@@ -11,6 +11,8 @@ Note where each file came from here so anyone can rebuild the folder.
 
 Laptop geometry probe: `percept/tools/probe_frame.py`. It reads one frame and prints full-frame boxes, metric depth, and landmark 8. Run `python3 percept/tools/probe_frame.py --help` for the model paths and calibration options.
 
+`calib.json` is laptop-local (gitignored), written by `percept/tools/calibrate_camera.py` with `{fx, fy, cx, cy, W, H, width, height}` for the C270/probe resolution. It is not a model file, and it is never copied into `include/beacon.h`.
+
 Export the baked detector with:
 
 ```sh

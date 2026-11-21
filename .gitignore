@@ -11,6 +11,9 @@ __pycache__/
 *.gguf
 models/*.bin
 
+# Laptop/C270 intrinsics: local calibration only, never commit
+models/calib.json
+
 # Build output
 build/
 *.o

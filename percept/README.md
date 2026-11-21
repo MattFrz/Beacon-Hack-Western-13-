@@ -18,6 +18,18 @@ python3 percept/tools/probe_to_world.py \
 
 Omit `--image` to loop a webcam until Ctrl-C, or add `--once` for one capture. `--out -` writes to stdout. Without `--calib`, boxes still emit but `xyz_cam`/`xyz_world` are omitted. Replay with `cd laptop/bridge && node main.js /tmp/beacon-live.jsonl`.
 
+Laptop-only camera calibration (9x6 inner corners, measured square side):
+
+```sh
+python3 percept/tools/calibrate_camera.py \
+  --images '/tmp/beacon-chess/*.jpg' \
+  --rows 6 --cols 9 --square-m 0.025 \
+  --out models/calib.json
+```
+
+Capture at the exact resolution used by the probe; `calib.json` is laptop-local
+and gitignored, and does not make metric depth spoken without a tape check.
+
 Shm reader: `src/head.cpp` builds as `percept-head`. It reads the newest `/beacon_frames` slot, prints the YOLO and depth letterbox affines, and initialises only the ABI fields of `/beacon_depth` and `/beacon_world`. No model runs yet. It writes no detections, depth, hand, or pose data.
 
 Build and check with `camd` running:
