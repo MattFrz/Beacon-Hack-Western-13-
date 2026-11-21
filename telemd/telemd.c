@@ -82,10 +82,27 @@ static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
             hand.pose_epoch == t->pose_epoch && guided.display.d_m >= 0 && isfinite(guided.display.d_m))
             snprintf(distance, sizeof(distance), "%.9g", guided.display.d_m);
     }
+    const beacon_guided_display_t *display = &guided.display;
+    char ticks[32] = "null", pan[32] = "null";
+    if (isfinite(display->tick_hz) && display->tick_hz > 0)
+        snprintf(ticks, sizeof(ticks), "%.9g", display->tick_hz);
+    if (isfinite(display->pan))
+        snprintf(pan, sizeof(pan), "%.9g", display->pan);
+
+    /* Each uint16_t clip ID needs at most five digits and a comma. */
+    enum { CLIP_CAPACITY = sizeof(display->last_clips) / sizeof(display->last_clips[0]) };
+    char clips[6 * CLIP_CAPACITY + 1] = "";
+    size_t used = 0;
+    for (size_t i = 0; i < display->n_last_clips && i < CLIP_CAPACITY; ++i)
+        used += (size_t)snprintf(clips + used, sizeof(clips) - used, "%s%u",
+                                 i ? "," : "", (unsigned)display->last_clips[i]);
+
     const char *law = guided.display.law < sizeof(laws)/sizeof(laws[0]) ? laws[guided.display.law] : "NONE";
     return snprintf(packet, cap, "{\"v\":1,\"t_ns\":%" PRIu64 ",\"seq\":{\"guided\":%u,\"percept\":%u},"
-                    "\"mode\":\"%s\",\"law\":\"%s\",\"target\":%s,\"hand\":%s,\"d_m\":%s}",
-                    now, gs, ps, modes[mode], law, target, hand_json, distance);
+                    "\"mode\":\"%s\",\"law\":\"%s\",\"target\":%s,\"hand\":%s,\"d_m\":%s,"
+                    "\"cue\":{\"tick_hz\":%s,\"pan\":%s,\"continuous\":%s,\"clip_ids\":[%s]}}",
+                    now, gs, ps, modes[mode], law, target, hand_json, distance,
+                    ticks, pan, display->continuous ? "true" : "false", clips);
 }
 
 int main(int argc, char **argv)
