@@ -13,9 +13,17 @@
 #define TICK_NEAR_MS       80.0f
 #define D_EMA_TAU_S        0.200f /* §10: 200 ms EMA of d                */
 #define PAN_FULL_M         0.25f  /* lateral offset that pans fully      */
-#define WALK_REPEAT_NS     3000000000ull /* §10: repeat ~every 3 s       */
-#define WALK_REPEAT_NEAR_NS 1500000000ull /* faster repeats when close   */
-#define WALK_NEAR_M        0.60f
+#define WALK_STABLE_NS     600000000ull  /* a change must hold this long before we say it */
+#define WALK_MIN_GAP_NS    2500000000ull /* never two cues closer than this */
+#define WALK_REMIND_NS     8000000000ull /* full reminder when nothing changed */
+#define WALK_REMIND_NEAR_NS 4000000000ull /* "within reach" and no hand yet: remind sooner */
+#define RETURN_REPEAT_NS   4000000000ull
+#define TURN_STABLE_NS     400000000ull
+#define TURN_MIN_GAP_NS    2000000000ull
+#define TURN_REMIND_NS     5000000000ull
+#define DIR_AHEAD_DEG      8.0f   /* within this: "straight ahead" */
+#define DIR_SLIGHT_DEG     22.0f  /* within this: "slightly to your left/right" */
+#define WITHIN_REACH_M     0.60f
 #define RETURN_POP_M       0.60f  /* §10: pop crumb within ~0.6 m        */
 #define RETURN_LIVE_M      3.0f   /* §10: named object within ~3 m ends RETURN */
 #define HOLD_TICK_SLOWDOWN 1.6f
@@ -23,6 +31,13 @@
 #define POSE_FRESH_NS      1000000000ull /* the map is only trusted with a fresh pose */
 #define FOUND_HOLD_NS      600000000ull  /* tone this long before "found it" */
 #define FOUND_REARM_M      0.30f  /* hand moved this far away: allow another "found it" */
+#define STEP_M             0.70f  /* one walking step */
+#define LANDMARK_M         0.30f  /* another object this close to the target: "It's next to ..." */
+#define ORIENT_ON_DEG      15.0f  /* pips start when the target is this far to one side */
+#define FACING_DEG         10.0f  /* within this you are facing it: chime, pips stop */
+#define PIP_SLOW_MS        700.0f /* pip gap with the target at 90 deg or more ... */
+#define PIP_FAST_MS        150.0f /* ... down to this as it comes in front */
+#define PIP_BURST_NS       6000000000ull /* pips run this long after each spoken cue, then rest */
 
 /* ------------------------------------------------------------------ small math */
 static float v3_norm(const float v[3]) { return sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
@@ -101,6 +116,7 @@ static void leave_reach(guided_state_t *st, guided_out_t *out)
     st->in_reach = 0;
     st->reach_enter_n = 0;
     st->found = 0;
+    st->walk_started = 0;  /* back to walking: start with a full sentence */
     tone_off(st, out);
 }
 
@@ -124,6 +140,7 @@ void guided_default_cfg(guided_cfg_t *cfg)
     cfg->metres_enabled = 0;           /* off until the tape check passes (§11) */
     cfg->hand_conf_min = 0.5f;
     cfg->hand_stale_ns = 500000000ull; /* 0.5 s */
+    cfg->orient_pips = 1;
 }
 
 void guided_init(guided_state_t *st, const guided_cfg_t *cfg)
@@ -143,40 +160,63 @@ float guided_tick_interval_ms(float d)
     return TICK_NEAR_MS + f * (TICK_FAR_MS - TICK_NEAR_MS);
 }
 
-/* "<name>. About two metres, a little left." built from clips (§10 WALK). */
-int guided_walk_clips(const float pc[3], int metres_ok, int with_name, uint16_t *clips, int max)
+/* ------------------------------------------------------------------ walk sentences
+ * Google Maps style: one full sentence, then short updates only when the
+ * direction or distance actually changes, and a full reminder now and then.
+ *   full:  "Your keys are slightly to your left," + "about two metres away."
+ *          (no metres before the tape check: "Your keys are slightly to your left.")
+ *   short: "To your left." and/or "About one metre away."
+ * No up/down: the chest camera looks down at the table, so it would be noise. */
+int guided_dir_cat(float az_deg)
+{
+    float a = fabsf(az_deg);
+    if (a < DIR_AHEAD_DEG)
+        return DIR_AHEAD;
+    if (a < DIR_SLIGHT_DEG)
+        return az_deg < 0 ? DIR_SLEFT : DIR_SRIGHT;
+    return az_deg < 0 ? DIR_LEFT : DIR_RIGHT;
+}
+
+/* Qualitative distance: "within arm's reach", "about N steps ahead" (a step is
+ * ~0.7 m), "more than five steps away". No metres or centimetres spoken. */
+uint16_t guided_dist_clip(float range_m)
+{
+    if (range_m <= WITHIN_REACH_M)
+        return BEACON_CLIP_WITHIN_REACH;
+    int steps = (int)(range_m / STEP_M + 0.5f);
+    if (steps < 1)
+        steps = 1;
+    if (steps > 5)
+        return BEACON_CLIP_STEPS_FAR;
+    return (uint16_t)(BEACON_CLIP_STEPS_1 + steps - 1);
+}
+
+float guided_pip_interval_ms(float az_deg)
+{
+    float a = clampf(fabsf(az_deg), FACING_DEG, 90.0f);
+    return PIP_FAST_MS + (a - FACING_DEG) / (90.0f - FACING_DEG) * (PIP_SLOW_MS - PIP_FAST_MS);
+}
+
+/* dist == 0: say no distance (metres not allowed yet). */
+int guided_walk_cue(int dir, uint16_t dist, int full, int say_dir, int say_dist,
+                    uint16_t *clips, int max)
 {
     int n = 0;
-#define ADD(c) do { if (n < max) clips[n++] = (uint16_t)(c); } while (0)
-    if (with_name)
-        ADD(BEACON_CLIP_OBJECT_NAME);
-
-    float range = v3_norm(pc);
-    if (metres_ok && range >= 0.5f) {
-        int m = (int)lroundf(range);
-        if (m < 1) m = 1;
-        if (m > 9) m = 9;
-        ADD(BEACON_CLIP_ABOUT);
-        ADD(BEACON_CLIP_NUM_0 + m);
-        ADD(m == 1 ? BEACON_CLIP_METRE : BEACON_CLIP_METRES);
+    if (max < 2)
+        return 0;
+    if (full) {
+        if (dist) {
+            clips[n++] = (uint16_t)(BEACON_CLIP_INTRO_CONT_AHEAD + dir);
+            clips[n++] = dist;
+        } else {
+            clips[n++] = (uint16_t)(BEACON_CLIP_INTRO_AHEAD + dir);
+        }
+        return n;
     }
-
-    const float rad2deg = 57.2957795f;
-    float az = atan2f(pc[0], pc[2]) * rad2deg;                              /* + right */
-    float el = atan2f(-pc[1], hypotf(pc[0], pc[2])) * rad2deg;              /* + up (Y is down) */
-    if (fabsf(az) < 10.0f) {
-        ADD(BEACON_CLIP_AHEAD);
-    } else if (fabsf(az) < 25.0f) {
-        ADD(BEACON_CLIP_A_LITTLE);
-        ADD(az < 0 ? BEACON_CLIP_LEFT : BEACON_CLIP_RIGHT);
-    } else {
-        ADD(az < 0 ? BEACON_CLIP_LEFT : BEACON_CLIP_RIGHT);
-    }
-    if (el > 20.0f)
-        ADD(BEACON_CLIP_UP);
-    else if (el < -20.0f)
-        ADD(BEACON_CLIP_DOWN);
-#undef ADD
+    if (say_dir)
+        clips[n++] = (uint16_t)(BEACON_CLIP_DIR_AHEAD + dir);
+    if (say_dist && dist)
+        clips[n++] = dist;
     return n;
 }
 
@@ -263,6 +303,8 @@ static void reset_guidance(guided_state_t *st)
     st->reach_enter_n = 0;
     st->found = 0;
     st->turning = 0;
+    st->walk_started = 0;
+    st->change_ns = 0;
     st->d_valid = 0;
     st->last_walk_ns = 0;
     st->lost_said = 0;
@@ -406,6 +448,62 @@ static int measure_d(const guided_state_t *st, const beacon_percept_block_t *p, 
 }
 
 /* ------------------------------------------------------------------ the step */
+/* "It's next to the mug.": another object in the same frame right beside the
+ * target. Said after a full sentence only. */
+static void say_landmark(const guided_state_t *st, const beacon_percept_block_t *p, guided_out_t *out)
+{
+    const float *t = st->target.xyz_cam;
+    for (int i = 0; i < BEACON_MAX_OBJECTS; ++i) {
+        const beacon_object_t *o = &p->objects[i];
+        if (!o->used || !o->in_latest_boxes || o->id == st->target.id ||
+            !strncmp(o->name, st->target.name, BEACON_NAME_LEN))
+            continue;
+        float dx = o->xyz_cam[0] - t[0], dy = o->xyz_cam[1] - t[1], dz = o->xyz_cam[2] - t[2];
+        if (sqrtf(dx * dx + dy * dy + dz * dz) <= LANDMARK_M) {
+            uint16_t c = BEACON_CLIP_NEXT_TO;
+            say(out, 0, &c, 1, o->name);
+            return;
+        }
+    }
+}
+
+/* Turn-toward pips (ADDITION): soft, panned to the target, faster as it comes in
+ * front; one chime once you face it, then quiet. Never in the frame we speak
+ * (and the audio thread drops a pip while the voice plays). */
+static void orient(guided_state_t *st, guided_out_t *out, float az, uint64_t now, int spoke)
+{
+    if (!st->cfg.orient_pips)
+        return;
+    float a = fabsf(az);
+    for (int i = 0; i < out->n_cmds; ++i) /* any speech this frame (cue, REPEAT, landmark) */
+        spoke |= out->cmds[i].kind == GUIDED_CMD_SAY;
+    if (!st->orienting) {
+        if (a < ORIENT_ON_DEG)
+            return;
+        st->orienting = 1;
+        st->next_pip_ns = now + 700000000ull; /* let the spoken cue go first */
+        st->pips_until_ns = now + PIP_BURST_NS;
+    }
+    if (a < FACING_DEG) {
+        st->orienting = 0;
+        push_cmd(out, GUIDED_CMD_CHIME);
+        return;
+    }
+    if (spoke) {
+        st->next_pip_ns = now + 700000000ull;
+        st->pips_until_ns = now + PIP_BURST_NS;
+        return;
+    }
+    if (now >= st->next_pip_ns && now < st->pips_until_ns) {
+        guided_cmd_t *c = push_cmd(out, GUIDED_CMD_PIP);
+        if (c) {
+            c->pan = clampf(az / 45.0f, -1.0f, 1.0f);
+            c->amp = 1.0f;
+        }
+        st->next_pip_ns = now + (uint64_t)(guided_pip_interval_ms(az) * 1e6f);
+    }
+}
+
 void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
                  const beacon_intent_t *in, uint64_t now, guided_out_t *out)
 {
@@ -444,12 +542,13 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
             translation(p->crumbs[idx].T_world_from_cam, cw);
             float dx = cw[0] - me[0], dz = cw[2] - me[2];
             if (hypotf(dx, dz) >= RETURN_POP_M) {
-                if (st->last_walk_ns == 0 || now - st->last_walk_ns >= WALK_REPEAT_NS) {
+                if (st->last_walk_ns == 0 || now - st->last_walk_ns >= RETURN_REPEAT_NS) {
                     float pc[3];
                     cam_from_world(p->pose.T_world_from_cam, cw, pc);
-                    pc[1] = 0.0f; /* walking cue: ignore height */
+                    int dir = guided_dir_cat(atan2f(pc[0], pc[2]) * 57.2957795f);
+                    uint16_t dist = st->cfg.metres_enabled ? guided_dist_clip(hypotf(pc[0], pc[2])) : 0;
                     uint16_t clips[GUIDED_MAX_CLIPS];
-                    int n = guided_walk_clips(pc, st->cfg.metres_enabled, 0, clips, GUIDED_MAX_CLIPS);
+                    int n = guided_walk_cue(dir, dist, 0, 1, 1, clips, GUIDED_MAX_CLIPS);
                     say_remember(st, out, 0, clips, n, NULL);
                     st->last_walk_ns = now;
                 }
@@ -474,23 +573,38 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
     /* ---------------- out of view, but the map knows where it is: turn */
     if (mode == BEACON_MODE_LIVE && st->turning) {
         st->turning = 0;
-        st->last_walk_ns = 0; /* back in view: speak the walk cue right away */
+        st->walk_started = 0; /* back in view: a full sentence right away */
     }
     if (mode != BEACON_MODE_LIVE && !st->in_reach) {
         float pc[3];
         if (memory_bearing(st, p, now, pc)) {
             float az = atan2f(pc[0], pc[2]) * 57.2957795f;
-            if (fabsf(az) > TURN_DEG) {
+            float a = fabsf(az);
+            if (a > TURN_DEG) {
                 out->law = BEACON_LAW_WALK;
-                if (!st->turning) {
+                uint16_t clip = a > 135.0f ? BEACON_CLIP_TURN_AROUND
+                              : a > 70.0f ? (az < 0 ? BEACON_CLIP_TURN_LEFT : BEACON_CLIP_TURN_RIGHT)
+                              : (az < 0 ? BEACON_CLIP_TURN_SLIGHT_LEFT : BEACON_CLIP_TURN_SLIGHT_RIGHT);
+                int speak = 0;
+                if (!st->turning) {               /* just left the view: say it now */
                     st->turning = 1;
-                    st->last_walk_ns = 0; /* say it now, not 3 s later */
+                    speak = 1;
+                } else if (clip != st->turn_clip) { /* e.g. "turn left" -> "a little to your left" */
+                    if (!st->turn_change_ns)
+                        st->turn_change_ns = now;
+                    speak = now - st->turn_change_ns >= TURN_STABLE_NS &&
+                            now - st->last_walk_ns >= TURN_MIN_GAP_NS;
+                } else {
+                    st->turn_change_ns = 0;
+                    speak = now - st->last_walk_ns >= TURN_REMIND_NS;
                 }
-                if (st->last_walk_ns == 0 || now - st->last_walk_ns >= WALK_REPEAT_NS) {
-                    uint16_t c = az < 0 ? BEACON_CLIP_TURN_LEFT : BEACON_CLIP_TURN_RIGHT;
-                    say_remember(st, out, 0, &c, 1, NULL);
+                if (speak) {
+                    say_remember(st, out, 0, &clip, 1, NULL);
+                    st->turn_clip = clip;
+                    st->turn_change_ns = 0;
                     st->last_walk_ns = now;
                 }
+                orient(st, out, az, now, speak);
                 st->lost_said = 0;
                 st->prev_mode = mode;
                 return;
@@ -514,7 +628,7 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
     }
     if (st->prev_mode == BEACON_MODE_LOST) {
         st->lost_said = 0;
-        st->last_walk_ns = 0; /* target is back: speak right away */
+        st->walk_started = 0; /* target is back: a full sentence right away */
     }
 
     /* ---------------- REACH distance */
@@ -541,6 +655,7 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
         if (mode == BEACON_MODE_LIVE && m == 1 && st->d_ema <= REACH_ENTER_M) {
             if (++st->reach_enter_n >= REACH_ENTER_FRAMES) {
                 st->in_reach = 1;
+                st->orienting = 0;
                 st->next_tick_ns = now;
                 push_cmd(out, GUIDED_CMD_FLUSH_SPEECH); /* duck WALK the moment REACH enters */
             }
@@ -604,14 +719,46 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
     if (st->d_valid)
         out->d_m = st->d_ema;
     if (mode == BEACON_MODE_LIVE) {
-        float range = v3_norm(st->target.xyz_cam);
-        uint64_t every = (!hand_ok && range <= WALK_NEAR_M) ? WALK_REPEAT_NEAR_NS : WALK_REPEAT_NS;
-        if (st->last_walk_ns == 0 || now - st->last_walk_ns >= every) {
-            uint16_t clips[GUIDED_MAX_CLIPS];
-            int n = guided_walk_clips(st->target.xyz_cam, st->cfg.metres_enabled, 1, clips, GUIDED_MAX_CLIPS);
+        const float *pc = st->target.xyz_cam;
+        int dir = guided_dir_cat(atan2f(pc[0], pc[2]) * 57.2957795f);
+        uint16_t dist = guided_dist_clip(v3_norm(pc));
+        /* "within reach" is not a number, so it is allowed before the tape check */
+        if (!st->cfg.metres_enabled && dist != BEACON_CLIP_WITHIN_REACH)
+            dist = 0;
+        uint16_t clips[GUIDED_MAX_CLIPS];
+        int n = 0, full = 0;
+        if (!st->walk_started) {
+            n = guided_walk_cue(dir, dist, 1, 1, 1, clips, GUIDED_MAX_CLIPS);
+            full = 1;
+            st->walk_started = 1;
+        } else {
+            int dir_changed = dir != st->cue_dir, dist_changed = dist != st->cue_dist;
+            if (dir_changed || dist_changed) {
+                if (!st->change_ns)
+                    st->change_ns = now;
+            } else {
+                st->change_ns = 0;
+            }
+            uint64_t remind = (dist == BEACON_CLIP_WITHIN_REACH && !hand_ok)
+                            ? WALK_REMIND_NEAR_NS : WALK_REMIND_NS;
+            if (st->change_ns && now - st->change_ns >= WALK_STABLE_NS &&
+                now - st->last_walk_ns >= WALK_MIN_GAP_NS)
+                n = guided_walk_cue(dir, dist, 0, dir_changed, dist_changed, clips, GUIDED_MAX_CLIPS);
+            else if (now - st->last_walk_ns >= remind) {
+                n = guided_walk_cue(dir, dist, 1, 1, 1, clips, GUIDED_MAX_CLIPS);
+                full = 1;
+            }
+        }
+        if (n > 0) {
             say_remember(st, out, 0, clips, n, st->target.name);
+            if (full)
+                say_landmark(st, p, out);
+            st->cue_dir = dir;
+            st->cue_dist = dist;
+            st->change_ns = 0;
             st->last_walk_ns = now;
         }
+        orient(st, out, atan2f(pc[0], pc[2]) * 57.2957795f, now, n > 0);
     }
     /* HOLD in WALK: say nothing new; no stale metres. */
     st->prev_mode = mode;

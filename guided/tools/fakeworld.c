@@ -204,7 +204,10 @@ int main(int argc, char **argv)
                 said_two = 1;
             }
         } else if (!strcmp(sc, "walk")) {
-            put_object(0, 2, "bottle", -0.60f, 0.10f, 2.20f, 1, now);
+            /* bottle ahead-left with a mug beside it; from 3 s the wearer turns to face it */
+            float bx = lerp(-0.60f, 0.0f, (float)(t - 3.0) / 2.0f);
+            put_object(0, 2, "bottle", bx, 0.10f, 2.20f, 1, now);
+            put_object(1, 4, "mug", bx + 0.18f, 0.10f, 2.25f, 1, now);
             put_hand(0, 0, 0, 0, now);
             if (!said_find && t >= 0.5) {
                 say_intent(BEACON_INTENT_GO, "fountain", "dispenser", "sink", "bottle", now);

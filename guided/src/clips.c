@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_CLIPS 64
+#define MAX_CLIPS 160
 
 static clip_t g_clips[MAX_CLIPS];
 static int g_n;
@@ -32,9 +32,20 @@ static const char *const k_stem[BEACON_CLIP_COUNT] = {
     [BEACON_CLIP_TURN_LEFT] = "turn_left",
     [BEACON_CLIP_TURN_RIGHT] = "turn_right",
     [BEACON_CLIP_FOUND_IT] = "found_it",
+    [BEACON_CLIP_DIR_AHEAD] = "dir_ahead", [BEACON_CLIP_DIR_SLEFT] = "dir_sleft",
+    [BEACON_CLIP_DIR_LEFT] = "dir_left", [BEACON_CLIP_DIR_SRIGHT] = "dir_sright",
+    [BEACON_CLIP_DIR_RIGHT] = "dir_right",
+    [BEACON_CLIP_WITHIN_REACH] = "within_reach",
+    [BEACON_CLIP_STEPS_1] = "steps_1", [BEACON_CLIP_STEPS_2] = "steps_2",
+    [BEACON_CLIP_STEPS_3] = "steps_3", [BEACON_CLIP_STEPS_4] = "steps_4",
+    [BEACON_CLIP_STEPS_5] = "steps_5", [BEACON_CLIP_STEPS_FAR] = "steps_far",
+    [BEACON_CLIP_TURN_SLIGHT_LEFT] = "turn_slight_left",
+    [BEACON_CLIP_TURN_SLIGHT_RIGHT] = "turn_slight_right",
+    [BEACON_CLIP_TURN_AROUND] = "turn_around",
 };
 
 static const char *const k_names[] = { "keys", "keychain", "cup", "mug", "bottle", "phone" };
+static const char *const k_dirs[] = { "ahead", "sleft", "left", "sright", "right" };
 
 static uint32_t rd32(const unsigned char *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint16_t rd16(const unsigned char *p) { return (uint16_t)(p[0] | p[1] << 8); }
@@ -102,6 +113,14 @@ int clips_load(const char *dir)
     for (size_t i = 0; i < sizeof(k_names) / sizeof(k_names[0]); ++i) {
         snprintf(stem, sizeof(stem), "name_%s", k_names[i]);
         load_one(dir, stem);
+        snprintf(stem, sizeof(stem), "next_to_%s", k_names[i]);
+        load_one(dir, stem);
+        for (int d = 0; d < 5; ++d) {
+            snprintf(stem, sizeof(stem), "intro_%s_%s_c", k_names[i], k_dirs[d]);
+            load_one(dir, stem);
+            snprintf(stem, sizeof(stem), "intro_%s_%s", k_names[i], k_dirs[d]);
+            load_one(dir, stem);
+        }
     }
     for (int m = 1; m <= 9; ++m) {
         snprintf(stem, sizeof(stem), "about_%d_metre%s", m, m == 1 ? "" : "s");
@@ -151,9 +170,24 @@ int clips_playlist(const uint16_t *ids, int n_ids, const char *label,
                 continue;
             }
         }
-        if (id == BEACON_CLIP_OBJECT_NAME) {
+        /* "Your keys are slightly to your left[,|.]": per object and direction */
+        if (id >= BEACON_CLIP_INTRO_CONT_AHEAD && id <= BEACON_CLIP_INTRO_RIGHT) {
+            int cont = id <= BEACON_CLIP_INTRO_CONT_RIGHT;
+            int d = cont ? id - BEACON_CLIP_INTRO_CONT_AHEAD : id - BEACON_CLIP_INTRO_AHEAD;
             if (label && label[0]) {
-                snprintf(stem, sizeof(stem), "name_%s", label);
+                snprintf(stem, sizeof(stem), "intro_%s_%s%s", label, k_dirs[d], cont ? "_c" : "");
+                c = clips_find(stem);
+            }
+            if (!c) /* unknown object: say the direction on its own */
+                c = clips_find(k_stem[BEACON_CLIP_DIR_AHEAD + d]);
+            if (c)
+                out[n++] = c;
+            continue;
+        }
+        if (id == BEACON_CLIP_OBJECT_NAME || id == BEACON_CLIP_NEXT_TO) {
+            if (label && label[0]) {
+                snprintf(stem, sizeof(stem), "%s_%s",
+                         id == BEACON_CLIP_NEXT_TO ? "next_to" : "name", label);
                 c = clips_find(stem);
             }
         } else if (id < BEACON_CLIP_COUNT && k_stem[id]) {

@@ -7,11 +7,12 @@
  *   4. publish target, heartbeat and stats under seq_guided, pulse supervisor
  *   5. sleep to the next absolute deadline; count misses, never catch up
  *
- * Usage: guided [--create] [--metres] [--duration S] [--verbose] [--sup PID:CHID]
+ * Usage: guided [--create] [--metres] [--no-orient-pips] [--duration S] [--verbose] [--sup PID:CHID]
  *               [--audio none|qnx|fifo:PATH|FILE.wav] [--sounds DIR]
  *   --create    create /beacon_world if missing (laptop / standalone; the
  *               supervisor creates it on the Pi)
- *   --metres    speak metres (only after the tape-measure check, spec §11)
+ *   --metres    speak distance in steps (only after the tape-measure check, spec §11)
+ *   --no-orient-pips  no soft pips while turning toward the target
  *   --audio     where sound goes (audio_out.h); default none
  *   --sounds    folder with the voice clips; default sounds/ or ../sounds/
  */
@@ -92,13 +93,14 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--create")) create = 1;
         else if (!strcmp(argv[i], "--metres")) cfg.metres_enabled = 1;
+        else if (!strcmp(argv[i], "--no-orient-pips")) cfg.orient_pips = 0;
         else if (!strcmp(argv[i], "--verbose")) verbose = 1;
         else if (!strcmp(argv[i], "--duration") && i + 1 < argc) duration_s = atof(argv[++i]);
         else if (!strcmp(argv[i], "--sup") && i + 1 < argc) sup = argv[++i];
         else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_spec = argv[++i];
         else if (!strcmp(argv[i], "--sounds") && i + 1 < argc) sounds = argv[++i];
         else {
-            fprintf(stderr, "usage: %s [--create] [--metres] [--duration S] [--verbose] [--sup PID:CHID]\n"
+            fprintf(stderr, "usage: %s [--create] [--metres] [--no-orient-pips] [--duration S] [--verbose] [--sup PID:CHID]\n"
                             "       [--audio none|qnx|fifo:PATH|FILE.wav] [--sounds DIR]\n", argv[0]);
             return 2;
         }

@@ -38,9 +38,26 @@ static const char *const k_clip_words[BEACON_CLIP_COUNT] = {
     [BEACON_CLIP_YOU_ARE_BACK] = "you are back",
     [BEACON_CLIP_PROMPT_BEEP] = "<beep>",
     [BEACON_CLIP_OBJECT_NAME] = "<name>",
-    [BEACON_CLIP_TURN_LEFT] = "turn left",
-    [BEACON_CLIP_TURN_RIGHT] = "turn right",
-    [BEACON_CLIP_FOUND_IT] = "found it",
+    [BEACON_CLIP_TURN_LEFT] = "turn left.",
+    [BEACON_CLIP_TURN_RIGHT] = "turn right.",
+    [BEACON_CLIP_FOUND_IT] = "found it.",
+    [BEACON_CLIP_INTRO_CONT_AHEAD] = "straight ahead,", [BEACON_CLIP_INTRO_CONT_SLEFT] = "slightly to your left,",
+    [BEACON_CLIP_INTRO_CONT_LEFT] = "to your left,", [BEACON_CLIP_INTRO_CONT_SRIGHT] = "slightly to your right,",
+    [BEACON_CLIP_INTRO_CONT_RIGHT] = "to your right,",
+    [BEACON_CLIP_INTRO_AHEAD] = "straight ahead.", [BEACON_CLIP_INTRO_SLEFT] = "slightly to your left.",
+    [BEACON_CLIP_INTRO_LEFT] = "to your left.", [BEACON_CLIP_INTRO_SRIGHT] = "slightly to your right.",
+    [BEACON_CLIP_INTRO_RIGHT] = "to your right.",
+    [BEACON_CLIP_DIR_AHEAD] = "straight ahead.", [BEACON_CLIP_DIR_SLEFT] = "slightly to your left.",
+    [BEACON_CLIP_DIR_LEFT] = "to your left.", [BEACON_CLIP_DIR_SRIGHT] = "slightly to your right.",
+    [BEACON_CLIP_DIR_RIGHT] = "to your right.",
+    [BEACON_CLIP_WITHIN_REACH] = "within arm's reach.",
+    [BEACON_CLIP_STEPS_1] = "about one step ahead.", [BEACON_CLIP_STEPS_2] = "about two steps ahead.",
+    [BEACON_CLIP_STEPS_3] = "about three steps ahead.", [BEACON_CLIP_STEPS_4] = "about four steps ahead.",
+    [BEACON_CLIP_STEPS_5] = "about five steps ahead.", [BEACON_CLIP_STEPS_FAR] = "more than five steps away.",
+    [BEACON_CLIP_TURN_SLIGHT_LEFT] = "turn a little to your left.",
+    [BEACON_CLIP_TURN_SLIGHT_RIGHT] = "turn a little to your right.",
+    [BEACON_CLIP_TURN_AROUND] = "turn around.",
+    [BEACON_CLIP_NEXT_TO] = "it's next to the",
 };
 
 /* speech ring: single producer (16 ms thread), single consumer (audio thread) */
@@ -80,6 +97,8 @@ void audio_submit(const guided_cmd_t *cmd)
         break;
     }
     case GUIDED_CMD_TICK:
+    case GUIDED_CMD_PIP:
+    case GUIDED_CMD_CHIME:
     case GUIDED_CMD_TONE_ON:
     case GUIDED_CMD_TONE_OFF:
         beacon_seq_write_begin(&g_tick.seq);
@@ -113,9 +132,15 @@ static void print_say(const guided_cmd_t *c)
     size_t n = 0;
     line[0] = '\0';
     for (int i = 0; i < c->n_clips && n < sizeof(line) - 40; ++i) {
-        const char *w = (c->clips[i] == BEACON_CLIP_OBJECT_NAME) ? c->name
-                      : (c->clips[i] < BEACON_CLIP_COUNT ? k_clip_words[c->clips[i]] : "?");
-        n += (size_t)snprintf(line + n, sizeof(line) - n, "%s%s", i ? " " : "", w);
+        uint16_t id = c->clips[i];
+        const char *w = (id == BEACON_CLIP_OBJECT_NAME) ? c->name
+                      : (id < BEACON_CLIP_COUNT && k_clip_words[id] ? k_clip_words[id] : "?");
+        if (id >= BEACON_CLIP_INTRO_CONT_AHEAD && id <= BEACON_CLIP_INTRO_RIGHT)
+            n += (size_t)snprintf(line + n, sizeof(line) - n, "%s%s: %s", i ? " " : "", c->name, w);
+        else if (id == BEACON_CLIP_NEXT_TO)
+            n += (size_t)snprintf(line + n, sizeof(line) - n, "%s%s %s.", i ? " " : "", w, c->name);
+        else
+            n += (size_t)snprintf(line + n, sizeof(line) - n, "%s%s", i ? " " : "", w);
     }
     printf("[%7.3f] SAY%s  \"%s\"\n", secs(), c->priority ? "!" : " ", line);
 }
@@ -137,6 +162,10 @@ static const char *mode_name(int mode)
 #define TICK_GAIN   0.40f
 #define TONE_GAIN   0.22f
 #define TICK_LEN    (AUDIO_RATE / 50)   /* 20 ms click */
+#define PIP_GAIN    0.22f               /* turn-toward pips: soft, under the voice level */
+#define PIP_HZ      600.0f              /* lower and rounder than the 880 Hz reach tick */
+#define PIP_LEN     (AUDIO_RATE / 33)   /* 30 ms */
+#define CHIME_LEN   (AUDIO_RATE / 5)    /* 200 ms: two notes, "you are facing it" */
 #define RAMP        (AUDIO_RATE / 333)  /* 3 ms fade in and out, no pops */
 #define MAX_QUEUED  8
 
@@ -148,10 +177,11 @@ static struct {
     playlist_t cur;                 /* cue being spoken */
     int        cur_i;
     size_t     cur_pos;
-    int        tick_left;           /* samples left in the current click */
-    float      tick_freq, tick_amp, tick_pan, tick_phase;
+    int        tick_left, tick_len;  /* samples left / total in the current click */
+    float      tick_freq, tick_freq2, tick_amp, tick_pan, tick_phase; /* freq2: 2nd half */
     int        tone_on;
     float      tone_pan, tone_phase, tone_level;
+    int        chime_pending;       /* waits for the voice to finish */
 } S;
 
 static void speech_clear(void)
@@ -213,7 +243,7 @@ static void render_block(int16_t *out, int frames)
         float sp = speech_next() * SPEECH_GAIN;
         float l = sp, r = sp;
         if (S.tick_left > 0) {
-            int k = TICK_LEN - S.tick_left;
+            int k = S.tick_len - S.tick_left;
             float env = 1.0f;
             if (k < RAMP)
                 env = (float)k / RAMP;
@@ -223,7 +253,7 @@ static void render_block(int16_t *out, int frames)
             pan_gains(S.tick_pan, &gl, &gr);
             l += v * gl;
             r += v * gr;
-            S.tick_phase += two_pi * S.tick_freq / AUDIO_RATE;
+            S.tick_phase += two_pi * (k < S.tick_len / 2 ? S.tick_freq : S.tick_freq2) / AUDIO_RATE;
             S.tick_left--;
         }
         float target = S.tone_on ? 1.0f : 0.0f; /* fade the tone in and out */
@@ -293,12 +323,25 @@ static void *audio_main(void *arg)
             } else if (tk.cmd.kind == GUIDED_CMD_TONE_OFF) {
                 S.tone_on = 0;
                 printf("[%7.3f] TONE  off\n", secs());
+            } else if (tk.cmd.kind == GUIDED_CMD_PIP) {
+                /* never over the voice: a pip while Beacon talks is dropped */
+                if (S.cur_i >= S.cur.n && S.q_len == 0 && S.tick_left == 0) {
+                    S.tick_left = S.tick_len = PIP_LEN;
+                    S.tick_phase = 0.0f;
+                    S.tick_pan = tk.cmd.pan;
+                    S.tick_amp = PIP_GAIN / TICK_GAIN;
+                    S.tick_freq = S.tick_freq2 = PIP_HZ;
+                    if (g_cfg.verbose)
+                        printf("[%7.3f] PIP   pan %+.2f\n", secs(), tk.cmd.pan);
+                }
+            } else if (tk.cmd.kind == GUIDED_CMD_CHIME) {
+                S.chime_pending = 1;
             } else {
-                S.tick_left = TICK_LEN;
+                S.tick_left = S.tick_len = TICK_LEN;
                 S.tick_phase = 0.0f;
                 S.tick_pan = tk.cmd.pan;
                 S.tick_amp = tk.cmd.amp * (tk.cmd.dark ? 0.6f : 1.0f);
-                S.tick_freq = tk.cmd.dark ? 523.0f : 880.0f; /* HOLD ticks are lower */
+                S.tick_freq = S.tick_freq2 = tk.cmd.dark ? 523.0f : 880.0f; /* HOLD ticks are lower */
                 ticks_since_print += 1 + (int)missed;
                 double now = secs();
                 if (g_cfg.verbose || now - last_tick_print >= 0.5) {
@@ -308,6 +351,18 @@ static void *audio_main(void *arg)
                     ticks_since_print = 0;
                 }
             }
+        }
+
+        /* the "facing it" chime plays once the voice is quiet */
+        if (S.chime_pending && S.cur_i >= S.cur.n && S.q_len == 0) {
+            S.chime_pending = 0;
+            S.tick_left = S.tick_len = CHIME_LEN;
+            S.tick_phase = 0.0f;
+            S.tick_pan = 0.0f;
+            S.tick_amp = 0.8f;
+            S.tick_freq = 880.0f;   /* rising two-note chime */
+            S.tick_freq2 = 1320.0f;
+            printf("[%7.3f] CHIME facing the target\n", secs());
         }
 
         /* stats every 5 s, from this thread, never from the 16 ms thread */

@@ -35,13 +35,13 @@ Run from the `guided/` folder (it finds the voice clips in `../sounds`).
 **You should see**, ending with `0 missed deadlines`:
 
 ```
-guided: 46 voice clips loaded from ../sounds
-[  0.3] SAY   "keys about one metre ahead down"
+guided: 127 voice clips loaded from ../sounds
+[  0.3] SAY   "keys: slightly to your right, about one step ahead."
 [  3.3] TICK  ...                       (ticks while the hand closes in)
 [  7.0] SAY!  "I lost the target"       (the camera program "dies")
-[  9.7] SAY   "keys about one metre a little left down"
+[  9.7] SAY   "keys: slightly to your left, about one step ahead."
 [ 14.0] TONE  on
-[ 14.7] SAY!  "found it"
+[ 14.6] SAY!  "found it."
 guided: 930 loops, 0 missed deadlines, ...
 ```
 
@@ -68,9 +68,9 @@ Press `a`, wait for `Stream established`, press `f`, wait for `PCM FIFO ready`.
     --audio fifo:$HOME/projects/qnx-bluetooth/audio.pcm
 ```
 
-**You should hear:** "Keys. About one metre. Ahead. Down." then beeps speeding up, a lower beep, "I lost the target", the cue again, a steady tone, then "Found it."
+**You should hear:** "Your keys are slightly to your right, about one step ahead." then beeps speeding up, a lower beep, "I lost the target", the cue again, a steady tone, then "Found it."
 
-Also try `turn` (wearer turns away: "turn left") and `reach`:
+Also try `turn` ("turn a little to your left", "turn left", soft pips on the left as you turn back, a chime when facing it) and `walk` ("It's next to the mug."):
 
 ```sh
 ./build/fakeworld turn & ./build/guided --metres --duration 14.5 \

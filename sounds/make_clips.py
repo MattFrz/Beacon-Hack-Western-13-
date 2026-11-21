@@ -69,6 +69,47 @@ CLIPS["turn_right"] = "Turn right."
 # Hand has stayed on the target: confirm, then stop the tone.
 CLIPS["found_it"] = "Found it."
 
+# ---- Natural walk sentences (Google Maps style) -------------------------
+# A full cue is two spoken chunks: "<intro + direction>," + "<distance>."
+#   "Your keys are slightly to your left," + "about two meters away."
+# Without metres (before the tape check): "Your keys are slightly to your left."
+# Short updates reuse "dir_*" and "dist_*" on their own.
+_DIRS = {
+    "ahead": "straight ahead",
+    "sleft": "slightly to your left",
+    "left": "to your left",
+    "sright": "slightly to your right",
+    "right": "to your right",
+}
+_INTROS = {  # label -> sentence start
+    "keys": "Your keys are", "keychain": "Your keychain is", "cup": "Your cup is",
+    "mug": "Your mug is", "bottle": "The bottle is", "phone": "Your phone is",
+}
+for _label, _start in _INTROS.items():
+    for _d, _words in _DIRS.items():
+        CLIPS[f"intro_{_label}_{_d}_c"] = f"{_start} {_words},"
+        CLIPS[f"intro_{_label}_{_d}"] = f"{_start} {_words}."
+for _d, _words in _DIRS.items():
+    CLIPS[f"dir_{_d}"] = _words[0].upper() + _words[1:] + "."
+# Distance in steps (about 70 cm each): easier to act on than metres.
+CLIPS.update({
+    "within_reach": "within arm's reach.",
+    "steps_1": "about one step ahead.",
+    "steps_2": "about two steps ahead.",
+    "steps_3": "about three steps ahead.",
+    "steps_4": "about four steps ahead.",
+    "steps_5": "about five steps ahead.",
+    "steps_far": "more than five steps away.",
+    "turn_slight_left": "Turn a little to your left.",
+    "turn_slight_right": "Turn a little to your right.",
+    "turn_around": "Turn around.",
+})
+# A landmark after the full sentence when another object sits right next to the target.
+_THE = {"keys": "your keys", "keychain": "your keychain", "cup": "the cup", "mug": "the mug",
+        "bottle": "the bottle", "phone": "your phone"}
+for _label, _words in _THE.items():
+    CLIPS[f"next_to_{_label}"] = f"It's next to {_words}."
+
 TRIM = (
     "silenceremove=start_periods=1:start_threshold=-45dB,areverse,"
     "silenceremove=start_periods=1:start_threshold=-45dB,areverse,"
@@ -86,25 +127,44 @@ def to_clip(raw: str, out_wav: str) -> None:
 
 
 def make_inflect(args) -> None:
-    """Inflect Mini v3 (owensong/Inflect-Mini-v3, Apache-2.0), run through its
-    own launcher once per clip. About 11 s per clip on a laptop CPU."""
+    """Inflect Mini v3 (owensong/Inflect-Mini-v3, Apache-2.0). Each clip is a
+    separate process that loads the model (~11 s), so clips render in
+    parallel (--jobs). The package is verified once with verify_release.py,
+    then each clip calls core/synthesize.py directly."""
+    from concurrent.futures import ThreadPoolExecutor
+
     voice = args.voice or "hope"
-    only = set(args.only.split(",")) if args.only else None
-    with tempfile.TemporaryDirectory() as tmp:
-        for name, text in CLIPS.items():
-            if only and name not in only:
-                continue
-            say = text if text[-1] in ".!?" else text + "."
-            raw = os.path.join(tmp, name + ".wav")
-            subprocess.run(
-                [args.inflect_python, "run.py", "speech", "--voice", voice,
-                 "--text", say, "--subtype", "PCM_16", "--output", raw],
-                cwd=args.inflect_dir, check=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            to_clip(raw, os.path.join(args.out, name + ".wav"))
-            print(f"{name + '.wav':18s} {text}", flush=True)
-    print(f"Made {len(only) if only else len(CLIPS)} clips with Inflect Mini v3 ({voice}) in {args.out}")
+    only = [o for o in args.only.split(",") if o] if args.only else None
+
+    def wanted(name: str) -> bool:  # exact names, or "prefix*"
+        if only and not any(name.startswith(o[:-1]) if o.endswith("*") else name == o
+                            for o in only):
+            return False
+        return not (args.missing and os.path.exists(os.path.join(args.out, name + ".wav")))
+
+    todo = [(n, t) for n, t in CLIPS.items() if wanted(n)]
+    subprocess.run([args.inflect_python, "verify_release.py"], cwd=args.inflect_dir,
+                   check=True, stdout=subprocess.DEVNULL)
+    env = dict(os.environ, OMP_NUM_THREADS=str(max(1, (os.cpu_count() or 4) // args.jobs)))
+
+    def render(item, tmp):
+        name, text = item
+        # A trailing comma keeps the rising "more to come" tone of a
+        # sentence start; otherwise make sure it ends like a sentence.
+        say = text if text[-1] in ".!?," else text + "."
+        raw = os.path.join(tmp, name + ".wav")
+        subprocess.run(
+            [args.inflect_python, "-B", "core/synthesize.py", "--model", "mini",
+             "--voice", voice, "--text", say, "--subtype", "PCM_16", "--output", raw],
+            cwd=args.inflect_dir, check=True, env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        to_clip(raw, os.path.join(args.out, name + ".wav"))
+        print(f"{name + '.wav':28s} {text}", flush=True)
+
+    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(args.jobs) as pool:
+        list(pool.map(lambda it: render(it, tmp), todo))
+    print(f"Made {len(todo)} clips with Inflect Mini v3 ({voice}) in {args.out}")
 
 
 def main() -> None:
@@ -118,7 +178,9 @@ def main() -> None:
     ap.add_argument("--inflect-dir", default="/opt/inflect-mini-v3")
     ap.add_argument("--inflect-python", default="/opt/inflect-venv/bin/python")
     ap.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
-    ap.add_argument("--only", default="", help="comma-separated clip names (inflect)")
+    ap.add_argument("--only", default="", help="comma-separated clip names or prefix* (inflect)")
+    ap.add_argument("--missing", action="store_true", help="skip clips that already exist (inflect)")
+    ap.add_argument("--jobs", type=int, default=6, help="clips rendered in parallel (inflect)")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 

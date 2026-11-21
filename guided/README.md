@@ -23,26 +23,34 @@ make test       # unit tests
 tools/run_scenario.sh reach --metres
 ```
 
-Scenarios: `reach`, `lost` (`slay percept` mid-reach, keys moved, `pose_epoch` bumped), `walk` ("refill water" binds `bottle`), `unseen`, `stop`, `return`, `reject` ("not that one" moves from `keys` to `keychain`, then "say that again").
+Scenarios: `reach`, `lost` (`slay percept` mid-reach, keys moved, `pose_epoch` bumped), `walk` ("refill water" binds `bottle`, a mug beside it, the wearer turns to face it), `turn` (wearer turns away, the map says "turn left", turns back, reaches), `unseen`, `stop`, `return`, `reject` ("not that one" moves from `keys` to `keychain`, then "say that again").
 
 Example (`lost`):
 
 ```
-[  3.302] SAY   "keys about one metre ahead down"
+[  0.309] SAY   "keys: slightly to your right, about one step ahead."
 [  3.351] TICK  x1  pan -0.93 amp 0.75
-[  5.935] TICK  x2  pan -0.47 amp 0.75
 [  6.684] TICK  x3  pan -0.46 amp 0.75  (hold)
-[  7.001] SAY!  "I lost the target"
-[  9.701] SAY   "keys about one metre a little left down"
-[ 14.035] TONE  on   pan -0.41
-guided: 930 loops, 0 missed deadlines, worst lateness 208 us, p95 150 us
+[  7.009] SAY!  "I lost the target"
+[  9.719] SAY   "keys: slightly to your left, about one step ahead."
+[ 14.039] TONE  on   pan -0.41
+[ 14.639] SAY!  "found it."
+guided: 930 loops, 0 missed deadlines, worst lateness 1078 us, p95 150 us
 ```
 
-Flags: `--metres` speaks metres (spec §11: only after the tape-measure check passes; off by default), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX), `--audio` (below), `--sounds DIR` (voice clips; default `sounds/` or `../sounds/`).
+Flags: `--metres` speaks the distance in steps (spec §11: only after the tape-measure check passes; off by default; "within arm's reach" is always allowed), `--no-orient-pips` (turn off the turn-toward pips), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX), `--audio` (below), `--sounds DIR` (voice clips; default `sounds/` or `../sounds/`).
 
 ## Sound
 
-`guided`'s audio thread loads the 43 clips in `sounds/` at startup and mixes speech, REACH ticks (880 Hz, 523 Hz in HOLD) and the continuous tone into 10 ms stereo blocks. Cues use the phrase clips when they match: "Keys." + "About two metres." + "A little left.".
+`guided`'s audio thread loads the voice clips in `sounds/` at startup and mixes speech, pips, REACH ticks and the continuous tone into 10 ms stereo blocks.
+
+What the wearer hears, Google Maps style (qualitative, body-relative, no degrees or exact numbers):
+
+- **Walking, target in view:** one full sentence, "Your keys are slightly to your left, about two steps ahead." Then only short updates when something changes ("To your right."), and a reminder every ~8 s. A step is about 0.7 m; under 0.6 m it says "within arm's reach".
+- **Landmark:** if another object sits within 0.3 m of the target, the full sentence is followed by "It's next to the mug."
+- **Target out of view:** "Turn a little to your left." / "Turn left." / "Turn around." from the session map.
+- **Turning toward it (ADDITION):** soft 600 Hz pips panned toward the target, faster as it comes in front, never over the voice, for ~6 s after each spoken cue. Once you face it (within 10°), one rising chime. `--no-orient-pips` turns them off.
+- **Reaching:** 880 Hz ticks (523 Hz in HOLD) speeding up as the hand closes in, a steady tone under 0.15 m, then "Found it."
 
 | `--audio` | Where it goes |
 | --- | --- |
@@ -51,7 +59,7 @@ Flags: `--metres` speaks metres (spec §11: only after the tape-measure check pa
 | `fifo:PATH` | The JBL over Bluetooth, through [Combadge-HTN/qnx-bluetooth](https://github.com/Combadge-HTN/qnx-bluetooth)'s PCM pipe (44.1 kHz stereo, resampled from 16 kHz). Waits quietly until the Bluetooth program is reading and reconnects if it restarts. |
 | `qnx` | The QNX sound device (USB headset or speaker) via io-audio. Untested on the Pi. |
 
-Listen on a laptop: `tools/run_scenario.sh lost --metres --audio /tmp/lost.wav`.
+Listen on a laptop: `tools/run_scenario.sh walk --metres --audio /tmp/walk.wav` (write to a Linux folder; writing to `/mnt/c` every 10 ms is slow).
 
 JBL on the Pi (from the qnx-bluetooth README):
 
@@ -74,4 +82,4 @@ Bluetooth adds roughly 0.1–0.3 s of delay, which is fine for speech but makes 
 
 ## `beacon.h` additions to review (Matt, Nathan)
 
-Not in spec §6, marked `ADDITION` in the header: `objects[].used`, `hand.valid`, `hand.pose_epoch` (§7 Range 1 compares it), `intent.utterance_id` (lets `guided` see the same request twice), `target.bound` / `target.in_latest_boxes`, and the `display` + `stats` blocks under `seq_guided` for `telemd`. Extra clips used by the WALK template: "about", "a little", "you are back", a prompt beep.
+Not in spec §6, marked `ADDITION` in the header: `objects[].used`, `hand.valid`, `hand.pose_epoch` (§7 Range 1 compares it), `intent.utterance_id` (lets `guided` see the same request twice), `target.bound` / `target.in_latest_boxes`, and the `display` + `stats` blocks under `seq_guided` for `telemd`. Extra clips used by the WALK template: "about", "a little", "you are back", a prompt beep, the sentence clips (`INTRO_*`, `DIR_*`, `STEPS_*`, `WITHIN_REACH`, `TURN_*`, `NEXT_TO`). Two extra commands: `GUIDED_CMD_PIP` and `GUIDED_CMD_CHIME` (turn-toward pips, `--no-orient-pips` to disable).

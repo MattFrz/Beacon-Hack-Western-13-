@@ -362,6 +362,34 @@ enum beacon_clip {
     BEACON_CLIP_TURN_LEFT,        /* ADDITION: target out of view, from the session map */
     BEACON_CLIP_TURN_RIGHT,       /* ADDITION */
     BEACON_CLIP_FOUND_IT,         /* ADDITION: hand has stayed on the target */
+    /* ADDITION: natural walk sentences. Directions are in the order
+     * ahead, slightly left, left, slightly right, right. */
+    BEACON_CLIP_INTRO_CONT_AHEAD,  /* "Your <label> is/are straight ahead," */
+    BEACON_CLIP_INTRO_CONT_SLEFT,
+    BEACON_CLIP_INTRO_CONT_LEFT,
+    BEACON_CLIP_INTRO_CONT_SRIGHT,
+    BEACON_CLIP_INTRO_CONT_RIGHT,
+    BEACON_CLIP_INTRO_AHEAD,       /* same, ending the sentence: "...straight ahead." */
+    BEACON_CLIP_INTRO_SLEFT,
+    BEACON_CLIP_INTRO_LEFT,
+    BEACON_CLIP_INTRO_SRIGHT,
+    BEACON_CLIP_INTRO_RIGHT,
+    BEACON_CLIP_DIR_AHEAD,         /* short update: "Straight ahead." */
+    BEACON_CLIP_DIR_SLEFT,
+    BEACON_CLIP_DIR_LEFT,
+    BEACON_CLIP_DIR_SRIGHT,
+    BEACON_CLIP_DIR_RIGHT,
+    BEACON_CLIP_WITHIN_REACH,      /* "within arm's reach." */
+    BEACON_CLIP_STEPS_1,           /* "about one step ahead." ... (a step is ~0.7 m) */
+    BEACON_CLIP_STEPS_2,
+    BEACON_CLIP_STEPS_3,
+    BEACON_CLIP_STEPS_4,
+    BEACON_CLIP_STEPS_5,
+    BEACON_CLIP_STEPS_FAR,         /* "more than five steps away." */
+    BEACON_CLIP_TURN_SLIGHT_LEFT,  /* "Turn a little to your left." */
+    BEACON_CLIP_TURN_SLIGHT_RIGHT,
+    BEACON_CLIP_TURN_AROUND,
+    BEACON_CLIP_NEXT_TO,           /* "It's next to the mug." (cmd name = the landmark) */
     BEACON_CLIP_COUNT
 };
 
