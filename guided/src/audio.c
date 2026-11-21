@@ -162,7 +162,7 @@ static const char *mode_name(int mode)
 #define TICK_GAIN   0.40f
 #define TONE_GAIN   0.22f
 #define TICK_LEN    (AUDIO_RATE / 50)   /* 20 ms click */
-#define PIP_GAIN    0.22f               /* turn-toward pips: soft, under the voice level */
+#define PIP_GAIN    0.32f               /* turn-toward pips: soft, under the voice level */
 #define PIP_HZ      600.0f              /* lower and rounder than the 880 Hz reach tick */
 #define PIP_LEN     (AUDIO_RATE / 33)   /* 30 ms */
 #define CHIME_LEN   (AUDIO_RATE / 5)    /* 200 ms: two notes, "you are facing it" */

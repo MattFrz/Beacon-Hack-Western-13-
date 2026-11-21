@@ -1,17 +1,20 @@
 """Make every Beacon voice clip with an offline text-to-speech model.
 
-Runs once on a laptop (Linux / WSL); Beacon only plays the finished WAVs.
-Both engines are Apache-2.0 and run locally on CPU.
-
-Default: Inflect Mini v3, voice "hope" (https://huggingface.co/owensong/Inflect-Mini-v3)
-    python3 -m venv /opt/tts && /opt/tts/bin/pip install numpy soundfile onnxruntime uv
-    /opt/tts/bin/uv python install 3.12 && /opt/tts/bin/uv venv -p 3.12 /opt/inflect-venv
-    /opt/tts/bin/uv pip install -p /opt/inflect-venv/bin/python huggingface-hub==0.36.2
-    /opt/inflect-venv/bin/hf download owensong/Inflect-Mini-v3 --local-dir /opt/inflect-mini-v3
-    cd /opt/inflect-mini-v3 && /opt/inflect-venv/bin/python verify_release.py
-    /opt/tts/bin/uv pip install -p /opt/inflect-venv/bin/python -r core/requirements-cpu.txt
+Default: Kokoro-82M (GGUF) through llama.cpp's llama-tts, voice af_heart.
+The same tool and GGUF files run on the Pi's QNX llama.cpp port, so the
+clips can be made on the laptop or on the Pi. Beacon only plays the WAVs.
+    git clone https://github.com/ggml-org/llama.cpp /opt/llama.cpp && cd /opt/llama.cpp
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF
+    cmake --build build -j --target llama-tts
+    hf download ggml-org/Kokoro-82M-GGUF Kokoro-82M-F32.gguf mmproj-Kokoro-82M-F16.gguf \
+        --local-dir /opt/gguf-tts
     sudo apt install ffmpeg
-    /opt/tts/bin/python sounds/make_clips.py                     # ~6 min for 32 clips
+    python3 sounds/make_clips.py                     # 127 clips in ~90 s
+    python3 sounds/make_clips.py --voice af_bella    # another built-in voice
+
+Alternative: Inflect Mini v3, voice "hope" (not GGUF; laptop only)
+    (setup: https://huggingface.co/owensong/Inflect-Mini-v3)
+    /opt/tts/bin/python sounds/make_clips.py --engine inflect
 
 Alternative: tiny-voca, voice F2 (https://huggingface.co/n4ze3m/tiny-voca)
     /opt/tts/bin/pip install huggingface_hub git+https://github.com/n4ze3m/dizione
@@ -126,6 +129,50 @@ def to_clip(raw: str, out_wav: str) -> None:
     )
 
 
+def wanted_clips(args):
+    """(name, text) pairs to render: --only (names or "prefix*") and --missing."""
+    only = [o for o in args.only.split(",") if o] if args.only else None
+
+    def wanted(name: str) -> bool:
+        if only and not any(name.startswith(o[:-1]) if o.endswith("*") else name == o
+                            for o in only):
+            return False
+        return not (args.missing and os.path.exists(os.path.join(args.out, name + ".wav")))
+
+    return [(n, t) for n, t in CLIPS.items() if wanted(n)]
+
+
+def make_llamacpp(args) -> None:
+    """A GGUF voice through llama.cpp's llama-tts (the same tool and files run
+    on the Pi's QNX llama.cpp port). --gguf is the model, --mmproj its audio
+    part; --voice picks a built-in voice, or --speaker/--speaker-text clone one
+    (Qwen3-TTS)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    todo = wanted_clips(args)
+    threads = str(max(1, (os.cpu_count() or 4) // args.jobs))
+
+    def render(item, tmp):
+        name, text = item
+        say = text if text[-1] in ".!?," else text + "."
+        raw = os.path.join(tmp, name + ".wav")
+        cmd = [args.llama_tts, "-m", args.gguf, "-mm", args.mmproj, "-p", say,
+               "-o", raw, "-t", threads, "--seed", "7"]
+        if args.voice:
+            cmd += ["--tts-voice", args.voice]
+        if args.speaker:
+            cmd += ["--tts-speaker-file", args.speaker]
+        if args.speaker_text:
+            cmd += ["--tts-speaker-text", args.speaker_text]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        to_clip(raw, os.path.join(args.out, name + ".wav"))
+        print(f"{name + '.wav':28s} {text}", flush=True)
+
+    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(args.jobs) as pool:
+        list(pool.map(lambda it: render(it, tmp), todo))
+    print(f"Made {len(todo)} clips with llama.cpp + {os.path.basename(args.gguf)} in {args.out}")
+
+
 def make_inflect(args) -> None:
     """Inflect Mini v3 (owensong/Inflect-Mini-v3, Apache-2.0). Each clip is a
     separate process that loads the model (~11 s), so clips render in
@@ -169,9 +216,15 @@ def make_inflect(args) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", choices=["inflect", "tinyvoca"], default="inflect")
+    ap.add_argument("--engine", choices=["llamacpp", "inflect", "tinyvoca"], default="llamacpp")
+    ap.add_argument("--llama-tts", default="/opt/llama.cpp/build/bin/llama-tts")
+    ap.add_argument("--gguf", default="/opt/gguf-tts/Kokoro-82M-F32.gguf", help="llamacpp: model GGUF")
+    ap.add_argument("--mmproj", default="/opt/gguf-tts/mmproj-Kokoro-82M-F16.gguf", help="llamacpp: audio GGUF")
+    ap.add_argument("--speaker", default="", help="llamacpp: reference clip to clone (Qwen3-TTS)")
+    ap.add_argument("--speaker-text", default="", help="llamacpp: transcript of --speaker")
     ap.add_argument("--voice", default=None,
-                    help="inflect: cassidy|mark|hope|james|sophia|jasper (default hope); "
+                    help="llamacpp: Kokoro voice (default af_heart); "
+                         "inflect: cassidy|mark|hope|james|sophia|jasper (default hope); "
                          "tinyvoca: F2|M2 (default F2)")
     ap.add_argument("--speed", type=float, default=1.05, help="tinyvoca only")
     ap.add_argument("--model", default="/opt/tiny-voca/onnx/model.onnx", help="tinyvoca only")
@@ -184,6 +237,10 @@ def main() -> None:
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
+    if args.engine == "llamacpp":
+        args.voice = args.voice or ("af_heart" if "kokoro" in args.gguf.lower() else None)
+        make_llamacpp(args)
+        return
     if args.engine == "inflect":
         make_inflect(args)
         return

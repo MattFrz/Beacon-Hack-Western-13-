@@ -42,7 +42,7 @@ Flags: `--metres` speaks the distance in steps (spec §11: only after the tape-m
 
 ## Sound
 
-`guided`'s audio thread loads the voice clips in `sounds/` at startup and mixes speech, pips, REACH ticks and the continuous tone into 10 ms stereo blocks.
+The voice is Kokoro-82M (GGUF, voice `af_heart`) rendered by llama.cpp's `llama-tts` into WAV clips (`sounds/make_clips.py`); the same GGUF runs on the Pi's QNX llama.cpp port. `guided`'s audio thread loads the voice clips in `sounds/` at startup and mixes speech, pips, REACH ticks and the continuous tone into 10 ms stereo blocks.
 
 What the wearer hears, Google Maps style (qualitative, body-relative, no degrees or exact numbers):
 
