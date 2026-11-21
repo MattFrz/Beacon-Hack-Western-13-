@@ -13,6 +13,9 @@
  *   unseen  "where is my phone" with no phone in view
  *   stop    reach, then "stop"
  *   return  walk an L, then "take me back" along the breadcrumbs
+ *   turn    the wearer turns away (map says "turn left"), turns back, reaches
+ *   bottle  the whole journey: turned away, "find my water bottle", turn, walk 3 m, reach, found it
+ *           and holds the keys ("found it")
  *   reject  keys and keychain in view: "not that one" moves to the keychain,
  *           "say that again" repeats, a second "not that one" runs out
  */
@@ -136,7 +139,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--duration") && i + 1 < argc) duration = atof(argv[++i]);
     }
     if (duration <= 0)
-        duration = !strcmp(sc, "lost") ? 16 : (!strcmp(sc, "return") ? 22 : 12);
+        duration = !strcmp(sc, "lost") ? 16 : (!strcmp(sc, "return") ? 22 : (!strcmp(sc, "turn") ? 15 : (!strcmp(sc, "bottle") ? 23 : 12)));
 
     int fd = shm_open(BEACON_SHM_WORLD, O_RDWR | O_CREAT, 0666);
     if (fd == -1 || ftruncate(fd, (off_t)sizeof(beacon_world_t)) == -1) {
@@ -202,10 +205,74 @@ int main(int argc, char **argv)
                 said_two = 1;
             }
         } else if (!strcmp(sc, "walk")) {
-            put_object(0, 2, "bottle", -0.60f, 0.10f, 2.20f, 1, now);
+            /* bottle ahead-left with a mug beside it; from 6 s the wearer turns to face it */
+            float bx = lerp(-0.60f, 0.0f, (float)(t - 6.0) / 3.0f);
+            put_object(0, 2, "bottle", bx, 0.10f, 2.20f, 1, now);
+            put_object(1, 4, "mug", bx + 0.18f, 0.10f, 2.25f, 1, now);
             put_hand(0, 0, 0, 0, now);
             if (!said_find && t >= 0.5) {
                 say_intent(BEACON_INTENT_GO, "fountain", "dispenser", "sink", "bottle", now);
+                said_find = 1;
+            }
+        } else if (!strcmp(sc, "turn")) {
+            /* keys on the table; the wearer turns 90 deg right (keys leave the
+             * view, the map says "turn left"), turns back, then reaches. */
+            float yaw = 0;
+            if (t >= 3 && t < 4) yaw = (float)((t - 3) * 90);
+            else if (t >= 4 && t < 7) yaw = 90;
+            else if (t >= 7 && t < 8) yaw = (float)(90 - (t - 7) * 90);
+            set_pose_yaw(yaw, 0, 0, 1);
+            const float kw[3] = { 0.10f, 0.30f, 0.60f };    /* keys in the world */
+            const float *T = g_p.pose.T_world_from_cam;
+            float d[3] = { kw[0] - T[3], kw[1] - T[7], kw[2] - T[11] };
+            float kc[3] = { T[0] * d[0] + T[4] * d[1] + T[8] * d[2],
+                            T[1] * d[0] + T[5] * d[1] + T[9] * d[2],
+                            T[2] * d[0] + T[6] * d[1] + T[10] * d[2] };
+            int seen = kc[2] > 0.05f && fabsf(atan2f(kc[0], kc[2])) < 0.47f; /* ~27 deg half FOV */
+            put_object(0, 1, "keys", kc[0], kc[1], kc[2], seen, now);
+            double ht = t - 8.5;
+            if (ht >= 0) {
+                float f = (float)(ht / 3.0);
+                put_hand(1, lerp(0.35f, kw[0] + 0.01f, f), lerp(0.55f, kw[1] + 0.01f, f),
+                         lerp(0.20f, kw[2] - 0.02f, f), now);
+            } else {
+                put_hand(0, 0, 0, 0, now);
+            }
+            if (!said_find && t >= 0.5) {
+                say_intent(BEACON_INTENT_FIND, "keys", "keychain", NULL, NULL, now);
+                said_find = 1;
+            }
+        } else if (!strcmp(sc, "bottle")) {
+            /* The whole journey to a metal water bottle on a table 3 m away, a mug beside it.
+             * 0-1 s facing it (percept stores it), 1-2 s turns right to put a bag down,
+             * 2.2 s "find my water bottle" -> "turn left" + pips, 4.5-7.5 s turns back,
+             * 8-16 s walks up to it (steps count down), 16.5 s reaches -> ticks, tone, "found it". */
+            float yaw = 0, z = 0;
+            if (t >= 1 && t < 2) yaw = (float)((t - 1) * 100);
+            else if (t >= 2 && t < 4.5) yaw = 100;
+            else if (t >= 4.5 && t < 7.5) yaw = (float)(100 - (t - 4.5) / 3.0 * 100);
+            z = lerp(0.0f, 2.4f, (float)(t - 8.0) / 8.0f);
+            set_pose_yaw(yaw, 0, z, 1);
+            const float *T = g_p.pose.T_world_from_cam;
+            const float bw[3] = { 0.15f, 0.25f, 3.0f }, mw[3] = { 0.33f, 0.25f, 3.05f };
+            const float *ws[2] = { bw, mw };
+            for (int k = 0; k < 2; ++k) {
+                float d[3] = { ws[k][0] - T[3], ws[k][1] - T[7], ws[k][2] - T[11] };
+                float c[3] = { T[0] * d[0] + T[4] * d[1] + T[8] * d[2],
+                               T[1] * d[0] + T[5] * d[1] + T[9] * d[2],
+                               T[2] * d[0] + T[6] * d[1] + T[10] * d[2] };
+                int seen = c[2] > 0.05f && fabsf(atan2f(c[0], c[2])) < 0.47f; /* ~27 deg half FOV */
+                put_object(k, k == 0 ? 2 : 4, k == 0 ? "bottle" : "mug", c[0], c[1], c[2], seen, now);
+            }
+            double ht = t - 16.5;
+            if (ht >= 0) {
+                float f = (float)(ht / 3.0);
+                put_hand(1, lerp(0.35f, 0.16f, f), lerp(0.55f, 0.26f, f), lerp(0.20f, 0.58f, f), now);
+            } else {
+                put_hand(0, 0, 0, 0, now);
+            }
+            if (!said_find && t >= 2.2) {
+                say_intent(BEACON_INTENT_FIND, "bottle", NULL, NULL, NULL, now);
                 said_find = 1;
             }
         } else if (!strcmp(sc, "reject")) {

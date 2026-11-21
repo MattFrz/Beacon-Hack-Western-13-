@@ -16,4 +16,6 @@ test('captionFromClips speaks the target name and skips unknown ids', () => {
   assert.equal(captionFromClips(walk, 'keys'), 'Keys about two metres ahead a little left');
   assert.equal(captionFromClips([id('LOST_TARGET'), 999], 'keys'), 'I lost the target.');
   assert.equal(captionFromClips([], 'keys'), null);
+  assert.equal(captionFromClips([id('INTRO_CONT_SLEFT'), id('STEPS_2')], 'keys'),
+    'Keys is slightly to your left, about two steps ahead.');
 });
