@@ -85,6 +85,18 @@ export default function App() {
           <p className="muted">No target bound</p>
         )}
 
+        <h2>Map</h2>
+        <dl>
+          <dt>Pose</dt>
+          <dd>{w.pose?.valid === true ? 'valid' : 'lost'}</dd>
+          <dt>Pose age</dt>
+          <dd><Num value={isNum(w.pose?.age_ns) ? w.pose.age_ns / 1e6 : null} digits={0} unit=" ms" /></dd>
+          <dt>Object dots</dt>
+          <dd>{(w.objects ?? []).length}</dd>
+          <dt>Crumbs</dt>
+          <dd>{(w.crumbs ?? []).length}</dd>
+        </dl>
+
         <h2>Processes</h2>
         <ul className="procs">
           {Object.entries(health.procs ?? {}).map(([name, p]) => (
