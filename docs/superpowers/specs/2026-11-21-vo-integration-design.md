@@ -213,10 +213,27 @@ the QNX OpenCV/ORT packages exist and `camd` publishes real frames.
 
 - Exact VO working scale (320×240 vs aspect-preserving) and frame stride N —
   tune on the recorded walk, record the choice here.
+  **Measured 2026-11-21 on the 18.2 s handheld clip (1280×720, 29.75 fps):**
+  stride 1 beats stride 3 — 541 steps, valid_fraction 0.62 vs 0.51, denser
+  crumb trail, guard trips only on true whip-pans (≈10 px/frame). Stride 1
+  is the laptop default for offline passes. On-device N still derives from
+  the real decoded frame rate (F8), not this number.
 - Watchdog thresholds (25% band, ≥20 plane candidates, window 10) are initial
   values from the research, to be tuned by the probe's correction-rate readout.
-- LK pyramid depth and track count floor (60) — same.
-- `h_chest` measurement procedure and value (§15 set, owner Matt).
+  **Measured on the same clip:** corrections ×2–4 on 25–30% of valid steps,
+  `h_est` 0.40–0.65 m — a table-height plane under a handheld camera, or a
+  depth-scale mismatch for phone footage. No tape ground truth on this clip,
+  so thresholds stand; a tape-gated L-walk (real chest height, floor visible)
+  is the remaining Task 3 gate before trusting Range 3.
+- LK pyramid depth and track count floor (60) — same. Track starvation was
+  the dominant refusal mode on real footage before the re-anchor rule;
+  unchanged.
+- `h_chest` measurement procedure and value (§15 set, owner Matt). 1.4 m was
+  assumed for the handheld clip; the device value must be tape-measured.
+- **Gotcha for `telemd`:** `probe_frame.read_frame` stamps video passes with
+  `time.monotonic_ns()` as the frame id; `merge_vo_world` aligns by ordinal
+  because of it. The on-device contract (`beacon.h`) uses real monotonic
+  `frame_id`s from `camd` — do not port the probe's behavior.
 
 ## QNX track review (2026-11-21, against `pi-dev-workflow.md` and `pi-bringup.md`)
 
