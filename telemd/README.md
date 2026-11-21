@@ -4,6 +4,8 @@ Owner: Matt. Optional sixth process, lowest priority, `0xe`. Read-only on `/beac
 
 JSON format: [`laptop/samples/`](../laptop/samples/).
 
+The dashboard’s Processes panel uses the latest monotonic heartbeat from each of `guided` and `percept`. A process shows as down until its first heartbeat and again when its heartbeat is at least one second old. Timing shows the last YOLO and depth durations in milliseconds, vision p95 (sent in nanoseconds, zero until measured), guided’s cumulative deadline misses and its worst lateness in whole microseconds.
+
 ## Live target telemetry
 
 From the repository root on Linux or WSL, run `make -C telemd`, then `telemd/build/telemd`. The default destination is `127.0.0.1:5005`. To use a bridge on another host, pass its IPv4 address and optional UDP port. With WSL NAT and a Windows-hosted bridge, use the Windows host address reachable from WSL.
