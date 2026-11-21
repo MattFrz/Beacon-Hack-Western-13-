@@ -44,7 +44,10 @@ only obvious package-named binary in `/usr/bin`. Python 3.14 and `pip` 25.1.1
 are present, but no CV/ML Python packages were found. PyPI did not provide a
 QNX wheel for numpy 2.5.5; pip fell back to a source build and failed in Meson
 with `Cython requires python3 dependency for link testing`. Use QNX ports or
-`oss.qnx.com` binaries, not plain PyPI wheels, for the native packages.
+`oss.qnx.com` binaries, not plain PyPI wheels, for the native packages. The
+`qnx-ports/build-files` catalog lists `onnxruntime`, `opencv`, `numpy`, and
+`pytorch`, but those are source build files for a Linux host with QNX SDP. No
+prebuilt binary was installed on the Pi from that route.
 
 Record the exact package name and version shown by the tool. The research
 versions below are targets, not observations.
@@ -174,3 +177,4 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | 2026-11-21 09:11 EDT | Laptop depth export | `percept/tools/export_depth.py` exported Depth Anything V2 Metric Indoor Small to a static `(1, 3, 210, 210)` input and `(1, 210, 210)` metric output. Combined with YOLOE on `bus.jpg`, sampled depths at person centres were 6.1 to 10.3 m. Tape check still required. |
 | 2026-11-21 09:13 EDT | Laptop hand probe | Downloaded MediaPipe Tasks `hand_landmarker.task`. With `libglvnd` on `LD_LIBRARY_PATH`, `probe_frame.py --hands --hand-model ...` found a fingertip in the MediaPipe `woman_hands.jpg` sample. |
 | 2026-11-21 14:13 UTC | Models staged on Pi | Copied YOLOE ONNX, depth ONNX plus `.onnx.data`, and `hand_landmarker.task` to `/data/home/qnxuser/beacon-test/models`. All four SHA-256 hashes match the laptop values. Runtime packages are still missing. |
+| 2026-11-21 14:15 UTC | USB recheck | Still no USB device in `usb` output. `/dev/snd` still only has `controlC0`. C270 and USB audio are not attached. |
