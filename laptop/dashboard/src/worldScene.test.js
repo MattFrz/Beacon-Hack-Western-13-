@@ -32,6 +32,28 @@ test('poseSceneMatrix converts an identity pose into an identity scene matrix', 
   assert.deepEqual(poseSceneMatrix(pose), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 });
 
+test('poseSceneMatrix emits column-major translation for Three.js fromArray', () => {
+  const pose = {
+    valid: true,
+    T_world_from_cam: [
+      1, 0, 0, -0.02,
+      0, 1, 0, 0.01,
+      0, 0, 1, 0.02,
+      0, 0, 0, 1,
+    ],
+  };
+  const m = poseSceneMatrix(pose);
+  // OpenCV translation [-0.02, 0.01, 0.02] -> scene [-0.02, -0.01, -0.02]
+  // Three.js stores translation at column-major indices 12, 13, 14.
+  assert.equal(m[12], -0.02);
+  assert.equal(m[13], -0.01);
+  assert.equal(m[14], -0.02);
+  assert.equal(m[15], 1);
+  assert.equal(m[3], 0);
+  assert.equal(m[7], 0);
+  assert.equal(m[11], 0);
+});
+
 test('wearerState freezes the last position when pose is invalid', () => {
   const validPose = {
     valid: true,

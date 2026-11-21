@@ -26,7 +26,7 @@ const COLORS = {
 };
 
 export default function Scene({ world }) {
-  const { mode, t_ns } = world ?? {};
+  const { mode } = world ?? {};
   const objects = worldObjects(world);
   const hand = worldHand(world);
   const target = worldTarget(world);

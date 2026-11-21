@@ -21,12 +21,13 @@ export function poseSceneMatrix(pose) {
   const t = pose?.T_world_from_cam;
   if (!pose?.valid || !Array.isArray(t) || t.length < 16 || !t.slice(0, 16).every(isNum)) return null;
   // Conjugate by diag(1, -1, -1, 1), the OpenCV-world -> three.js world change of basis.
+  // Telemetry T is row-major; Three.js Matrix4.fromArray is column-major.
   const signs = [1, -1, -1, 1];
   const out = new Array(16);
   for (let r = 0; r < 4; r += 1) {
     for (let c = 0; c < 4; c += 1) {
       const value = t[r * 4 + c] * signs[r] * signs[c];
-      out[r * 4 + c] = value === 0 ? 0 : value;
+      out[c * 4 + r] = value === 0 ? 0 : value;
     }
   }
   return out;
