@@ -96,6 +96,30 @@ static beacon_frames_t *open_frames(void)
     return frames;
 }
 
+static void seed_next_frame_id(beacon_frames_t *frames)
+{
+    beacon_frame_slot_t *slot =
+        (beacon_frame_slot_t *)malloc(sizeof(beacon_frame_slot_t));
+    if (slot == NULL) {
+        fprintf(stderr, "camd: frame-id seed malloc failed\n");
+        return;
+    }
+
+    uint64_t max_id = 0;
+    for (uint32_t i = 0; i < BEACON_FRAME_SLOTS; ++i) {
+        if (beacon_seq_read(&frames->slot[i].seq, slot, &frames->slot[i],
+                            sizeof(*slot), 8, NULL) &&
+            slot->frame_id > max_id) {
+            max_id = slot->frame_id;
+        }
+    }
+    free(slot);
+
+    g_next_frame_id = max_id + 1u;
+    if (g_next_frame_id == 0u)
+        g_next_frame_id = 1u;
+}
+
 static void publish_frame(beacon_frames_t *frames,
                           uint32_t width, uint32_t height, uint32_t stride,
                           uint32_t frametype, const uint8_t *pixels, size_t bytes_used)
@@ -359,6 +383,7 @@ int main(int argc, char **argv)
     beacon_frames_t *frames = open_frames();
     if (frames == NULL)
         return 1;
+    seed_next_frame_id(frames);
 
     uint8_t *buffer = NULL;
     uint32_t width = 0u;
