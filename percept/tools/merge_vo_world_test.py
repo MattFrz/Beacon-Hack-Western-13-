@@ -105,6 +105,19 @@ class MergeTests(unittest.TestCase):
         self.assertEqual([c["xyz_world"][0] for c in crumbs],
                          [0.0, 0.6, 1.2])
 
+    def test_ns_scale_frame_ids_are_ignored_for_alignment(self):
+        """probe_to_world --video stamps objects with monotonic-ns frame ids;
+        those must not be mistaken for frame indices."""
+        rec_a = world_record(37835178895452, xyz_cam=(1.0, 0.0, 2.0))
+        rec_b = world_record(37841061716173, xyz_cam=(1.0, 0.0, 2.0))
+        merged = self.run_merge(
+            [rec_a, rec_b],
+            [vo_record(1, True, 0.0), vo_record(2, True, 1.0)])
+        # ordinal alignment: record 0 -> frame 1 (T 0), record 1 -> frame 2 (T 1)
+        self.assertEqual(merged[0]["pose"]["T_world_from_cam"], T(0.0))
+        self.assertEqual(merged[1]["pose"]["T_world_from_cam"], T(1.0))
+        self.assertEqual(merged[1]["objects"][0]["xyz_world"], [2.0, 0.0, 2.0])
+
     def test_record_without_frame_id_uses_calibrated_ordinal(self):
         blank = world_record(5)
         blank["objects"] = []  # no frame_id anywhere

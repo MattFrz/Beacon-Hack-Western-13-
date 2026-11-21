@@ -30,6 +30,7 @@ from percept.tools import vo_core  # noqa: E402
 IDENTITY_T = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
 CRUMB_MIN_DT_NS = 400_000_000
 CRUMB_MIN_MOVE_M = 0.05
+FRAME_ID_MAX = 10_000  # probe --video frame ids are monotonic ns; ignore those
 
 
 def read_jsonl(path: Path) -> List[Dict[str, object]]:
@@ -53,6 +54,15 @@ def first_frame_id(record: Dict[str, object]) -> Optional[int]:
             if isinstance(obj, dict) and isinstance(obj.get("frame_id"), int):
                 return obj["frame_id"]
     return None
+
+
+def usable_frame_id(record: Dict[str, object]) -> Optional[int]:
+    """Frame-scale id, or None: probe_to_world --video stamps objects with
+    monotonic-ns ids that must never be mistaken for frame indices."""
+    fid = first_frame_id(record)
+    if fid is None or not (0 < fid < FRAME_ID_MAX):
+        return None
+    return fid
 
 
 def translation(T: List[float]):
@@ -120,9 +130,11 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
          if isinstance(rec.get("frame_id"), int)),
         key=lambda rec: rec["frame_id"])
 
-    offsets = [first_frame_id(rec) - i for i, rec in enumerate(world_records)
-               if first_frame_id(rec) is not None]
-    offset = median(offsets)
+    offsets = [usable_frame_id(rec) - i for i, rec in enumerate(world_records)
+               if usable_frame_id(rec) is not None]
+    # A --video world pass emits one record per frame, in order, so the
+    # ordinal maps straight onto the 1-based frame index VO uses.
+    offset = median(offsets) if offsets else 1
 
     crumbs = build_crumbs(vo_records, dt_ns)
 
@@ -132,7 +144,7 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
     n_out = 0
     with out_path.open("w", encoding="utf-8") as out:
         for i, rec in enumerate(world_records):
-            fid = first_frame_id(rec)
+            fid = usable_frame_id(rec)
             F = fid if fid is not None else i + offset
             while (vo_i < len(vo_records)
                    and vo_records[vo_i]["frame_id"] <= F):
