@@ -6,6 +6,7 @@ import { captionFromClips } from './clips.js';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import { useTelemetry } from './useTelemetry.js';
+import { crumbsToScene, worldObjects } from './worldScene.js';
 
 const MODES = ['LIVE', 'HOLD', 'LOST'];
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -87,6 +88,18 @@ export default function App() {
         ) : (
           <p className="muted">No target bound</p>
         )}
+
+        <h2>Map</h2>
+        <dl>
+          <dt>Pose</dt>
+          <dd>{w.pose?.valid === true ? 'valid' : 'lost'}</dd>
+          <dt>Pose age</dt>
+          <dd><Num value={isNum(w.pose?.age_ns) ? w.pose.age_ns / 1e6 : null} digits={0} unit=" ms" /></dd>
+          <dt>Object dots</dt>
+          <dd>{worldObjects(w).length}</dd>
+          <dt>Crumbs</dt>
+          <dd>{crumbsToScene(w).length}</dd>
+        </dl>
 
         <h2>Processes</h2>
         <ul className="procs">
