@@ -11,3 +11,5 @@ From the repository root on Linux or WSL, run `make -C telemd`, then `telemd/bui
 The sender waits for the shared world, opens it read-only, and sends a version-1 JSON datagram about every 100 ms. Each message includes the monotonic timestamp, guided and percept sequence numbers, mode, law, and bound target (or null). Reads that overlap a write are retried or skipped.
 
 To exercise it with the laptop simulator, run the bridge in live mode, start the sender, then run `bash guided/tools/run_scenario.sh reject` from the repo root. A WebSocket client on the bridge should see the target change from keys to keychain. This milestone covers target telemetry. Frame streaming, full-world telemetry and Pi scheduling are pending.
+
+For the reach view, use the `reach` or `lost` scenario. A fresh, valid hand supplies its camera and world coordinates, confidence, frame ID and capture time. The sender publishes the smoothed distance from guided when the live target and hand share a frame and pose epoch. Missing or stale tracking clears the hand and distance to JSON null.

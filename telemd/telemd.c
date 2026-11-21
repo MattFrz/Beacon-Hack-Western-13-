@@ -42,15 +42,18 @@ static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
     static const char *const laws[] = {"NONE", "STOP", "LOST", "REACH", "WALK", "RETURN"};
     beacon_guided_block_t guided;
     beacon_percept_health_t health;
-    beacon_seq_t gs, ps;
+    beacon_hand_t hand;
+    beacon_seq_t gs, ps, hand_seq;
     if (!beacon_seq_read(&world->seq_guided, &guided, &world->guided, sizeof(guided), 3, &gs) ||
-        !beacon_seq_read(&world->seq_percept, &health, &world->percept.health, sizeof(health), 3, &ps))
+        !beacon_seq_read(&world->seq_percept, &health, &world->percept.health, sizeof(health), 3, &ps) ||
+        !beacon_seq_read(&world->seq_percept, &hand, &world->percept.hand, sizeof(hand), 3, &hand_seq) ||
+        ps != hand_seq)
         return 0;
 
     uint64_t now = beacon_now_ns();
     const beacon_target_t *t = &guided.target;
-    int mode = beacon_mode(t->bound, t->in_latest_boxes, t->last_seen_ns, now,
-                           beacon_live_max_ns(health.p95_vision_ns));
+    uint64_t live_ns = beacon_live_max_ns(health.p95_vision_ns);
+    int mode = beacon_mode(t->bound, t->in_latest_boxes, t->last_seen_ns, now, live_ns);
     char target[768] = "null";
     if (t->bound) {
         char name[6 * BEACON_NAME_LEN + 1], camera[96], position[96], confidence[32] = "null";
@@ -64,9 +67,25 @@ static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
                  "\"conf\":%s,\"last_seen_ns\":%" PRIu64 ",\"frame_id\":%" PRIu64 ",\"pose_epoch\":%u}",
                  t->id, name, camera, position, confidence, t->last_seen_ns, t->frame_id, t->pose_epoch);
     }
+    char hand_json[384] = "null", distance[32] = "null";
+    if (hand.valid && hand.t_ns && hand.t_ns <= now && now - hand.t_ns < live_ns &&
+        isfinite(hand.conf) && isfinite(hand.xyz_cam[0]) &&
+        isfinite(hand.xyz_cam[1]) && isfinite(hand.xyz_cam[2])) {
+        char camera[96], position[96];
+        vector_json(camera, hand.xyz_cam);
+        vector_json(position, hand.xyz_world);
+        snprintf(hand_json, sizeof(hand_json),
+                 "{\"xyz_cam\":%s,\"xyz_world\":%s,\"conf\":%.9g,"
+                 "\"t_ns\":%" PRIu64 ",\"frame_id\":%" PRIu64 "}",
+                 camera, position, hand.conf, hand.t_ns, hand.frame_id);
+        if (mode == BEACON_MODE_LIVE && hand.frame_id == t->frame_id &&
+            hand.pose_epoch == t->pose_epoch && guided.display.d_m >= 0 && isfinite(guided.display.d_m))
+            snprintf(distance, sizeof(distance), "%.9g", guided.display.d_m);
+    }
     const char *law = guided.display.law < sizeof(laws)/sizeof(laws[0]) ? laws[guided.display.law] : "NONE";
     return snprintf(packet, cap, "{\"v\":1,\"t_ns\":%" PRIu64 ",\"seq\":{\"guided\":%u,\"percept\":%u},"
-                    "\"mode\":\"%s\",\"law\":\"%s\",\"target\":%s}", now, gs, ps, modes[mode], law, target);
+                    "\"mode\":\"%s\",\"law\":\"%s\",\"target\":%s,\"hand\":%s,\"d_m\":%s}",
+                    now, gs, ps, modes[mode], law, target, hand_json, distance);
 }
 
 int main(int argc, char **argv)
