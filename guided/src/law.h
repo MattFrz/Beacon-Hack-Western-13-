@@ -83,6 +83,9 @@ typedef struct {
     uint64_t d_t_ns;
     uint64_t next_tick_ns;
     int      tone_on;
+    uint64_t tone_since_ns;  /* when the continuous tone started */
+    int      found;          /* "found it" said; quiet until the hand moves away */
+    int      turning;        /* giving "turn left/right" from the session map */
 
     /* WALK and mode bookkeeping */
     uint64_t last_walk_ns;

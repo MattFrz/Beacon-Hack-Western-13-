@@ -38,6 +38,9 @@ static const char *const k_clip_words[BEACON_CLIP_COUNT] = {
     [BEACON_CLIP_YOU_ARE_BACK] = "you are back",
     [BEACON_CLIP_PROMPT_BEEP] = "<beep>",
     [BEACON_CLIP_OBJECT_NAME] = "<name>",
+    [BEACON_CLIP_TURN_LEFT] = "turn left",
+    [BEACON_CLIP_TURN_RIGHT] = "turn right",
+    [BEACON_CLIP_FOUND_IT] = "found it",
 };
 
 /* speech ring: single producer (16 ms thread), single consumer (audio thread) */

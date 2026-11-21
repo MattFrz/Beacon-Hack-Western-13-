@@ -19,6 +19,10 @@
 #define RETURN_POP_M       0.60f  /* §10: pop crumb within ~0.6 m        */
 #define RETURN_LIVE_M      3.0f   /* §10: named object within ~3 m ends RETURN */
 #define HOLD_TICK_SLOWDOWN 1.6f
+#define TURN_DEG           25.0f  /* target this far off-axis and out of view: "turn left/right" */
+#define POSE_FRESH_NS      1000000000ull /* the map is only trusted with a fresh pose */
+#define FOUND_HOLD_NS      600000000ull  /* tone this long before "found it" */
+#define FOUND_REARM_M      0.30f  /* hand moved this far away: allow another "found it" */
 
 /* ------------------------------------------------------------------ small math */
 static float v3_norm(const float v[3]) { return sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
@@ -96,7 +100,22 @@ static void leave_reach(guided_state_t *st, guided_out_t *out)
 {
     st->in_reach = 0;
     st->reach_enter_n = 0;
+    st->found = 0;
     tone_off(st, out);
+}
+
+/* Where the bound target is right now, from the session map (spec §7 Range 3).
+ * Only with a valid, fresh pose in the same epoch: a dead percept stops the
+ * pose, so this goes false and the wearer hears LOST, never a guessed turn. */
+static int memory_bearing(const guided_state_t *st, const beacon_percept_block_t *p,
+                          uint64_t now, float pc[3])
+{
+    if (!p->pose.valid || p->pose.pose_epoch != st->target.pose_epoch)
+        return 0;
+    if (now > p->pose.t_ns && now - p->pose.t_ns > POSE_FRESH_NS)
+        return 0;
+    cam_from_world(p->pose.T_world_from_cam, st->target.xyz_world, pc);
+    return 1;
 }
 
 /* ------------------------------------------------------------------ public helpers */
@@ -242,6 +261,8 @@ static void reset_guidance(guided_state_t *st)
 {
     st->in_reach = 0;
     st->reach_enter_n = 0;
+    st->found = 0;
+    st->turning = 0;
     st->d_valid = 0;
     st->last_walk_ns = 0;
     st->lost_said = 0;
@@ -450,6 +471,33 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
         return;
     }
 
+    /* ---------------- out of view, but the map knows where it is: turn */
+    if (mode == BEACON_MODE_LIVE && st->turning) {
+        st->turning = 0;
+        st->last_walk_ns = 0; /* back in view: speak the walk cue right away */
+    }
+    if (mode != BEACON_MODE_LIVE && !st->in_reach) {
+        float pc[3];
+        if (memory_bearing(st, p, now, pc)) {
+            float az = atan2f(pc[0], pc[2]) * 57.2957795f;
+            if (fabsf(az) > TURN_DEG) {
+                out->law = BEACON_LAW_WALK;
+                if (!st->turning) {
+                    st->turning = 1;
+                    st->last_walk_ns = 0; /* say it now, not 3 s later */
+                }
+                if (st->last_walk_ns == 0 || now - st->last_walk_ns >= WALK_REPEAT_NS) {
+                    uint16_t c = az < 0 ? BEACON_CLIP_TURN_LEFT : BEACON_CLIP_TURN_RIGHT;
+                    say_remember(st, out, 0, &c, 1, NULL);
+                    st->last_walk_ns = now;
+                }
+                st->lost_said = 0;
+                st->prev_mode = mode;
+                return;
+            }
+        }
+    }
+
     /* ---------------- LOST (§6, §10): unique cue, never a number */
     if (mode == BEACON_MODE_LOST) {
         out->law = BEACON_LAW_LOST;
@@ -510,6 +558,12 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
         out->law = BEACON_LAW_REACH;
         out->d_m = st->d_ema;
         out->pan = clampf(st->lat_ema / PAN_FULL_M, -1.0f, 1.0f);
+        if (st->found && st->d_ema > FOUND_REARM_M)
+            st->found = 0;               /* hand moved away: guide again */
+        if (st->found) {                 /* already confirmed: stay quiet */
+            st->prev_mode = mode;
+            return;
+        }
         float ms = guided_tick_interval_ms(st->d_ema);
         if (ms <= 0.0f && !hold) {
             out->continuous = 1;
@@ -517,6 +571,12 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
                 guided_cmd_t *c = push_cmd(out, GUIDED_CMD_TONE_ON);
                 if (c) { c->pan = out->pan; c->amp = 1.0f; }
                 st->tone_on = 1;
+                st->tone_since_ns = now;
+            } else if (now - st->tone_since_ns >= FOUND_HOLD_NS) {
+                tone_off(st, out);       /* hand stayed on it: confirm out loud */
+                say1(out, 1, BEACON_CLIP_FOUND_IT);
+                st->found = 1;
+                out->continuous = 0;
             }
         } else {
             tone_off(st, out);

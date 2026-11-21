@@ -29,6 +29,9 @@ static const char *const k_stem[BEACON_CLIP_COUNT] = {
     [BEACON_CLIP_ABOUT] = "about",
     [BEACON_CLIP_A_LITTLE] = "a_little",
     [BEACON_CLIP_YOU_ARE_BACK] = "you_are_back",
+    [BEACON_CLIP_TURN_LEFT] = "turn_left",
+    [BEACON_CLIP_TURN_RIGHT] = "turn_right",
+    [BEACON_CLIP_FOUND_IT] = "found_it",
 };
 
 static const char *const k_names[] = { "keys", "keychain", "cup", "mug", "bottle", "phone" };

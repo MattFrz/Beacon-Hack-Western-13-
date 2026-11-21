@@ -63,6 +63,11 @@ for _n in range(1, 10):
         f"About {_NUM_WORDS[_n]} meter{'' if _n == 1 else 's'}.")
 CLIPS["a_little_left"] = "A little left."
 CLIPS["a_little_right"] = "A little right."
+# Target out of view, bearing from the session map (spec §7 Range 3).
+CLIPS["turn_left"] = "Turn left."
+CLIPS["turn_right"] = "Turn right."
+# Hand has stayed on the target: confirm, then stop the tone.
+CLIPS["found_it"] = "Found it."
 
 TRIM = (
     "silenceremove=start_periods=1:start_threshold=-45dB,areverse,"

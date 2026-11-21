@@ -9,6 +9,7 @@ shift || true
 case "$sc" in
   lost) dur=15.5 ;;
   return) dur=21.5 ;;
+  turn) dur=14.5 ;;
   *) dur=11 ;;
 esac
 make -s all

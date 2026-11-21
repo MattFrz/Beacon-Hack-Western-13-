@@ -13,6 +13,8 @@
  *   unseen  "where is my phone" with no phone in view
  *   stop    reach, then "stop"
  *   return  walk an L, then "take me back" along the breadcrumbs
+ *   turn    the wearer turns away (map says "turn left"), turns back, reaches
+ *           and holds the keys ("found it")
  *   reject  keys and keychain in view: "not that one" moves to the keychain,
  *           "say that again" repeats, a second "not that one" runs out
  */
@@ -136,7 +138,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--duration") && i + 1 < argc) duration = atof(argv[++i]);
     }
     if (duration <= 0)
-        duration = !strcmp(sc, "lost") ? 16 : (!strcmp(sc, "return") ? 22 : 12);
+        duration = !strcmp(sc, "lost") ? 16 : (!strcmp(sc, "return") ? 22 : (!strcmp(sc, "turn") ? 15 : 12));
 
     int fd = shm_open(BEACON_SHM_WORLD, O_RDWR | O_CREAT, 0666);
     if (fd == -1 || ftruncate(fd, (off_t)sizeof(beacon_world_t)) == -1) {
@@ -206,6 +208,34 @@ int main(int argc, char **argv)
             put_hand(0, 0, 0, 0, now);
             if (!said_find && t >= 0.5) {
                 say_intent(BEACON_INTENT_GO, "fountain", "dispenser", "sink", "bottle", now);
+                said_find = 1;
+            }
+        } else if (!strcmp(sc, "turn")) {
+            /* keys on the table; the wearer turns 90 deg right (keys leave the
+             * view, the map says "turn left"), turns back, then reaches. */
+            float yaw = 0;
+            if (t >= 3 && t < 4) yaw = (float)((t - 3) * 90);
+            else if (t >= 4 && t < 7) yaw = 90;
+            else if (t >= 7 && t < 8) yaw = (float)(90 - (t - 7) * 90);
+            set_pose_yaw(yaw, 0, 0, 1);
+            const float kw[3] = { 0.10f, 0.30f, 0.60f };    /* keys in the world */
+            const float *T = g_p.pose.T_world_from_cam;
+            float d[3] = { kw[0] - T[3], kw[1] - T[7], kw[2] - T[11] };
+            float kc[3] = { T[0] * d[0] + T[4] * d[1] + T[8] * d[2],
+                            T[1] * d[0] + T[5] * d[1] + T[9] * d[2],
+                            T[2] * d[0] + T[6] * d[1] + T[10] * d[2] };
+            int seen = kc[2] > 0.05f && fabsf(atan2f(kc[0], kc[2])) < 0.47f; /* ~27 deg half FOV */
+            put_object(0, 1, "keys", kc[0], kc[1], kc[2], seen, now);
+            double ht = t - 8.5;
+            if (ht >= 0) {
+                float f = (float)(ht / 3.0);
+                put_hand(1, lerp(0.35f, kw[0] + 0.01f, f), lerp(0.55f, kw[1] + 0.01f, f),
+                         lerp(0.20f, kw[2] - 0.02f, f), now);
+            } else {
+                put_hand(0, 0, 0, 0, now);
+            }
+            if (!said_find && t >= 0.5) {
+                say_intent(BEACON_INTENT_FIND, "keys", "keychain", NULL, NULL, now);
                 said_find = 1;
             }
         } else if (!strcmp(sc, "reject")) {

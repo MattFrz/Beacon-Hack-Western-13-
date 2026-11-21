@@ -359,6 +359,9 @@ enum beacon_clip {
     BEACON_CLIP_YOU_ARE_BACK,     /* "you are back" */
     BEACON_CLIP_PROMPT_BEEP,      /* short beep before listening */
     BEACON_CLIP_OBJECT_NAME,      /* placeholder: speak the target's label */
+    BEACON_CLIP_TURN_LEFT,        /* ADDITION: target out of view, from the session map */
+    BEACON_CLIP_TURN_RIGHT,       /* ADDITION */
+    BEACON_CLIP_FOUND_IT,         /* ADDITION: hand has stayed on the target */
     BEACON_CLIP_COUNT
 };
 
