@@ -98,22 +98,23 @@ static beacon_frames_t *open_frames(void)
 
 static void seed_next_frame_id(beacon_frames_t *frames)
 {
-    beacon_frame_slot_t *slot =
-        (beacon_frame_slot_t *)malloc(sizeof(beacon_frame_slot_t));
-    if (slot == NULL) {
-        fprintf(stderr, "camd: frame-id seed malloc failed\n");
-        return;
-    }
+    _Static_assert(
+        offsetof(beacon_frame_slot_t, t_ns) >=
+            offsetof(beacon_frame_slot_t, frame_id) + sizeof(uint64_t),
+        "frame header layout changed; update the frame-id seed read");
 
+    uint8_t head[offsetof(beacon_frame_slot_t, t_ns)];
     uint64_t max_id = 0;
     for (uint32_t i = 0; i < BEACON_FRAME_SLOTS; ++i) {
-        if (beacon_seq_read(&frames->slot[i].seq, slot, &frames->slot[i],
-                            sizeof(*slot), 8, NULL) &&
-            slot->frame_id > max_id) {
-            max_id = slot->frame_id;
-        }
+        if (!beacon_seq_read(&frames->slot[i].seq, head, &frames->slot[i],
+                             sizeof(head), 8, NULL))
+            continue;
+
+        uint64_t id = 0;
+        memcpy(&id, head + offsetof(beacon_frame_slot_t, frame_id), sizeof(id));
+        if (id > max_id)
+            max_id = id;
     }
-    free(slot);
 
     g_next_frame_id = max_id + 1u;
     if (g_next_frame_id == 0u)
