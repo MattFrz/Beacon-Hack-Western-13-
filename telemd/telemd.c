@@ -1,4 +1,7 @@
 #include "beacon.h"
+#ifdef BEACON_PREVIEW
+#include "preview.h"
+#endif
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -159,6 +162,9 @@ int main(int argc, char **argv)
             fprintf(stderr, "Unsupported world ABI %u\n", world->abi);
             return 1;
         }
+#ifdef BEACON_PREVIEW
+        preview_tick(sock, &dest);
+#endif
         nanosleep(&period, NULL);
     }
 }
