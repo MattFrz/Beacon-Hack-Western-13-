@@ -1,6 +1,6 @@
 # models
 
-Large files are not committed (see `.gitignore`). Owner: Nathan. Expected here:
+Large files are not committed (see `.gitignore`). Owner: Nathan. Bake list and export rules: [`docs/nathans-revision.md`](../docs/nathans-revision.md) §9. Expected here:
 
 - `yoloe26n_320.onnx` (baked prompts, detect-only) and `labels.txt` (labels.txt is committed)
 - Depth Anything V2 Metric Indoor Small ONNX

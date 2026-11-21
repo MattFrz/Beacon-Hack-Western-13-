@@ -1,7 +1,7 @@
 # Beacon: team plan (who does what, when)
 
 Date: 2026-11-21
-Status: operations plan that builds on [`nathans-revision.md`](nathans-revision.md). The revision is the product, geometry and QNX source of truth; nothing here changes it. This file adds owners, tonight's laptop work, the hardware request, and the laptop dashboard.
+Status: operations plan that builds on [`nathans-revision.md`](nathans-revision.md). That file is the product, geometry and QNX source of truth. Every `§` in this document is a section of `docs/nathans-revision.md`. If this file disagrees with it, the revision wins. This file adds owners, tonight's laptop work, the hardware request, and the laptop dashboard.
 
 ## Where we are
 
@@ -25,7 +25,7 @@ Status: operations plan that builds on [`nathans-revision.md`](nathans-revision.
 
 **Shared conventions for the C/C++ processes**
 
-- Each process folder gets its own `Makefile` that builds with `-I../include`. Plain `make` builds for the laptop with `cc`/`c++`. `make CC="qcc -Vgcc_ntoaarch64le" CXX="q++ -Vgcc_ntoaarch64le"` cross-compiles for the Pi from a laptop with QNX SDP 8.0 sourced (`source qnxsdp-env.sh`). Then `scp` the binary to the Pi.
+- Each process folder gets its own `Makefile` that builds with `-I../include`. Plain `make` builds for the laptop with `cc`/`c++`. Two legal Pi loops: (1) `make CC="qcc -Vgcc_ntoaarch64le" CXX="q++ -Vgcc_ntoaarch64le"` on a laptop with QNX SDP 8.0 sourced (`source qnxsdp-env.sh`), then `scp` the binary; (2) `rsync` sources to `/data/home/qnxuser/` and `make` on the device if SDP is not on the laptop. See `docs/pi-dev-workflow.md` for the on-device loop. Beacon itself is **not** started from `/boot/onboot` (spec §5.1).
 - QNX-only calls (`ThreadCtl`, `procmgr_ability`, pulses, CamAPI, GPIO) go behind `#ifdef __QNX__`, so every process also builds and runs on a laptop.
 - Output goes to `build/` (gitignored). Model files go in `models/` (gitignored, except `labels.txt`).
 
@@ -40,12 +40,12 @@ Saturday integration: each person builds their own folder for QNX and copies the
 
 ## Tonight: laptop work, no new hardware needed
 
-First 30 minutes: Matt and Munadir freeze `include/beacon.h` from spec §6 (frame ring, depth slot, world state with per-writer seqs, `intent.kind`, pulse codes). Everyone builds against that header.
+First 30 minutes: Matt and Munadir freeze `include/beacon.h` from **current** spec §6 (frame ring, depth slot, world state with per-writer seqs, `intent.kind` including `REPEAT` and `REJECT`, pulse codes). Do not write `CAM_W` / `CAM_H` from the C270. Everyone builds against that header.
 
 | Who | Tonight | Done when |
 | --- | --- | --- |
 | **Nathan** | If he has the Pi: bring-up §21 steps 1–5 (packages, C270 probe on Sensor Framework, USB audio playback and record). On a laptop: bake the noun list into YOLOE-26n and export static detect-only ONNX at 320 (§9); export Depth Anything V2 Metric Indoor Small; run both plus MediaPipe hands on a webcam through ONNX Runtime to check outputs and the §7 letterbox inverses. | Models and `labels.txt` in `models/` (large files not committed); a laptop script prints boxes, metres and fingertip for one frame; bring-up log notes package versions, camera unit, `W×H`, frametype. |
-| **Munadir** | `guided` in C, QNX calls behind `#ifdef __QNX__` so it builds and runs on a laptop: read a fake target from shm with the seqlock reader, compute mode (LIVE / HOLD / LOST), pick the law (STOP, LOST, REACH, WALK, RETURN), enqueue clip ids and tick commands. `voiced` logic: whisper.cpp tiny.en on recorded clips, then the §9 synonym table to `{job, candidates}`, written to `intent` with its own seq. | Fake target in, correct law and clip ids out at 60 Hz; stopping the fake writer gives HOLD then LOST; ten test phrases map to the right job and candidates. |
+| **Munadir** | `guided` in C, QNX calls behind `#ifdef __QNX__` so it builds and runs on a laptop: read a fake target from shm with the seqlock reader, compute mode (LIVE / HOLD / LOST), pick the law (STOP, LOST, REACH, WALK, RETURN; REPEAT replays last cue, REJECT tries next candidate), enqueue clip ids and tick commands. `voiced` logic: whisper.cpp tiny.en on recorded clips, then the §9 synonym table to `{job, candidates}` including REPEAT/REJECT, written to `intent` with its own seq. | Fake target in, correct law and clip ids out at 60 Hz; stopping the fake writer gives HOLD then LOST; ten test phrases map to the right job and candidates, including "say that again" and "not that one." |
 | **Zain** | `bridge` and the 3D dashboard against a hand-written sample first, then Matt's replay files. | The dashboard plays a replay: objects at their 3D positions, hand point, target, mode banner, health panel. |
 | **Matt** | `supervisor` skeleton (spawn, heartbeats over a channel, restart with backoff, piezo fault path as a stub). `telemd` JSON format and a replay generator (a reach, a HOLD, a LOST) so Zain is never blocked. Pre-render every §10 clip as 16 kHz mono WAV in `sounds/`. | Supervisor restarts a killed dummy child on a laptop; replay files exist; every §10 clip exists. |
 
@@ -81,14 +81,14 @@ The Pi already has the official active cooler. Check the power supply is the off
 
 ## If parts are late: camera and mic only
 
-We already hold a C270 with a mic. If Nathan's probe shows it on Sensor Framework, it can stand in until the Camera Module 3 arrives, and the USB speaker or C270 mic can stand in for the headset. Everything up to build step 5 can be developed that way; the piezo path waits for the buzzer and transistor.
+We already hold a C270 with a mic. If Nathan's probe shows it on Sensor Framework, it can stand in until the Camera Module 3 arrives, and the USB speaker or C270 mic can stand in for the headset. Everything up to build step 5 can be developed that way; the piezo path waits for the buzzer and transistor. Do not write C270 `W×H` into `beacon.h`. Step 2 Saturday still probes Camera Module 3.
 
 ## Laptop dashboard (additive, never on the wearer's path)
 
-- **`telemd`** (Matt): an optional sixth process at the lowest priority we use, runmask `0xe`. Read-only on `/beacon_world` and `/beacon_frames` with the same seqlock readers; skips torn reads; never writes shm, never sends to `guided`. It recomputes `mode` for display with the same function `guided` uses (shared header), since `mode` is not stored in shm. Sends UDP to the laptop: world-state JSON at ~10 Hz (objects with `xyz_cam` / `xyz_world`, hand, target, intent, pose, crumbs, health) and a downscaled JPEG at ~5 fps.
+- **`telemd`** (Matt): an optional sixth process at the lowest priority we use, runmask `0xe`. Read-only on `/beacon_world` and `/beacon_frames` with the same seqlock readers; skips torn reads; never writes shm, never sends to `guided`. It recomputes `mode` for display with the same function `guided` uses (shared header), since `mode` is not stored in shm. Sends UDP to a laptop on the local network so the team can monitor: world-state JSON at ~10 Hz and a downscaled JPEG at ~5 fps. Not a cloud path. Kill `telemd` and pixels stay on the Pi.
 - **Timing panel:** if Munadir and Nathan agree, `guided` also publishes a small stats block (miss count, worst lateness) under `seq_guided`; otherwise the panel shows the Profiler trace.
 - **`bridge`** (Zain): Node, UDP in, WebSocket out, records every session to JSONL for replay.
-- **Dashboard** (Zain): Vite + React + three.js via react-three-fiber. Torso with a chest camera cone and live video, objects at their real 3D positions from depth, fingertip-to-target line, the spoken cue as a caption, mode banner (LIVE / HOLD / LOST), process health, timing panel, replay scrubber.
+- **Dashboard** (Zain): Vite + React + three.js via react-three-fiber. Torso with a chest camera cone, optional live JPEG for team monitoring, objects at their real 3D positions from depth, fingertip-to-target line, the spoken cue as a caption, mode banner (LIVE / HOLD / LOST), process health, timing panel, replay scrubber. JSON markers still work if JPEG is off.
 - **Rule:** kill `telemd` or unplug the laptop mid-demo and the wearer hears no difference.
 
 ## Demo (spec §12)

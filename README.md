@@ -1,9 +1,11 @@
 # Beacon
 
-Chest-worn Raspberry Pi 5 on QNX 8.0 that homes you to a thing by sound. Say "where are my keys", walk on a short spoken bearing, then stereo ticks speed up as your hand reaches. Kill the detector and the ticks hold, then a lost cue, never a guessed metre. Vision, speech and guidance run on-device. Built at Hack Western 13.
+Chest-worn Raspberry Pi 5 on QNX 8.0 that homes a wearer who is blind or has low vision to a named item by sound. Say "where are my keys," walk on a short spoken bearing, then stereo ticks speed up as your hand reaches. Kill the detector and the ticks hold, then a lost cue, never a guessed metre. On-device, no tags, supplement to a cane. Built at Hack Western 13.
 
-- Design (source of truth): [`docs/nathans-revision.md`](docs/nathans-revision.md)
+- Design (source of truth): [`docs/nathans-revision.md`](docs/nathans-revision.md). If another file in this repo disagrees with it, the revision wins.
 - Team plan (owners, schedule, hardware): [`docs/team-plan.md`](docs/team-plan.md)
+- Accessibility research: [`docs/beacon-accessibility-research.md`](docs/beacon-accessibility-research.md)
+- Pi bring-up notes: [`docs/pi-dev-workflow.md`](docs/pi-dev-workflow.md)
 
 ## Layout
 
@@ -26,4 +28,5 @@ Chest-worn Raspberry Pi 5 on QNX 8.0 that homes you to a thing by sound. Say "wh
 
 - `main` holds the shared base. Work on a branch per owner or feature (`zain/dashboard`, `munadir/guided`, ...) and merge back through a PR.
 - Changes to `include/beacon.h` or the telemetry format go through their owners, since every process builds against them.
+- Freeze `include/beacon.h` from **this** copy of `docs/nathans-revision.md` §6 (`intent.kind` includes `REPEAT` and `REJECT`). Do not freeze `CAM_W` / `CAM_H` from the C270.
 - Never commit `sd-stage/` (it holds network secrets) or large model files.

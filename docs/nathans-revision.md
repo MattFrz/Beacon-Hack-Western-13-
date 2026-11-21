@@ -1,48 +1,111 @@
 # Beacon: Nathan's revision
 
 Date: 2026-11-21
-Status: Nathan's revision — product, geometry, and QNX mechanism. Implementation source of truth for this repo.
+Status: Nathan's revision. Product, accessibility framing, geometry, and QNX mechanism. Implementation source of truth for this repo.
 Path: `docs/nathans-revision.md`
 Repo: `/home/nate/Projects/Beacon-Hack-Western-13-`
-Supersedes, for product and geometry: `Beacon Hack Western build plan.md` (Nov 20; removed from the repo, see git history) and the neighbour notes in `/home/nate/Projects/hackwestern13/docs/beacon-design.md`. Those remain research/ops background. Where they disagree with this file, this file wins.
+Supersedes, for product and geometry: `Beacon Hack Western build plan.md` (Nov 20; removed from the repo, see git history) and the neighbour notes in `/home/nate/Projects/hackwestern13/docs/beacon-design.md`. Those remain research/ops background. Where they disagree with this file, this file wins. Operations (owners, folders, tonight's work) live in `docs/team-plan.md` and must not contradict this file.
 
 Working name: Beacon.
 
-A chest-worn Raspberry Pi 5 running QNX 8.0 that homes a blind or low-vision wearer to a thing without a sighted helper. Perception AI proposes a named 3D point. A high-priority QNX process is the only thing allowed to turn that point into sound. Swap QNX for Raspberry Pi OS and a hung model can starve the beeps; this design is built so that cannot happen.
+A chest-worn Raspberry Pi 5 running QNX 8.0 that homes a wearer who is blind or has low vision to a named thing, without waiting for a sighted helper. Perception AI proposes a named 3D point. A high-priority QNX process is the only thing allowed to turn that point into sound. On Raspberry Pi OS a hung model can delay the beeps by hundreds of milliseconds with no error; this design is built so that cannot happen.
+
+This is a hackathon prototype built by a sighted team. It has not been tested with people who are blind or have low vision. Say that in the pitch.
+
+What this project is, in one place:
+
+1. An accessibility product: named-object homing for people who are blind or have low vision (section 1).
+2. A geometry loop: pixel to metre-scale 3D point to session memory to sound (sections 7–10).
+3. A QNX isolation contract: five processes, FIFO on core 0, `slay percept` must not mute the piezo (section 5.1).
+4. A weekend cut: Sunday is keys FIND+REACH, in-view bottle WALK, then kill → LOST. RETURN is gated on VO (sections 12–13).
 
 ## 1. Product
 
-Beacon exists to reduce one pain: **I cannot get to a thing I care about without a sighted person, and I cannot trust an app that goes quiet or invents distance.**
+One-line job: a homing cue for a named item seen this session.
+
+Beacon exists because a specific personal item that moved (keys, phone, a bottle on a table) still forces people to wait for whoever is nearby. A cane covers the floor. Memory and labels cover a consistent home. Camera apps describe a photo. AirTags work if you tagged the thing. Remote-help apps need another person on the line and occupy a hand. Digital tools are a last resort after touch and memory, and people drop them when they lie or go silent. Sources: `docs/beacon-accessibility-research.md`.
 
 The wearer asks in ordinary English. The device answers with a short spoken instruction. Direction and distance in that sentence come from sensors, never from the language model. They walk on that speech.
 
-**Ticks start only when a hand is reaching for the targeted object.** The chest camera estimates hand-to-object distance. Ticks speed up as the hand gets closer, stereo pans left/right, and a continuous tone when it is very close. Walking speech does not beep. A cane hand is not fighting ticks.
+Ticks start only when a hand is reaching for the targeted object. The chest camera estimates hand-to-object distance. Ticks speed up as the hand gets closer, stereo pans left/right, and a continuous tone when it is very close. Walking speech does not beep, so a cane hand is not fighting ticks. If the hand is close in range but far off-axis, ticks stay audible (hard pan, quieter, never silent). Silence while searching was the main failure in a 12-person BLV hand-steering study.
 
-If vision dies, we kill `percept` live: speech or ticks hold from the last known place, then a distinct **LOST**. Never a guessed metre.
+If vision dies, we kill `percept` live: speech or ticks hold from the last known place, then a distinct LOST. Never a guessed metre. Silence and a fake "two metres" are both unusable. Honest "I lost the target" is the wearer-facing claim and the QNX prize beat.
 
-Three wearer journeys, same job at different ranges. Code may implement all three. **Sunday’s 30 s script does not.**
+Independence here means control over when help arrives for this one job. Asking a person is not the failure.
+
+### 1.1 Who it is for, and who built it
+
+Wearer: a person who is blind or has low vision, indoors, with a cane or a free hand, looking for a named everyday item they have already been near this session.
+
+Judges: Best Use of QNX. They should hear that a high-priority thread on core 0 still makes sound after the detector is dead.
+
+Builders: a sighted hackathon team. Next step after the weekend is paid, BLV-led testing. Do not say the audio, the chest mount, or the LOST cue have been validated with wearers.
+
+### 1.2 What the wearer can say
+
+| Utterance | Job | Sunday |
+|---|---|---|
+| "Where are my keys?" | FIND a stored/live name | Required |
+| "Where can I refill water?" | GO to a candidate in the session list | In-view bottle only until VO p95 exists |
+| "Take me back." | RETURN along this-walk crumbs | Not in the 30 s script until VO p95 exists. Never faked |
+| "Stop." / "Cancel." | STOP | Required |
+| "Say that again." / "Repeat." | REPEAT last spoken cue | Required (cheap; no extra model) |
+| "Not that one." | REJECT current bind; try the next candidate or NACK_UNSEEN | Required |
+
+Hands stay free for a cane. All sensing, inference, guidance and audio run on the loaner Pi.
+
+Three wearer journeys, same job at different ranges. Code may implement all three. Sunday's 30 s script does not.
 
 | Journey | Wearer | Beacon | Sunday 30 s |
 |---|---|---|---|
-| Find and reach | “Where are my keys?” | Spoken bearing while beyond arm’s reach; ticks only once a hand is reaching | **Required** |
-| Ask the room | “Where can I refill water?” | Map the sentence onto a stored session label, then the same homing | **In-view only** until VO p95 exists. Demo object is a `bottle` |
-| Return | “Take me back.” | Replay this-walk breadcrumbs backwards as spoken walk waypoints | **Not in the 30 s script** until Saturday VO p95 exists. Never faked |
+| Find and reach | "Where are my keys?" | Spoken bearing while beyond arm's reach; ticks only once a hand is reaching | Required |
+| Ask the room | "Where can I refill water?" | Map the sentence onto a stored session label, then the same homing | In-view only until VO p95 exists. Demo object is a `bottle` |
+| Return | "Take me back." | Replay this-walk breadcrumbs backwards as spoken walk waypoints | Not in the 30 s script until Saturday VO p95 exists. Never faked |
 
-Hands stay free for a cane. All sensing, inference, guidance and audio run on the loaner Pi.
+Floor-level dropped items (medication on white tile) are a documented pain and are out of the Sunday script. The chest camera is a tabletop and in-view claim until a floor drop is actually tested.
+
+### 1.3 Pitch language
+
+Say this:
+
+> Beacon homes you to a named item you have already seen this session, fully on the Pi. It is a supplement to the cane and to your own labels. It does not detect stairs, traffic, or obstacles. The word list is baked (keys, bottle, cup, ...). If it loses the target it says so. Built this weekend by a sighted team; it has not been tested with BLV wearers yet.
+
+| Avoid | Why | Use instead |
+|---|---|---|
+| "We give people sight" / "see with sound" / "a camera for the blind" | Cure framing is criticized by blind people | Homing cue for a named item: get there and reach it without waiting for a sighted person |
+| "the blind," "suffering from," "brave," "inspirational" | Paternalistic or tragedy framing | "People who are blind or have low vision"; ask individuals how they self-identify |
+| "Replaces the cane" / "keeps you safe" / obstacle, stair, or traffic claims | Safety the spec does not demonstrate | A supplement to the cane. It does not detect obstacles, stairs, or traffic |
+| "Seeing AI / Be My Eyes, but better" | Those are description and remote-human tools | Different job: homing to a named thing seen this session, on-device, no one else watching the camera |
+| "Works anywhere / finds anything / never wrong" | Confident wrong outputs cause overtrust | Short baked word list and objects in view; if it loses the target it says so and never invents a distance |
+| "No more asking for help" | Asking can be an independent living skill; the problem is loss of control | Fewer moments where this one job depends on whoever happens to be nearby |
+| "User-tested with the blind" | Untrue | Built by a sighted hackathon team; next step is paid, BLV-led testing |
+
+Sunday 30 s must never imply: finding an object never seen this session; arbitrary nouns beyond the bake list; stairs/obstacles/traffic; ticks as a trusted guide after perception is dead; a room inventory; a floor drop; RETURN as indoor navigation. Show `slay percept` -> HOLD -> LOST. Do not only describe it.
+
+### 1.4 Audio UX (wearer-facing)
+
+- Query-driven and short. "Keys. About two metres ahead, a little left." Repeat about every 3 s while walking. Stop when REACH starts.
+- Tick rate encodes hand-to-target distance. Stereo pan encodes left/right. Continuous tone inside about 15 cm. A faster tick must never mean error or lost (use a different timbre).
+- Off-axis hand: keep a findable tick. Pan hard, drop amplitude to a floor (about 0.25), never to zero.
+- LOST is a different sound, then one short sentence with no number: "I lost the target."
+- Keep at least one ear open to the room. Prefer bone conduction or a single ear. Two-ear USB is the loaner default until something open-ear exists; do not claim the form factor is right.
+- Repeat, reject, and stop are first-class. The wearer must be able to question a bind.
+- Do not narrate the room. Do not stream corrections while walking.
 
 ## 2. What this is not
 
 - A room narrator / Seeing AI clone. No “what’s in front of me” inventory as a v1 job.
-- Obstacle avoidance, stairs, traffic, or any safety claim we do not demonstrate.
-- Building-scale SLAM, loop closure, or place-recognition relocalization.
-- A physical tag / AprilTag fob. Identity is a baked detector label, not a printed marker.
+- A cane, guide dog, or obstacle / stair / traffic detector. No safety claim we do not demonstrate.
+- A floor-drop finder on Sunday. Chest camera is tabletop and in-view until a floor drop is tested.
+- Building-scale SLAM, loop closure, indoor GPS, or place-recognition relocalization. RETURN is a short retrace of this walk, not “take me anywhere.”
+- A physical tag / AprilTag fob. Identity is a baked detector label, not a printed marker. AirTag-style tagging is a different product.
 - CLIP crop index, vector database, LingBot-Map, Cactus Mirage, Hailo NPU, CUDA companion.
 - Distances, headings, or “stop” emitted by an LLM.
-- Cloud APIs.
+- Cloud APIs. The camera feed does not go to the internet or to a remote human. Optional `telemd` may send world-state JSON and a downscaled JPEG to a laptop on the local network so the team can monitor. Kill `telemd` and pixels stay on the Pi. The wearer path never waits on that laptop.
 - Dual-camera headset as a v1 requirement.
 - QNX 8.0 adaptive partitioning (APS). **QNX 8.0 does not support APS.** Isolation is processes, priorities, runmasks, and a supervisor. Do not pitch APS.
 
-“Open-vocab” in v1 means **no retraining**: a 16–32 noun list is baked into YOLOE-26n before Saturday. It does **not** mean arbitrary new nouns at runtime. Say that to judges.
+“Open-vocab” in v1 means **no retraining**: a 16–32 noun list is baked into YOLOE-26n before Saturday. It does **not** mean arbitrary new nouns at runtime. Say that to judges. The noun list is a product limit, not an implementation detail.
 
 ## 3. Locked decisions
 
@@ -50,7 +113,7 @@ Talked through in alignment; do not silently reopen. Review patches below are co
 
 | Call | Decision |
 |---|---|
-| Docs vs plan | This file (`docs/nathans-revision.md`) is the product/geometry/QNX source of truth. The Nov 20 plan is superseded for product/geometry (banner in that file). |
+| Docs vs plan | This file (`docs/nathans-revision.md`) is the product/geometry/QNX source of truth. The Nov 20 plan was removed from the repo. `docs/team-plan.md` is ops only. |
 | Physical tags | None. |
 | Mapping | Session-scoped 3D POI store is in v1 (objects seen this walk). Not a building map. |
 | Detector | YOLOE-26n **detect-only** static ONNX with ~16–32 baked prompts if Ultralytics export allows; otherwise note the extra seg-head cost. Runtime is QNX `onnxruntime` 1.24.4. Prompt-free 4,585-name checkpoint is stretch only, gated on loaner p95. |
@@ -58,10 +121,13 @@ Talked through in alignment; do not silently reopen. Review patches below are co
 | Walk vs reach | Walk = spoken instruction from sensors. Reach = ticks from hand-to-target distance. |
 | Sunday script | FIND-and-reach + in-view bottle WALK + `slay percept` → LOST. Ask-the-room off-camera and RETURN drop unless VO p95 exists. Do not say “RETURN is implemented” from a log. |
 | Failure demo | After a successful home, `slay percept`. HOLD then LOST. Cover-lens is the same path. |
-| Weekend approach | Session homing on five processes. No CLIP. No Laya unless Saturday is already green. |
-| Speech | Wearer may speak ordinary English. `voiced` emits `{job, candidate names}`. `guided` binds a stored object and speaks a short instruction filled from sensors, then ticks on reach. Table first; llama.cpp only on table miss; keyword fallback if the LLM is late. |
-| Form factor | Chest, one Camera Module 3, USB headset, GPIO piezo. Optional IMU does not replace VO. |
+| Weekend approach | Session homing on five processes. Optional sixth process `telemd` is read-only monitoring (JSON + downscaled JPEG to a local laptop). Kill it and the wearer hears no difference. No CLIP. No Laya unless Saturday is already green. |
+| Speech | Wearer may speak ordinary English. `voiced` emits `{job, candidate names}`. `guided` binds a stored object and speaks a short instruction filled from sensors, then ticks on reach. Table first; llama.cpp only on table miss; keyword fallback if the LLM is late. REPEAT and REJECT are first-class. |
+| Form factor | Chest, one Camera Module 3, GPIO piezo. Audio: keep at least one ear open if the kit allows (bone conduction or single-ear). Two-ear USB is the loaner fallback, not a claim that the form factor is right. Optional IMU does not replace VO. |
 | Hands (review) | MediaPipe runs in `percept`, not on the 16 ms `guided` thread. After `slay percept`, REACH uses last `d` (HOLD) then LOST. No new unprojection without depth. |
+| Off-axis ticks | REACH ticks stay findable when the hand is near in range but far in angle. Amplitude floor ~0.25, never silent. |
+| Validation | Prototype. Not BLV-tested. Floor drops out of Sunday. |
+| Remote monitor | Optional `telemd` may send JSON and a downscaled JPEG to a laptop on the local network. Kill it and pixels stay. Never cloud. |
 
 ## 4. Constraints
 
@@ -70,7 +136,7 @@ Hardware and OS:
 - Raspberry Pi 5, 8 GB, QNX 8.0 loaner image, active cooler required. Thermal throttle on core 0 kills the guidance deadline.
 - Camera Module 3 through QNX Sensor Framework (unit 3 on CAM/DISP 0, unit 4 on CAM/DISP 1). Frames are uncompressed. Confirm the loaner config (`sensor_rpi5.conf` or older `post_startup.sh`) before writing camera code.
 - **Lock published `W×H` and focus before calibration.** After Phase 0 capture, write `CAM_W`, `CAM_H`, frametype into a header every consumer compiles against. If CamAPI can lock focus, lock it as a **step-2 gate**. If it cannot, Range 1 unprojection is unknown until a tape-check at two distances; do not speak metres.
-- Audio out: USB headset. QNX has no usable 3.5 mm jack on Pi 5. GPIO piezo is the cannot-fail actuator if USB audio vanishes.
+- Audio out: USB headset is the loaner path (QNX Pi 5 has no usable 3.5 mm jack). Prefer single-ear or bone conduction so the other ear stays on the room. GPIO piezo is the cannot-fail actuator if USB audio vanishes. Do not put guidance vibration on the cane hand.
 - Optional IMU: BNO055 or ICM-20948 on I2C. Visual odometry still publishes pose; IMU only helps WALK yaw.
 
 Software (from `oss.qnx.com` unless noted):
@@ -315,7 +381,7 @@ On `percept` start: if a writer seq is odd, skip that torn blob (do not copy it)
 
 1. Read latest completed `seq_percept` and `seq_voiced` (skip if odd / mismatch). `hand` is inside the percept blob.
 2. Bind `intent` → `target` (section 9). Compute `mode` locally from `now` and `last_seen_ns` (section 6). **Do not write `mode` into shm.**
-3. Select law: STOP, LOST, REACH, WALK, RETURN (section 10).
+3. Select law: STOP, LOST, REACH, WALK, RETURN, REPEAT, REJECT (section 10).
 4. Enqueue a clip id or tick command on a non-blocking queue. A lower-priority audio thread in this process (or `MsgSend` to an audio helper) performs USB writes. GPIO piezo is written from the 16 ms thread (it must not block).
 5. Pulse supervisor.
 
@@ -345,7 +411,7 @@ Hard gate (build step 3): with cores 1–3 hogged, if synthesizer p95 misses 16 
 **voiced.** USB mic, 16 kHz mono. Wake: push-to-talk GPIO if present, otherwise energy-gate a 2 s window after a short prompt beep (beep is a clip id sent to `guided`, not a USB write from `voiced`). `whisper.cpp` tiny.en → text. Then:
 
 1. Deterministic synonym / keyword table → `{job, candidate_names[]}` (section 9).
-2. If no row hits, `llama.cpp` ~0.5B GGUF remaps to one of `{FIND, GO, RETURN, STOP}` plus candidate names from the **seen** `objects[].name` list (voiced may **read** names, not write objects). Cap ~16 tokens. Strip digits. If late or dead, write `intent.kind = NACK_UNHEARD` and return.
+2. If no row hits, `llama.cpp` ~0.5B GGUF remaps to one of `{FIND, GO, RETURN, STOP, REPEAT, REJECT}` plus candidate names from the **seen** `objects[].name` list (voiced may **read** names, not write objects). Cap ~16 tokens. Strip digits. If late or dead, write `intent.kind = NACK_UNHEARD` and return.
 3. Write `intent` only (`seq_voiced`). Return.
 
 `voiced` is forbidden from writing metres, headings, `target`, `objects[]`, `crumbs[]`, or playing USB audio. All wearer-facing clips go through `guided`.
@@ -393,7 +459,7 @@ seq_guided
               // mode is NOT stored
 ```
 
-`intent.kind`: `NONE | FIND | GO | RETURN | STOP | NACK_UNHEARD | NACK_UNSEEN | NACK_CANT`.
+`intent.kind`: `NONE | FIND | GO | RETURN | STOP | REPEAT | REJECT | NACK_UNHEARD | NACK_UNSEEN | NACK_CANT`.
 
 `FIND` and `GO` are the same guidance law (set target). Keep both so the table/LLM can record phrasing; `guided` does not distinguish them.
 
@@ -576,6 +642,8 @@ Synonym table (fast path, before the LLM):
 | phone, mobile | FIND | `phone` |
 | back, retrace, return | RETURN | (none) |
 | stop, cancel, quit | STOP | (none) |
+| again, repeat, say that | REPEAT | (none) |
+| not that, wrong one, other one | REJECT | (none) |
 
 ## 10. How we guide
 
@@ -587,7 +655,7 @@ Spoken instruction only. `guided` fills a template from LIVE `WorldState`:
 
 > “Keys. About two metres ahead, a little left.”
 
-Pre-rendered clips concatenated (numbers 0–9, “metre(s)”, “ahead”, “left”, “right”, “up”, “down”, “I lost the target”, “stopping”, “I have not seen that”, “I cannot retrace without a path”, “I did not catch that”, “I cannot help with that”). Optional llama.cpp may paraphrase **after** the numbers are filled; if it is late, play the template. Repeat ~every 3 s, not every frame. If no hand and `|p_cam|` ≲ 0.6 m, **faster repeats, still no ticks** (honor the reach lock). Treat a MediaPipe miss at tabletop as a blocking chest-mount test (section 16), not a Sunday surprise.
+Pre-rendered clips concatenated (numbers 0–9, “metre(s)”, “ahead”, “left”, “right”, “up”, “down”, “I lost the target”, “stopping”, “I have not seen that”, “I cannot retrace without a path”, “I did not catch that”, “I cannot help with that”). Optional llama.cpp may paraphrase **after** the numbers are filled; if it is late, play the template. Repeat ~every 3 s, not every frame. Keep a copy of the last filled template for `REPEAT`. If no hand and `|p_cam|` ≲ 0.6 m, **faster repeats, still no ticks** (honor the reach lock). Treat a MediaPipe miss at tabletop as a blocking chest-mount test (section 16), not a Sunday surprise.
 
 RETURN: play `crumbs` **backwards** as walk waypoints using `crumb_i` / `crumb_n`. Pop when the wearer is within ~0.6 m of the current crumb. When the named object is re-detected within ~3 m, drop crumbs and use the live track. If `pose.valid` is false, refuse: “I cannot retrace without a path.”
 
@@ -610,15 +678,19 @@ This is the **only** time ticks run.
 - Continuous tone below ~0.15 m.
 - Stereo pan from the lateral component of `(target − hand)` in camera frame.
 - 200 ms EMA of `d` so depth noise does not chatter.
-- If the hand is close in range but far off-axis, that is not hot. Tick amplitude scales with `cos(theta)` for `theta` the angle between camera +Z and the vector to target, clamped at 0.
+- If the hand is close in range but far off-axis, that is not hot. Pan hard toward the target. Tick amplitude scales with `max(0.25, cos(theta))` for `theta` the angle between camera +Z and the vector to target. Never go silent while REACH is live; losing the sound off-axis was the main failure in the 12-person BLV hand-steering study.
 
 If a hand is visible but still outside the enter threshold, stay on WALK speech. Do not start ticks across the room.
 
 HOLD while already in REACH: keep darker/slower ticks on last `d` up to 1.5 s, then LOST. Do not start REACH from HOLD (prevents phantom ticks after a turn).
 
-### STOP / LOST / NACK
+### STOP / LOST / NACK / REPEAT / REJECT
 
 Unique cue, not a faster tick. Spoken: “stopping”, “I lost the target”, “I did not catch that”, “I have not seen that”, or “I cannot help with that.” `guided` plays all of these.
+
+`REPEAT`: replay the last filled WALK template or last NACK clip. Do not re-run whisper or llama. If nothing has been spoken yet, play “I have not seen that.”
+
+`REJECT`: drop the current `target` id. Try the next unused name in `intent.candidates` that is still in `objects[]` and younger than 1.5 s. If none remain, play “I have not seen that” and clear the bind. Do not silently switch class outside the candidate set.
 
 Sunday: after a successful home, `slay percept`. Ticks or last speech HOLD, then LOST. Cover-lens is the same path. Never keep a live distance while the camera is dark.
 
@@ -655,9 +727,11 @@ Never skip step 3.
 
 Line to say:
 
-> A late or wrong beep can put a hand on a knife. AI proposes the target. A high-priority QNX thread on core 0 disposes the sound. We kill the detector; the beeps keep going, then a lost cue, never a guessed distance.
+> Beacon homes you to a named item you have already seen this session. It is a supplement to a cane, not a replacement, and it does not detect stairs or obstacles. A late or wrong beep can put a hand on the wrong object. AI proposes the target. A high-priority QNX thread on core 0 disposes the sound. We kill the detector; the beeps keep going, then a lost cue, never a guessed distance. Sighted team, not yet tested with BLV wearers.
 
 Named `oss.qnx.com` modules: `whisper.cpp`, `onnxruntime`, `tflite-runtime` / `mediapipe`. Camera via Sensor Framework. Isolation via processes, FIFO priorities, runmasks, seqlocked shm, and a supervisor, because QNX 8.0 has no APS. The kill in step 3 is the QNX beat; without it this is a CV demo.
+
+Do not demo a floor drop. Do not inventory the room. Do not call RETURN indoor navigation.
 
 ## 13. Weekend build order
 
@@ -696,13 +770,16 @@ Must exist before Sunday:
 - Tape-measure vs spoken metres at 0.5 m, 1 m, 2 m. If error > 30% at 1 m, disable spoken metres.
 - Chest-tabletop MediaPipe: hand entering from below actually produces landmark 8.
 - Synonym table against the **actual** stored label (`water` → `bottle` on the judging table).
+- REPEAT replays the last cue with no extra inference. REJECT skips a wrong bind and does not pick a class outside the candidate set.
 - If VO is in the script: three L-shaped returns; report endpoint error. If VO is out of the script, do not claim it.
 
 Only claim what was measured. If only software timestamps exist for LOST, label it “time to queue LOST.”
 
 ## 16. Hardware bill
 
-Required: Pi 5 8 GB, QNX 8.0, official PSU, active cooler, Camera Module 3 on CAM/DISP 0, USB headset (mic + headphones), GPIO piezo, chest strap or lanyard so the camera sees a tabletop and a hand entering from below.
+Required: Pi 5 8 GB, QNX 8.0, official PSU, active cooler, Camera Module 3 on CAM/DISP 0, USB audio (mic + at least one ear of playback), GPIO piezo, chest strap or lanyard so the camera sees a tabletop and a hand entering from below.
+
+Prefer single-ear or bone conduction so ambient sound stays available. Two-ear closed USB is acceptable for the loaner demo; do not pitch it as the right everyday form factor. Guidance never goes on the cane hand (no wrist haptic).
 
 Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1), Hailo-8 (do not plan the demo on it).
 
@@ -731,13 +808,21 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 | LIVE if age < 300 ms | LIVE if the latest percept bundle still contains the name, capped by `max(1.0 s, 2×p95)` |
 | One seq over all of WorldState | Per-writer seq; `/beacon_depth` exists |
 | “Say RETURN is implemented” from a log | Forbidden |
+| USB two-ear headset as the product | Loaner fallback; prefer one ear open; do not claim the form factor is right |
+| Off-axis ticks go silent | Amplitude floor ~0.25 while REACH is live |
+| STOP only | REPEAT and REJECT are first-class |
+| Implied BLV testing | Pitch: sighted hackathon prototype |
+| Camera feed never leaves the Pi | Optional `telemd` JSON + JPEG to a local laptop for team monitoring; kill `telemd` and pixels stay; never cloud |
+| Nov 20 plan as a second product doc | File removed from the repo. Ops live in `docs/team-plan.md` |
 
 ## 19. References
 
 - Neighbour design (background): `/home/nate/Projects/hackwestern13/docs/beacon-design.md`
 - QNX prize research: `/home/nate/Projects/hackwestern13/docs/QNX-research.md`
-- Open-vocab model brief: `/tmp/beacon-open-vocab-pi-models.md`
-- Spec review (BLOCK, 2026-11-21): `/tmp/beacon-spec-review.md`
+- Team ops plan: `docs/team-plan.md`
+- Accessibility research (this revision): `docs/beacon-accessibility-research.md`
+- Open-vocab model brief: `docs/beacon-open-vocab-pi-models.md`
+- Spec review (BLOCK, 2026-11-21): `docs/beacon-spec-review.md`
 - QNX 8.0 APS: not supported — https://www.qnx.com/developers/docs/8.0/com.qnx.doc.ide.userguide/topic/APS_view.html
 - QNX AI Camera App (Sensor Framework + TFLite): https://gitlab.com/qnx/projects/ai-camera-app
 - QNX hand-track workshop: https://github.com/qnx/QNX-AI-workshop
@@ -760,6 +845,8 @@ Adversarial review (`/tmp/beacon-spec-review.md`) verdict was **BLOCK**. Product
 - P1 30 s script = keys + in-view bottle + LOST; RETURN not faked
 - P1 Nov 20 plan banner-superseded
 - P2 LRU objects, NACK audio through `guided`, CamAPI focus-lock as step-2 gate, PnP convention
+- Accessibility framing (2026-11-21): one-line job, pitch language, REPEAT/REJECT, off-axis tick floor, open-ear preference, prototype disclaimer, floor drops out of Sunday
+- Reconcile with origin/main (2026-11-21): keep teammate skeleton and `docs/team-plan.md`; local spec wins; `telemd` JPEG is local-network monitoring only
 
 ## 21. Loaner bring-up (QNX image)
 
