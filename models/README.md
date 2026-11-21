@@ -21,8 +21,11 @@ Verified export on 2026-11-21 with Ultralytics 8.4.216 and checkpoint
 `yoloe-26n-seg.pt` from the 8.4.0 assets. The first `set_classes()` call
 downloads `mobileclip2_b.ts` (242 MB); that encoder is export-only. The result
 was a detect-only static ONNX, 9.3 MB, output shape `(1, 21, 2100)` for 17
-baked labels plus 4 box coordinates. `probe_frame.py` loaded it and detected
-people in `bus.jpg`.
+baked labels plus 4 box coordinates across 2100 raw proposals. The ONNX has no
+NMS; QNX must letterbox, decode, and NMS the raw output. `probe_frame.py` uses
+its own ONNX Runtime path for that by default and detected people in `bus.jpg`.
+`--yolo-runtime ultralytics` remains available as a comparison path where the
+Ultralytics package is installed.
 
 Export depth with:
 
@@ -32,9 +35,9 @@ python3 percept/tools/export_depth.py --out models/depth_anything_v2_metric_indo
 
 Verified with Transformers 5.24.0 and ONNX Runtime 1.32.0 on the laptop. The
 static input is `(1, 3, 210, 210)` and the output is metric depth `(1, 210, 210)`.
-`probe_frame.py` combined it with the baked YOLOE ONNX on `bus.jpg` and sampled
-6.1 to 10.3 m at the detected person centres. Those are model outputs that still
-need a tape check before spoken metres are allowed.
+`probe_frame.py` combined it with the raw-decoded baked YOLOE ONNX on `bus.jpg`
+and sampled 6.1 to 10.3 m at the detected person centres. Those are model outputs
+that still need a tape check before spoken metres are allowed.
 
 Hand model downloaded from:
 

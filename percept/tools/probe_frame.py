@@ -192,10 +192,87 @@ def load_yolo(path: Path):
         return YOLO(str(path))
 
 
+def load_yolo_session(path: Path):
+    import onnxruntime as ort
+
+    return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+
+
+def detect_yolo_ort(
+    frame: Any,
+    args: argparse.Namespace,
+    labels: Sequence[str],
+    yolo_affine: Affine,
+    notes: List[str],
+):
+    import cv2
+    import numpy as np
+
+    session = load_yolo_session(args.yolo)
+    letterboxed = letterbox(frame, yolo_affine, (114, 114, 114))
+    x = np.transpose(letterboxed, (2, 0, 1))[None, ...].astype(np.float32) / 255.0
+    input_name = session.get_inputs()[0].name
+    output = session.run(None, {input_name: x})[0]
+    if output.ndim != 3 or output.shape[0] != 1:
+        raise RuntimeError(f"unexpected YOLO output shape {output.shape}")
+    if output.shape[1] != len(labels) + 4:
+        raise RuntimeError(
+            f"YOLO has {output.shape[1] - 4} class logits, labels has {len(labels)}"
+        )
+
+    preds = np.transpose(output[0], (1, 0))
+    boxes = preds[:, :4]
+    scores = preds[:, 4:]
+    cls = np.argmax(scores, axis=1)
+    conf = scores[np.arange(scores.shape[0]), cls]
+    keep = np.where(conf >= args.conf)[0]
+    if keep.size == 0:
+        return []
+
+    selected_boxes = boxes[keep]
+    cx, cy, w, h = selected_boxes.T
+    net_xyxy = np.column_stack(
+        (cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0)
+    ).astype(np.float32)
+    nms = cv2.dnn.NMSBoxes(
+        net_xyxy.tolist(),
+        conf[keep].astype(np.float32).tolist(),
+        float(args.conf),
+        float(args.yolo_iou),
+    )
+    if len(nms) == 0:
+        return []
+
+    detections = []
+    for index in np.asarray(nms).reshape(-1):
+        selected = int(index)
+        row = int(keep[selected])
+        u_net = float(cx[selected])
+        v_net = float(cy[selected])
+        u_back, v_back, valid = yolo_affine.net_to_full(u_net, v_net)
+        if not valid:
+            continue
+        x1, y1, x2, y2 = net_xyxy[selected]
+        u1, v1, _ = yolo_affine.net_to_full(float(x1), float(y1))
+        u2, v2, _ = yolo_affine.net_to_full(float(x2), float(y2))
+        detections.append(
+            {
+                "name": labels[int(cls[row])],
+                "conf": float(conf[row]),
+                "bbox_px": [float(u1), float(v1), float(u2), float(v2)],
+                "center_px": [float(u_back), float(v_back)],
+                "center_net": [u_net, v_net],
+            }
+        )
+    return detections
+
+
 def detect(frame: Any, args: argparse.Namespace, labels: Sequence[str], yolo_affine: Affine, notes: List[str]):
     if args.yolo is None:
         notes.append("no --yolo: detections empty")
         return []
+    if args.yolo_runtime == "ort":
+        return detect_yolo_ort(frame, args, labels, yolo_affine, notes)
 
     model = load_yolo(args.yolo)
     result = model(frame, imgsz=args.yolo_size, conf=args.conf, verbose=False)[0]
@@ -285,10 +362,13 @@ def depth_at_full(metres: Any, affine: Affine, u: float, v: float, scale: float)
     import numpy as np
 
     u_net, v_net = affine.full_to_net(u, v)
-    if not (0 <= u_net < affine.net_w and 0 <= v_net < affine.net_h):
-        return None
     x = int(round(u_net))
     y = int(round(v_net))
+    if not (0 <= x < affine.net_w and 0 <= y < affine.net_h):
+        return None
+    _, _, in_image = affine.net_to_full(x, y)
+    if not in_image:
+        return None
     z = float(metres[y, x]) * scale
     if not math.isfinite(z) or z <= 0:
         return None
@@ -372,6 +452,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--yolo", type=Path, help="baked YOLOE model, .onnx or .pt")
     parser.add_argument("--yolo-size", type=int, default=320, help="YOLO net size")
     parser.add_argument("--conf", type=float, default=0.25, help="YOLO confidence")
+    parser.add_argument(
+        "--yolo-runtime",
+        choices=("ort", "ultralytics"),
+        default="ort",
+        help="ORT decodes raw ONNX output; ultralytics decodes and NMSes internally",
+    )
+    parser.add_argument(
+        "--yolo-iou", type=float, default=0.5, help="YOLO NMS IoU for ORT decode"
+    )
     parser.add_argument("--depth", type=Path, help="metric depth ONNX")
     parser.add_argument("--depth-size", type=int, default=210, help="depth net size")
     parser.add_argument(
