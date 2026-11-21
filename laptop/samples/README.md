@@ -9,8 +9,9 @@
 
 ## Files
 
+- [Simulator demo replay](sim-reach-lost.jsonl) — 15 seconds recorded through `fakeworld lost`, `guided`, `telemd`, and the live bridge. Watch the hand approach the keys, tracking switch from LIVE to HOLD to LOST, and the keys reappear on the left. The caption shows the reach ticks and then the continuous tone after recovery. To loop the recording, run `npm run replay:sim` from `laptop/bridge` with the dashboard open.
 - [`world.sample.json`](world.sample.json): one world-state message, mid-reach on the keys with a bottle in view.
-- [`dev-reach.jsonl`](dev-reach.jsonl): a 9 s replay made by [`make-dev-reach.js`](make-dev-reach.js) from the sample: WALK cue, reach (ticks, then continuous tone), `slay percept` at 6 s, HOLD, LOST. A stopgap so the dashboard can be built without the Pi; Matt's generator and real recordings replace it.
+- [`dev-reach.jsonl`](dev-reach.jsonl): a 9 s replay made by [`make-dev-reach.js`](make-dev-reach.js) from the sample: WALK cue, reach (ticks, then continuous tone), `slay percept` at 6 s, HOLD, LOST. A stopgap so the dashboard can be built without the Pi; Matt's generator and real recordings replace it. HOLD keeps the last objects faded (`in_latest_boxes: false`) with no frozen hand, while LOST clears them to an empty cloud (`objects: []`, no `d_m`).
 
 ## Field notes
 
@@ -21,7 +22,7 @@ Field names follow `include/beacon.h`, frozen from [`docs/nathans-revision.md`](
 | `t_ns` and every `*_ns` | `CLOCK_MONOTONIC` on the Pi | Not wall time. JSON numbers are exact up to about 104 days of uptime. |
 | `seq.*` | per-writer seqs | Always even (`telemd` skips torn reads). |
 | `mode` | recomputed by `telemd` | `LIVE` / `HOLD` / `LOST`, using the same function as `guided`. Not stored in shm. |
-| `law`, `cue`, `d_m` | recomputed by `telemd`, or published by `guided` | `law`: `STOP` / `LOST` / `REACH` / `WALK` / `RETURN` / `NONE`. `cue.caption` is display text for what the wearer hears. All three may be `null` if not available. |
+| `law`, `cue`, `d_m` | recomputed by `telemd`, or published by `guided` | `law`: `STOP` / `LOST` / `REACH` / `WALK` / `RETURN` / `NONE`. `cue.caption` is display text for what the wearer hears. Instead of `caption`, `telemd` may send `cue.clip_ids` (guided's last spoken `enum beacon_clip` ids), which the dashboard turns into text. All three may be missing or `null`. |
 | `intent.kind` | `voiced` | `NONE`, `FIND`, `GO`, `RETURN`, `STOP`, `REPEAT`, `REJECT`, `NACK_UNHEARD`, `NACK_UNSEEN`, `NACK_CANT`. REPEAT/REJECT are intents, not extra walk laws. |
 | `target`, `hand` | `guided`, `percept` | `null` when unbound or not seen. |
 | `xyz_cam` | camera frame | OpenCV: +X right, +Y down, +Z forward, metres. |
