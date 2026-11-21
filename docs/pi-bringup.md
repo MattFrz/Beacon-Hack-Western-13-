@@ -108,12 +108,13 @@ Focus-lock gate is still open. `camd` has no decoded camera frames yet, so
 `CAM_W`, `CAM_H`, and frametype are still unset in `include/beacon.h`. The C270
 remains a bring-up fallback, not the chosen camera.
 
-## 4. USB audio
+## 4. Audio output
 
-- [ ] Play one WAV through the USB headset.
-- [ ] Record two seconds from the USB mic.
-- [ ] Confirm there is no 3.5 mm playback path on this image.
-- [ ] Save the device names shown by the audio tools.
+- [x] Confirm there is no 3.5 mm playback path on this image.
+- [x] Confirm `io-snd` sees a USB control but no PCM playback device.
+- [x] Play WAV clips through the JBL Go 3 over a user-space BTstack A2DP bridge.
+- [ ] Play one WAV through a USB headset (still needed for the low-risk path).
+- [ ] Record two seconds from a USB mic (still needed; only the C270 is attached).
 
 | Device | Role | Name / path observed | Result |
 | --- | --- | --- | --- |
@@ -121,6 +122,116 @@ remains a bring-up fallback, not the chosen camera.
 | USB headset | capture | none found | C270 mic not attached |
 | 3.5 mm | playback | no 3.5 mm jack | absent, as expected on Pi 5 |
 | Audio control | control | `/dev/snd/controlC0` | present; no PCM device found |
+| JBL Go 3 | A2DP playback | `18:90:67:DE:BC:EF`, name `JBL Go 3` | SBC 44.1 kHz stereo, audible tone and chime confirmed 2026-11-21 |
+
+### 4a. Bluetooth A2DP bridge (validated 2026-11-21)
+
+Stock QNX 8.0 has no A2DP stack and no Bluetooth HCI service. The experimental
+[`Combadge-HTN/qnx-bluetooth`](https://github.com/Combadge-HTN/qnx-bluetooth)
+project ports BTstack to the Pi 5's onboard BCM7271 BT UART and exposes A2DP
+source playback through a named pipe. This is an **application-level output**,
+not a SALSA device or system-wide route.
+
+Staged on the Pi at `/data/home/qnxuser/projects/qnx-bluetooth` (no `.git`, no
+files added to this repo). Upstream only auto-connects to a device named
+`TWS Mini Speaker`; our local copy of
+`btstack-master/example/a2dp_source_demo.c` was patched to also accept
+`JBL Go 3`. That patch lives only on the Pi.
+
+Setup and verification:
+
+```sh
+ssh qnxpi
+cd /data/home/qnxuser/projects/qnx-bluetooth
+
+# Read-only board and factory-address check (passed):
+sudo ./btstack-master/port/qnx-pi5/a2dp_source_demo --check-board
+# Pi 5 factory Bluetooth address: 88:A2:9E:A9:D4:D6
+
+# Build (native cc on the Pi) and fetch verified radio firmware:
+(cd btstack-master/port/qnx-pi5 && make -j2)
+sh fetch-firmware.sh   # BCM4345C0.hcd, SHA-256 verified
+
+# Terminal 1: start the temporary radio session.
+# 'a' scans/connects, 'f' opens the PCM FIFO, 'x' plays a quiet 3 s tone.
+sudo env QNX_PCM_VOLUME_SHIFT=0 sh ./run-radio.sh
+
+# Terminal 2: play a Beacon clip after 'f'.
+python3 /path/to/beacon/guided/bt_speaker.py sounds/ahead.wav
+```
+
+The FIFO contract is **44100 Hz, 2 channels, signed 16-bit little-endian**,
+stereo frames of four bytes, one writer at a time. Use
+`QNX_PCM_VOLUME_SHIFT=0` for speech; the default divides by 32. `audio.pcm`
+must exist (`mkfifo -m 600 audio.pcm`). `guided/bt_speaker.py` converts the
+16 kHz mono clips in `sounds/` to this format using only the Python standard
+library.
+
+Observed on 2026-11-21:
+
+- Board check passed. GPIO 24–27 and 29 were `pull=pd func=INPUT`, matching
+  the launcher's guard; GPIO 28 (WL_ON) was left alone.
+- JBL discovered at RSSI −35 dBm, paired, negotiated SBC 44100 Hz stereo and
+  established the A2DP stream plus AVRCP. Reconnected from stored pairing on
+  the next run without pairing mode.
+- Quiet built-in tone audible and confirmed by user.
+- `play_pcm.py` sent a 44.1 kHz stereo chime; receiver reported
+  `PCM stopped: 63945 input frames` at gain 1/1. Audible and confirmed by user.
+- On Ctrl-C, GPIO/UART returned to the idle baseline and `.radio-lock` was
+  removed. No boot image, system config, or startup service was changed.
+
+Caveats, keep them visible:
+
+- Experimental: three upstream commits, short tests only, no long-duration or
+  reconnect stress test, polled UART backend, one historical link-supervision
+  timeout reported upstream.
+- Requires root and direct GPIO/MMIO access. The launcher is guarded for a
+  specific BCM2712 D0 board; do not bypass its checks.
+- SSP confirmation still prints a TODO, but the handler rejects any address
+  other than `device_addr`; auto mode pins that to the JBL's address.
+- No system-wide audio route: QNX SALSA here has no external PCM plugin, and
+  the available `io-snd` driver interface is not available in this image.
+- BTstack's free license is personal/non-commercial. Do not vendor it into a
+  commercial build.
+- Not on the 16 ms tick path. Keep GPIO piezo as the cannot-fail cue.
+
+### 4b. Supervisor-managed Bluetooth child (validated 2026-11-21)
+
+`supervisor/bt_audio_service.sh` is the child Beacon's supervisor should start
+as root. It runs `run-radio-auto.sh` in a restart loop and logs to
+`bt_audio.log`. It does **not** install anything in QNX boot config.
+
+The Pi-side qnx-bluetooth copy has local-only patches: accept `JBL Go 3` in the
+name filter; `QNX_AUTO` mode connects to a pinned `QNX_BT_ADDR`, opens
+`audio.pcm`, and calls `a2dp_source_start_stream()` itself; a two-second timer
+reconnects after A2DP release; the launcher cleans UART registers and stale
+locks on exit. Pinned address: `18:90:67:DE:BC:EF`. The stock upstream binary
+was rebuilt and tested separately to confirm radio failures were not caused by
+these patches.
+
+```sh
+# Started by supervisor (root), not by /boot/onboot:
+sudo sh /data/home/qnxuser/projects/qnx-bluetooth/bt_audio_service.sh
+
+# Playback while the service is up:
+python3 guided/bt_speaker.py sounds/ahead.wav
+```
+
+Validated after a Pi reboot: no key presses; service auto-connected to the
+JBL, opened the FIFO at gain 1/1, started the stream, and consumed all 63,945
+frames of the 16 kHz → 44.1 kHz converted chime. `pairings.tlv` survived the
+reboot. On a clean TERM/HUP, GPIO, UART and `.radio-lock` are restored.
+
+If an aborted session leaves the radio claimed, with no radio process running:
+
+```sh
+cd /data/home/qnxuser/projects/qnx-bluetooth
+sudo gpio-bcm set 29 op dl pd
+sudo gpio-bcm set 24-27 ip pd
+sudo gpio-bcm set 29 ip pd
+sudo rm -rf .radio-lock
+sudo ./uart_probe --idle-after-abort
+```
 
 ## 5. GPIO and piezo
 
@@ -195,3 +306,13 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | 2026-11-21 14:42 UTC | Demo-class image probes | Raw ORT YOLOE detected `bottle` at 0.36/0.29 in a PET bottle image. It detected `keychain` at 0.166 in a car-keys image only when `--conf` was lowered to 0.15; default 0.25 missed it. Real demo objects still need a live C270 probe before picking a confidence threshold. |
 | 2026-11-21 14:50 UTC | BMP frame source | Added `camd --bmp PATH` as a bring-up-only real-pixel source. It reads 32-bit BMPs, including the QNX screenshot's top-down BGRA BI_BITFIELDS format, and publishes the BMP's own dimensions with frametype marker 65535. Verified on the laptop with `/tmp/c270-frame.bmp`: `read-frames` saw 1024x600, stride 4096, 2457600 bytes. This is not a camera driver and does not set `CAM_W`, `CAM_H`, or a real camera frametype. |
 | 2026-11-21 15:39 UTC | QNX shm round-trip | Deployed the new `camd`, `read-frames`, and `dump-frame` to `/data/home/qnxuser/beacon-test/camd` and built them with the on-device `cc`. Captured a fresh C270 JPEG feed with `mjpeg_example` + `screenshot` to `/tmp/c270-qnx-frame.bmp`. On QNX, `camd --bmp` published it to `/beacon_frames`; `read-frames` saw frame_id 1, 1024x600, stride 4096, frametype 65535, 2457600 bytes. `dump-frame` wrote `/tmp/c270-qnx-roundtrip.bmp`; the laptop probe found `person` at 0.20 with `--conf 0.15` (default 0.25). This is a screen-capture round-trip, not a raw camera frame in camd. |
+| 2026-11-21 15:07 UTC | BTstack board check | Cloned `Combadge-HTN/qnx-bluetooth` to `/tmp`, copied 43 MB without `.git` to `qnxpi:/data/home/qnxuser/projects/qnx-bluetooth`, built natively with `make -j2`. Read-only `--check-board` passed with Bluetooth address `88:A2:9E:A9:D4:D6`. GPIO baseline matched the launcher guard. No radio session started yet. |
+| 2026-11-21 15:11 UTC | BT firmware | `fetch-firmware.sh` downloaded `BCM4345C0.hcd` (63806 bytes) and verified SHA-256 `51c45e77ddad91a19e96dc8fb75295b2087c279940df2634b23baf71b6dea42c`. |
+| 2026-11-21 15:14 UTC | BT scan, no JBL | Short radio session initialized the controller at 3 Mbps and scanned, but saw only a phone named `me`; the JBL was not in pairing mode. Clean exit restored GPIO/UART and removed `.radio-lock`. |
+| 2026-11-21 15:16 UTC | JBL A2DP tone | Patched the demo's speaker-name filter locally to accept `JBL Go 3`. With the speaker in pairing mode: found `18:90:67:DE:BC:EF` at −35 dBm, paired, negotiated SBC 44100 Hz stereo, established A2DP/AVRCP, played the quiet 3 s tone. User confirmed audible. Clean exit restored hardware state. |
+| 2026-11-21 15:18 UTC | Bluetooth PCM playback | Created `audio.pcm`, generated a 63945-frame 44.1 kHz stereo chime, and ran `play_pcm.py` at `QNX_PCM_VOLUME_SHIFT=0` while the radio was connected. Receiver reported all 63945 frames consumed; user confirmed audible. Radio exited 130 on intentional Ctrl-C with hardware restored. |
+| 2026-11-21 | Beacon backend/docs | Added `guided/bt_speaker.py` (stdlib-only 16 kHz mono → 44.1 kHz stereo WAV player) and documented the validated BT path in `docs/team-plan.md` and this file. Changes are local and uncommitted. |
+| 2026-11-21 15:21 UTC | Backend playback | Played a generated 23200-frame 16 kHz mono chime through `guided/bt_speaker.py`; the Pi converted it to 63945 stereo frames and the JBL stream consumed all of them. User confirmed audible. |
+| 2026-11-21 15:27–15:41 UTC | Supervisor child bring-up | Added `supervisor/run-radio-auto.sh` and `supervisor/bt_audio_service.sh` with pinned auto-connect, auto FIFO, reconnect timer and cleanup. An SSH hangup left the BT controller wedged; the stock upstream binary failed identically, so the auto patches were not the cause. Recovered GPIO/UART with `uart_probe --idle-after-abort`. |
+| 2026-11-21 15:42 UTC | Pi reboot | Rebooted with `sudo shutdown -f` (QNX shutdown defaults to reboot; `-r` is invalid). GPIO/UART came back idle and `pairings.tlv` survived. |
+| 2026-11-21 15:47 UTC | Auto service validated | With the QNX_AUTO binary restored after the stock test: supervisor child connected to `18:90:67:DE:BC:EF` without key presses, opened `audio.pcm` at gain 1/1, started the stream, and consumed 63945 frames. Hardware was restored manually after the SSH test session hangup. |

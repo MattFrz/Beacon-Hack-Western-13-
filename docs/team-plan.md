@@ -47,7 +47,7 @@ First 30 minutes: Matt and Munadir freeze `include/beacon.h` from **current** sp
 | **Nathan** | If he has the Pi: bring-up §21 steps 1–5 (packages, C270 probe on Sensor Framework, USB audio playback and record). On a laptop: bake the noun list into YOLOE-26n and export static detect-only ONNX at 320 (§9); export Depth Anything V2 Metric Indoor Small; run both plus MediaPipe hands on a webcam through ONNX Runtime to check outputs and the §7 letterbox inverses. | Models and `labels.txt` in `models/` (large files not committed); a laptop script prints boxes, metres and fingertip for one frame; bring-up log notes package versions, camera unit, `W×H`, frametype. |
 | **Munadir** | `guided` in C, QNX calls behind `#ifdef __QNX__` so it builds and runs on a laptop: read a fake target from shm with the seqlock reader, compute mode (LIVE / HOLD / LOST), pick the law (STOP, LOST, REACH, WALK, RETURN; REPEAT replays last cue, REJECT tries next candidate), enqueue clip ids and tick commands. `voiced` logic: whisper.cpp tiny.en on recorded clips, then the §9 synonym table to `{job, candidates}` including REPEAT/REJECT, written to `intent` with its own seq. | Fake target in, correct law and clip ids out at 60 Hz; stopping the fake writer gives HOLD then LOST; ten test phrases map to the right job and candidates, including "say that again" and "not that one." |
 | **Zain** | `bridge` and the 3D dashboard against a hand-written sample first, then Matt's replay files. | The dashboard plays a replay: objects at their 3D positions, hand point, target, mode banner, health panel. |
-| **Matt** | `supervisor` skeleton (spawn, heartbeats over a channel, restart with backoff, piezo fault path as a stub). `telemd` JSON format and a replay generator (a reach, a HOLD, a LOST) so Zain is never blocked. Pre-render every §10 clip as 16 kHz mono WAV in `sounds/`. | Supervisor restarts a killed dummy child on a laptop; replay files exist; every §10 clip exists. |
+| **Matt** | `supervisor` skeleton (spawn, heartbeats over a channel, restart with backoff, piezo fault path as a stub). It should also start `supervisor/bt_audio_service.sh` as root once the QNX Pi is up; the script owns the validated JBL A2DP bridge and restarts it. `telemd` JSON format and a replay generator (a reach, a HOLD, a LOST) so Zain is never blocked. Pre-render every §10 clip as 16 kHz mono WAV in `sounds/`. | Supervisor restarts a killed dummy child on a laptop; replay files exist; every §10 clip exists; BT audio child reconnects to the pinned JBL after a kill. |
 
 ## Saturday: on the Pi, in the spec's build order (§13)
 
@@ -75,7 +75,7 @@ Inventory as of Sat Nov 21, 2:30 am (Zain's `hardware_inventory.md` plus Nathan'
 | Single-board computer | Raspberry Pi 5, official Active Cooler, black case | Runs everything | USB-C power, 2× micro-HDMI, Gigabit Ethernet, 2× USB 3.0, 2× USB 2.0, Wi-Fi, Bluetooth | 40-pin GPIO and 2× MIPI CAM/DISP reachable with the lid off. No 3.5 mm audio jack. RAM size not yet confirmed (spec assumes 8 GB). Nathan has it. |
 | Storage | microSD with QNX 8.0 preloaded | The OS | microSD slot | Our only copy: back it up before experimenting. |
 | Webcam + mic | Logitech C270 | Video and voice in | USB 2.0 | 720p30, fixed focus, 55° diagonal FOV, mono mic (~1.5 m). Not on QNX's tested camera list: the §21 probe decides whether it works on Sensor Framework. |
-| Speaker | JBL Go 3 | Audio out (intended) | Bluetooth 5.1 only | **No AUX input and QNX does not provide Bluetooth audio on the Pi 5, so this cannot be Beacon's speaker.** Fine for laptop testing. |
+| Speaker | JBL Go 3 | Audio out (validated experimentally) | Bluetooth 5.1 only | No AUX input; USB-C is charge-only. Stock QNX 8 has no A2DP stack, but the `Combadge-HTN/qnx-bluetooth` BTstack port drives the onboard radio and plays SBC 44.1 kHz stereo through an `audio.pcm` FIFO. Validated 2026-11-21. Root, board-specific, experimental; keep piezo/USB as fallback. |
 | Display cable | PiShop micro-HDMI to HDMI (CS-PID-301), 3 ft | Monitor for debugging | micro-HDMI | |
 | Ultrasonic sensor | (Nathan's roommate; model TBC) | Optional extra: tape-check depth or a straight-ahead distance | GPIO | Not in the spec. If it is an HC-SR04, its 5 V echo needs a divider (1 kΩ + 2 kΩ) before a Pi pin. |
 | IMU | (Nathan; model TBC) | WALK yaw help | I²C | The spec's optional IMU (§4). |
@@ -84,7 +84,7 @@ Inventory as of Sat Nov 21, 2:30 am (Zain's `hardware_inventory.md` plus Nathan'
 
 | Item | Why | Spec ref |
 | --- | --- | --- |
-| **USB audio out**: a USB headset with mic (preferred), or a USB speaker, or a USB audio adapter plus wired earbuds | The JBL is Bluetooth-only, so without this Beacon is silent | §4, §16 |
+| **USB audio out** (optional if the experimental BT bridge is used): USB headset with mic, USB speaker, or USB audio adapter + wired earbuds | Stock QNX still exposes no PCM device. The BTstack bridge is application-level and experimental; USB audio remains the low-risk system-wide path and the mic source. | §4, §16 |
 | Piezo buzzer + NPN transistor (e.g. 2N2222) + 1 kΩ resistor | The cannot-fail actuator, driven through a transistor | §5.1 |
 | Push button | Push-to-talk for `voiced` | §16 optional |
 | Female-female jumper wires, small breadboard | Piezo, button and sensors to GPIO | |
@@ -94,7 +94,7 @@ Inventory as of Sat Nov 21, 2:30 am (Zain's `hardware_inventory.md` plus Nathan'
 
 ## If parts are late: camera and mic only
 
-If Nathan's probe shows the C270 on Sensor Framework, it stands in until a Camera Module 3 arrives, and its mic stands in for the headset mic. Audio out still needs a USB device: the JBL Go 3 is Bluetooth-only and QNX has no Bluetooth audio on the Pi 5. Everything up to build step 5 can be developed that way; the piezo path waits for the buzzer and transistor. Do not write C270 `W×H` into `beacon.h`. Step 2 Saturday still probes Camera Module 3.
+If Nathan's probe shows the C270 on Sensor Framework, it stands in until a Camera Module 3 arrives, and its mic stands in for the headset mic. Audio out has two options: the validated experimental BTstack bridge to the JBL Go 3, or a USB audio device for the low-risk path. QNX 8 still has no stock Bluetooth audio stack. Everything up to build step 5 can be developed either way; the piezo path waits for the buzzer and transistor. Do not write C270 `W×H` into `beacon.h`. Step 2 Saturday still probes Camera Module 3.
 
 ## Laptop dashboard (additive, never on the wearer's path)
 
