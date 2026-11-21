@@ -1,4 +1,4 @@
-# Pi development workflow — QNX 8.0 on Raspberry Pi 5
+# Pi development workflow - QNX 8.0 on Raspberry Pi 5
 
 How to build, deploy, debug and recover the chest-worn Pi. Product, geometry,
 and QNX contracts live in [`nathans-revision.md`](nathans-revision.md); this
@@ -41,19 +41,19 @@ ssh qnxpi 'sudo -n shutdown -r now'        # or just power-cycle
 | Host | `ssh qnxpi` → `qnxuser@10.80.55.25` |
 | Auth | key (`~/.ssh/id_ed25519`), installed in `/home/qnxuser/.ssh/authorized_keys` |
 | Privilege | `qnxuser` is in `sudo`; `sudo -n` works without a password |
-| Hostname | `qnxpi` — hardcoded by `setconf _CS_HOSTNAME qnxpi` in `slm.cfg` |
+| Hostname | `qnxpi` - hardcoded by `setconf _CS_HOSTNAME qnxpi` in `slm.cfg` |
 | Wi‑Fi MAC | `88:a2:9e:a9:d4:d4` |
 | Network | `cybernet` phone hotspot, `10.80.55.0/24`, gw `10.80.55.90` |
 
 **The alias is IP-pinned** (`/etc/nixos/home/nate/ssh.nix`). mDNS does not work
 reliably on the laptop: `avahi-resolve-host-name -4 qnxpi.local` returns the
-right address, but glibc never sees it — `systemd-resolved` reports per-link
+right address, but glibc never sees it - `systemd-resolved` reports per-link
 `-mDNS`, the `nss-mdns` module fails to load, and `qnxpi.local` then falls
 through the `home.lab` search domain and resolves to an unrelated tailnet host.
 If the lease changes, read it off the Pi with `ifconfig bcm0` and update the
 alias.
 
-Set a real password before demo day — `passwd` must be run **interactively** on
+Set a real password before demo day - `passwd` must be run **interactively** on
 the device (piping into `ssh -tt` does not work; it hangs at `Old Password:`):
 
 ```sh
@@ -73,13 +73,13 @@ Until you do, anyone on the hotspot can log in as `qnxuser` (and `sudo` to root)
 | `/data` | QNX6 partition, 19 GB, ~17 GB free | **yes** | **no** |
 | `/boot` | FAT boot partition, visible on a PC | yes | no |
 | `/usr` (`/system`) | QNX6 system partition; `/etc` → `/system/etc` | yes | no |
-| `/dev/shmem` | RAM, lost on reboot | no | — |
+| `/dev/shmem` | RAM, lost on reboot | no | - |
 
 **Put your code in `/data`.** It is the only large writable space and it is where
 `/home` lives (`/home` → `/data/home`, so `/home/qnxuser` = `/data/home/qnxuser`).
 
 `/etc` being a symlink to `/system/etc` means editing config feels permanent, but
-it lives on the *system* partition — a reflash wipes it, and it is shared with
+it lives on the *system* partition - a reflash wipes it, and it is shared with
 QNX's own files. Prefer `/data` for anything you own.
 
 The IFS itself cannot be rebuilt here: that needs `mkifs` from the QNX SDP, which
@@ -89,7 +89,7 @@ this host does not have. Treat `qnx_sdp.ifs` as immutable.
 
 ## 4. Deploying code
 
-The device has a real toolchain — `gcc`, `make`, `git`, `python3.14`, `pip3`,
+The device has a real toolchain - `gcc`, `make`, `git`, `python3.14`, `pip3`,
 `rsync`, `scp`, `ssh`, and `python3 -m venv` works.
 
 Two viable loops:
@@ -119,16 +119,16 @@ There is no systemd. Use these instead:
 | Check an interface | `ifconfig bcm0` |
 | Check routes | `netstat -rn` |
 
-To make a process survive your SSH session, detach it — `nohup`-style shell
+To make a process survive your SSH session, detach it - `nohup`-style shell
 backgrounding is fine, but a process started from an SSH session dies when the
 session closes unless it is genuinely detached. Simplest reliable pattern for
 demo: start `supervisor` from a snippet after `io-audio`, Sensor Framework,
 and `/usr` (QSTI `post_startup` / an SLM component ordered after those). Do
-**not** launch Beacon from `/boot/onboot` — that script runs before pipes and
+**not** launch Beacon from `/boot/onboot` - that script runs before pipes and
 `/usr` exist (spec §5.1). `/boot/onboot` stays for Wi-Fi and hostname only.
 
 `slogger2` writes to per-buffer logs; `slog2info` reads them. If a process exits
-instantly, `slog2info` usually says why within a couple of seconds — check there
+instantly, `slog2info` usually says why within a couple of seconds - check there
 before adding print statements.
 
 ---
@@ -181,12 +181,12 @@ cat /boot/wpa_supplicant.conf >/data/var/etc/settings/wpa_supplicant.conf
 ```
 
 Anything that needs pipes, `/usr` or shell utilities should go in a **background
-child** that sleeps past the boot (`sleep 45; ...) &`) — by then both exist.
+child** that sleeps past the boot (`sleep 45; ...) &`) - by then both exist.
 
 ### Write diagnostics to `/boot`
 
 `/boot` is a writable FAT partition, so the device can leave its own logs where a
-PC can read them — no serial console needed:
+PC can read them - no serial console needed:
 
 ```sh
 exec >>/boot/onboot.log 2>&1
@@ -232,7 +232,7 @@ also fires as a second line of defence:
 touch -d '2030-01-01 00:00:00' /path/to/mounted/boot/{wpa_supplicant.conf,network}
 ```
 
-`IP_ADDR` is **Ethernet-only** — it does nothing for Wi‑Fi, which always gets its
+`IP_ADDR` is **Ethernet-only** - it does nothing for Wi‑Fi, which always gets its
 address from `dhcpcd` on `bcm0`.
 
 Other facts worth having: the Wi‑Fi interface is **`bcm0`** (not `wlan0`), driven
@@ -255,7 +255,7 @@ pcieport 0000:00:1c.0: retraining failed
 mmc0: error -110 doing runtime resume
 ```
 
-After that the card is unreadable until a **cold boot** — `pci rescan`, unbind/rebind
+After that the card is unreadable until a **cold boot** - `pci rescan`, unbind/rebind
 and bridge resets all fail to bring it back. With a USB reader there is none of
 this: the card appears as `/dev/sdX` and stays usable.
 
@@ -275,7 +275,7 @@ sync && udisksctl unmount -b /dev/sda1
 ```
 
 The boot partition also contains three leftover files from a previous Raspberry
-Pi OS install — `user-data`, `network-.con`, `cmdline.txt` with a Linux mac80211
+Pi OS install - `user-data`, `network-.con`, `cmdline.txt` with a Linux mac80211
 regulatory setting. They are inert for QNX; do not "fix" them.
 
 ---
@@ -285,7 +285,7 @@ regulatory setting. They are inert for QNX; do not "fix" them.
 When the Pi does not appear on the network, work down this list before guessing:
 
 1. **Is it on the hotspot?** Check the phone's client list for `88:a2:9e:a9:d4:d4`.
-2. **Does it have a lease?** `ifconfig bcm0` — `169.254.x.x` means association
+2. **Does it have a lease?** `ifconfig bcm0` - `169.254.x.x` means association
    without DHCP (usually stale settings, §7).
 3. **Did the boot hook run?** Read `/boot/onboot.log` from the card on a PC.
    A 49-byte log containing `can't create pipe` means §6 was violated.
@@ -293,7 +293,7 @@ When the Pi does not appear on the network, work down this list before guessing:
    `/boot/watchdog.log`.
 5. **Serial console** as the last resort: `enable_uart=1` is set in `config.txt`,
    `devc-serpl011-rpi5` runs at `115200` on the 40-pin header, and `tty-login.sh`
-   gives a login prompt. Wire USB‑TTL to **pin 8 (TX), pin 10 (RX), pin 6 (GND)** —
+   gives a login prompt. Wire USB‑TTL to **pin 8 (TX), pin 10 (RX), pin 6 (GND)** -
    this shows the full boot, including everything `onboot` cannot log.
 
 ---
@@ -320,5 +320,5 @@ When the Pi does not appear on the network, work down this list before guessing:
 - [ ] Processes start from a boot hook or explicit script, not your SSH session
 - [ ] `slog2info` checked, not just stdout
 - [ ] Card flashed from a **USB** reader, `grep -c $'\r'` returns 0
-- [ ] Cold-boot tested end to end — not just `slay` + restart
+- [ ] Cold-boot tested end to end - not just `slay` + restart
 - [ ] Spare card flashed and labeled
