@@ -6,8 +6,9 @@ full-frame pixels plus metric depth. It is a stand-in for percept on a laptop,
 not a QNX process.
 
 The models are optional so the affine math can be checked before export. Without
---depth there are no metres. Without --calib there is no xyz_cam. Nothing here
-guesses intrinsics or depth scale.
+--depth there are no metres. Without --calib or --fov there is no xyz_cam.
+--fov guesses a pinhole from horizontal field of view; it does not replace a
+tape check on depth.
 
 Example:
 
@@ -16,7 +17,7 @@ Example:
       --yolo models/yoloe26n_320.onnx \
       --depth models/depth_anything_v2_metric_indoor_small.onnx \
       --hands --hand-model models/hand_landmarker.task \
-      --calib models/calib.json
+      --fov
 
 By default, ONNX Runtime decodes the raw YOLOE output: letterbox to 320 px, run
 the static ONNX, decode centre/size boxes, NMS, then inverse-letterbox centres
@@ -72,6 +73,23 @@ class Calibration:
     cy: float
     width: Optional[int] = None
     height: Optional[int] = None
+
+
+def guess_calibration(frame_w: int, frame_h: int, hfov_deg: float) -> Calibration:
+    """Pinhole from frame size and a guessed horizontal FOV. Not a chessboard."""
+    if frame_w <= 0 or frame_h <= 0:
+        raise ValueError("frame size must be positive")
+    if not math.isfinite(hfov_deg) or hfov_deg <= 0.0 or hfov_deg >= 180.0:
+        raise ValueError("fov must be between 0 and 180 degrees")
+    fx = float(frame_w) / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
+    return Calibration(
+        fx=fx,
+        fy=fx,
+        cx=float(frame_w) / 2.0,
+        cy=float(frame_h) / 2.0,
+        width=int(frame_w),
+        height=int(frame_h),
+    )
 
 
 def make_affine(full_w: int, full_h: int, net_w: int, net_h: int) -> Affine:
@@ -176,6 +194,26 @@ def load_calibration(path: Optional[Path], frame_w: int, frame_h: int, notes: Li
             "calibration W/H differs from captured frame; re-calibrate at this resolution"
         )
     return calibration
+
+
+def resolve_calibration(
+    args: argparse.Namespace, frame_w: int, frame_h: int, notes: List[str]
+) -> Optional[Calibration]:
+    """Prefer --calib JSON; otherwise a guessed --fov pinhole; else omit xyz_cam."""
+    if getattr(args, "calib", None) is not None:
+        return load_calibration(args.calib, frame_w, frame_h, notes)
+    fov = getattr(args, "fov", None)
+    if fov is not None:
+        try:
+            calibration = guess_calibration(frame_w, frame_h, float(fov))
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        notes.append(
+            f"guessed --fov {float(fov):g}: xyz_cam from pinhole, not chessboard"
+        )
+        return calibration
+    notes.append("no --calib: xyz_cam omitted")
+    return None
 
 
 def tensor_scalar(value: Any) -> float:
@@ -491,6 +529,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--calib", type=Path, help="JSON with fx, fy, cx, cy, and optional W, H"
     )
+    parser.add_argument(
+        "--fov",
+        type=float,
+        nargs="?",
+        const=66.0,
+        default=None,
+        help="horizontal FOV degrees for a guessed pinhole when --calib is omitted; bare --fov uses 66",
+    )
     return parser
 
 
@@ -531,7 +577,7 @@ def probe_once(
     notes: List[str] = []
     yolo_affine = make_affine(frame_w, frame_h, args.yolo_size, args.yolo_size)
     depth_affine = make_affine(frame_w, frame_h, args.depth_size, args.depth_size)
-    calibration = load_calibration(args.calib, frame_w, frame_h, notes)
+    calibration = resolve_calibration(args, frame_w, frame_h, notes)
 
     timings_ms: Dict[str, Optional[float]] = {"yolo": None, "depth": None}
     started_ns = time.perf_counter_ns()
