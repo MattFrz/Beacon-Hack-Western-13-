@@ -722,6 +722,52 @@ class UdpEmitTest(unittest.TestCase):
         self.assertEqual(self.run_with_world(["--udp", self.target]), 0)
         self.assertEqual(json.loads(self.receive_payload()), self.world)
 
+    def test_bare_udp_sends_only_world_datagram(self):
+        prepared = (
+            [], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0, 0, 0),
+            contextlib.nullcontext(),
+        )
+        wanted = []
+
+        def fake_probe_once(*_args, **kwargs):
+            wanted.append(kwargs.get("want_jpeg", False))
+            return make_probe([make_detection("keys", [0.1, 0.2, 0.5])], t_ns=T_NS)
+
+        with patch.object(probe_frame, "prepare", return_value=prepared), patch.object(
+            probe_frame, "probe_once", side_effect=fake_probe_once
+        ), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                probe_to_world_module.main(["--udp", self.target, "--once"]), 0
+            )
+
+        self.assertEqual(wanted, [False])
+        self.assertEqual(json.loads(self.receive_payload()), self.world)
+        self.receiver.settimeout(0.05)
+        with self.assertRaises(socket.timeout):
+            self.receiver.recvfrom(65535)
+
+    def test_jpeg_every_zero_is_parser_error_with_or_without_jpeg(self):
+        for bad in ("0", "-1"):
+            for extra in ([], ["--jpeg"]):
+                with self.subTest(bad=bad, extra=extra):
+                    with patch.object(
+                        probe_to_world_module, "emit_lines"
+                    ) as emit_lines_mock:
+                        with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                            with self.assertRaises(SystemExit):
+                                probe_to_world_module.main(
+                                    [
+                                        "--udp", self.target,
+                                        "--jpeg-every", bad, *extra,
+                                    ]
+                                )
+                    emit_lines_mock.assert_not_called()
+                    self.assertIn("--jpeg-every", stderr.getvalue())
+
+        self.receiver.settimeout(0.05)
+        with self.assertRaises(socket.timeout):
+            self.receiver.recvfrom(65535)
+
     def test_missing_out_and_udp_is_error(self):
         with patch.object(probe_to_world_module, "emit_lines") as emit_lines_mock:
             with contextlib.redirect_stderr(io.StringIO()) as stderr:

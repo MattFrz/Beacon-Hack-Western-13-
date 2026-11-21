@@ -383,7 +383,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.jpeg and args.udp is None:
         parser.error("--jpeg requires --udp: raw JPEG bytes have no JSONL form")
-    if args.jpeg and args.jpeg_every < 1:
+    if args.jpeg_every < 1:
         parser.error("--jpeg-every must be at least 1")
     if args.out is None and args.udp is None:
         parser.error("one of --out or --udp is required")
@@ -418,7 +418,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     return
                 sock.sendto(jpeg, udp_target)
 
-            for world in emit_lines(args, on_video=send_video if sock is not None else None):
+            on_video = send_video if sock is not None and args.jpeg else None
+            for world in emit_lines(args, on_video=on_video):
                 line = json.dumps(world, separators=(",", ":"), sort_keys=False)
                 if out is not None:
                     out.write(line)

@@ -9,6 +9,7 @@ import io
 import json
 import math
 import shutil
+import socket
 import sys
 import tempfile
 import types
@@ -523,6 +524,35 @@ class ProbeRuntimeTest(unittest.TestCase):
         self.assertGreaterEqual(with_jpeg["timings_ms"]["jpeg"], 0.0)
         self.assertEqual(encode_calls, [((480, 640, 3), 320, 60)])
 
+    def test_probe_once_cycle_includes_jpeg_encoding_time(self):
+        args = self.make_args()
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        clock = {"ns": 0}
+
+        def tick():
+            clock["ns"] += 1_000  # 1 us per measured stage
+            return clock["ns"]
+
+        def fake_encode(_frame, _width, _quality):
+            clock["ns"] += 50_000_000  # 50 ms spent inside the encoder
+            return b"\xff\xd8slow"
+
+        with (
+            synthetic_probe_modules(),
+            self.fake_model_calls(),
+            patch.object(probe_frame.time, "perf_counter_ns", side_effect=tick),
+            patch.object(probe_frame, "encode_preview", side_effect=fake_encode),
+            resources,
+        ):
+            probe = probe_frame.probe_once(
+                args, labels, mean, std, pad, resources, want_jpeg=True
+            )
+
+        self.assertGreaterEqual(probe["timings_ms"]["jpeg"], 50.0)
+        self.assertGreaterEqual(
+            probe["timings_ms"]["cycle"], probe["timings_ms"]["jpeg"]
+        )
+
     def test_video_is_mutually_exclusive_with_image(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
@@ -596,6 +626,58 @@ class ProbeRuntimeTest(unittest.TestCase):
             [world["objects"][0]["frame_id"] for world in worlds], capture_times
         )
         self.assertEqual([world["seq"]["percept"] for world in worlds], [0, 2, 4])
+
+    def test_video_and_jpeg_emit_world_and_preview_until_eof(self):
+        video = self.root / "clip.mp4"
+        video.touch()
+        receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        receiver.bind(("127.0.0.1", 0))
+        receiver.settimeout(5.0)
+        self.addCleanup(receiver.close)
+        target = f"127.0.0.1:{receiver.getsockname()[1]}"
+        argv = [
+            "--labels", str(self.labels),
+            "--yolo", str(self.yolo),
+            "--depth", str(self.depth),
+            "--hands", "--hand-model", str(self.hand),
+            "--fov",
+            "--video", str(video),
+            "--udp", target,
+            "--jpeg", "--jpeg-every", "2",
+        ]
+        prepared = probe_frame.prepare(probe_to_world_module.build_parser().parse_args(argv))
+        frames = [
+            np.full((480, 640, 3), index + 1, dtype=np.uint8) for index in range(3)
+        ]
+        previews = [b"\xff\xd8frame0", b"\xff\xd8frame2"]
+
+        with (
+            synthetic_video_modules(frames),
+            self.fake_model_calls(),
+            patch.object(probe_frame, "prepare", return_value=prepared),
+            patch.object(
+                probe_frame, "encode_preview", side_effect=previews
+            ) as encode_mock,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(probe_to_world_module.main(argv), 0)
+
+        payloads = [receiver.recvfrom(65535)[0] for _ in range(5)]
+        self.assertEqual(payloads[1], previews[0])
+        self.assertEqual(payloads[4], previews[1])
+        worlds = [json.loads(payloads[index]) for index in (0, 2, 3)]
+        self.assertEqual(
+            [world["seq"]["percept"] for world in worlds], [0, 2, 4]
+        )
+        self.assertEqual(
+            [world["objects"][0]["frame_id"] for world in worlds],
+            [world["t_ns"] for world in worlds],
+        )
+        self.assertEqual(encode_mock.call_count, 2)
+        self.assertTrue(FakeFileCapture.instances[0].released)
+        receiver.settimeout(0.05)
+        with self.assertRaises(socket.timeout):
+            receiver.recvfrom(65535)
 
     def test_probe_unproject_receives_scaled_z_once(self):
         args = self.make_args("--depth-scale", "0.5")

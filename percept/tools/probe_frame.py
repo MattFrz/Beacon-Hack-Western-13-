@@ -843,7 +843,6 @@ def probe_once(
     )
     if args.hands:
         timings_ms["hands"] = (time.perf_counter_ns() - started_ns) / 1e6
-    timings_ms["cycle"] = (time.perf_counter_ns() - cycle_started_ns) / 1e6
 
     result: Dict[str, Any] = {
         "frame_id": frame_id,
@@ -885,6 +884,7 @@ def probe_once(
         if jpeg is not None:
             result["jpeg"] = jpeg
 
+    timings_ms["cycle"] = (time.perf_counter_ns() - cycle_started_ns) / 1e6
     return result
 
 
