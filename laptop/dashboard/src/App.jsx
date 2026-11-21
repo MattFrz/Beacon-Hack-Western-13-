@@ -1,0 +1,139 @@
+import { Highlight, HighlightItem } from '@animate-ui/react/primitives/effects/highlight';
+import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
+import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
+import { useState } from 'react';
+import Scene from './Scene.jsx';
+import Scrubber from './Scrubber.jsx';
+import { useTelemetry } from './useTelemetry.js';
+
+const MODES = ['LIVE', 'HOLD', 'LOST'];
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const msAgo = (now, then) => (isNum(now) && isNum(then) ? (now - then) / 1e6 : null);
+const panWord = (p) => (!isNum(p) ? '–' : p < -0.1 ? 'left' : p > 0.1 ? 'right' : 'centre');
+
+// A live number whose digits roll to each new value; '–' when telemetry has none.
+function Num({ value, digits = 0, unit = '' }) {
+  if (!isNum(value)) return '–';
+  return (
+    <>
+      <SlidingNumber number={value} decimalPlaces={digits} initiallyStable />
+      {unit}
+    </>
+  );
+}
+
+// Words that change (law, intent, spoken sentence) roll in letter by letter.
+function Rolling({ text, stagger = 0.03 }) {
+  if (!text) return '–';
+  return <RollingText key={text} text={text} transition={{ duration: 0.3, delay: stagger, ease: 'easeOut' }} />;
+}
+
+export default function App() {
+  const { log, world, frameUrl, connected, stale } = useTelemetry();
+  const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
+  const paused = cursor != null;
+  const shown = paused ? log.items[Math.max(cursor, log.first) - log.first]?.world : world;
+  const hasData = paused ? Boolean(shown) : Boolean(connected && !stale && world);
+  const w = shown ?? {};
+  const mode = hasData && MODES.includes(w.mode) ? w.mode : null;
+  const health = w.health ?? {};
+
+  return (
+    <div className="app">
+      <header>
+        <Highlight mode="parent" controlledItems value={mode} click={false} className="mode-hl" containerClassName="modes">
+          {MODES.map((m) => (
+            <HighlightItem key={m} value={m} activeClassName={`hl-${m}`}>
+              <div className={m === mode ? 'mode on' : 'mode'}>{m}</div>
+            </HighlightItem>
+          ))}
+        </Highlight>
+        {paused ? <div className="paused-pill">PAUSED</div> : !hasData && <div className="nodata">NO DATA</div>}
+        <div>
+          Law <b><Rolling text={w.law} /></b>
+        </div>
+        <div>
+          Intent <b><Rolling text={w.intent?.kind} /></b> {w.intent?.candidates?.join(', ')}
+        </div>
+        <div className="link">
+          {connected ? 'bridge connected' : 'bridge not running: start it in laptop/bridge (npm run replay:dev)'}
+        </div>
+      </header>
+
+      <main className={hasData ? '' : 'stale'}>
+        <Scene world={shown} />
+        <Caption law={w.law} cue={w.cue} />
+      </main>
+      <Scrubber log={log} cursor={cursor} setCursor={setCursor} />
+
+      <aside>
+        <h2>Target</h2>
+        {w.target ? (
+          <dl>
+            <dt>Name</dt>
+            <dd>{w.target.name}</dd>
+            <dt>Hand to target</dt>
+            <dd><Num value={w.d_m} digits={2} unit=" m" /></dd>
+            <dt>From camera</dt>
+            <dd><Num value={w.target.xyz_cam && Math.hypot(...w.target.xyz_cam)} digits={2} unit=" m" /></dd>
+            <dt>Last seen</dt>
+            <dd><Num value={msAgo(w.t_ns, w.target.last_seen_ns)} unit=" ms ago" /></dd>
+            <dt>Confidence</dt>
+            <dd><Num value={w.target.conf} digits={2} /></dd>
+          </dl>
+        ) : (
+          <p className="muted">No target bound</p>
+        )}
+
+        <h2>Processes</h2>
+        <ul className="procs">
+          {Object.entries(health.procs ?? {}).map(([name, p]) => (
+            <li key={name} className={p.alive ? 'up' : 'down'}>
+              <span>{name}</span>
+              {/* plain text: heartbeat ages jitter every message, so rolling digits would never settle */}
+              <span>{p.alive ? `beat ${isNum(msAgo(w.t_ns, p.hb_ns)) ? Math.round(msAgo(w.t_ns, p.hb_ns)) : '–'} ms ago` : 'down'}</span>
+            </li>
+          ))}
+        </ul>
+
+        <h2>Timing</h2>
+        <dl>
+          <dt>YOLO / depth</dt>
+          <dd><Num value={health.last_yolo_ms} /> / <Num value={health.last_depth_ms} unit=" ms" /></dd>
+          <dt>Vision p95</dt>
+          <dd><Num value={health.p95_vision_ns / 1e6} unit=" ms" /></dd>
+          <dt>16 ms misses</dt>
+          <dd><Num value={health.timing?.misses_16ms} /></dd>
+          <dt>Worst late</dt>
+          <dd><Num value={health.timing?.worst_late_us} unit=" µs" /></dd>
+        </dl>
+
+        {/* video is not kept in history, so a paused view never shows a live frame next to a past scene */}
+        {frameUrl && !paused && (
+          <>
+            <h2>Camera</h2>
+            <img src={frameUrl} alt="Latest downscaled camera frame from telemd" />
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+// What the wearer hears right now: the spoken sentence, or the reach ticks.
+function Caption({ law, cue }) {
+  if (cue?.caption) {
+    return (
+      <p className="caption">
+        “<Rolling text={cue.caption} stagger={0.012} />”
+      </p>
+    );
+  }
+  if (law !== 'REACH') return null;
+  return (
+    <p className="caption">
+      {cue?.continuous ? 'Continuous tone' : <>Ticks <Num value={cue?.tick_hz} digits={1} unit=" Hz" /></>}, pan{' '}
+      {panWord(cue?.pan)}
+    </p>
+  );
+}

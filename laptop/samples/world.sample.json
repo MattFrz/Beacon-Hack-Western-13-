@@ -4,25 +4,25 @@
   "seq": { "percept": 1842, "voiced": 12, "guided": 30716 },
   "mode": "LIVE",
   "law": "REACH",
-  "cue": { "caption": "Keys. About half a metre ahead, a little right.", "clip_ids": [], "tick_hz": 6.5, "pan": 0.3, "continuous": false },
+  "cue": { "caption": null, "clip_ids": [], "tick_hz": 6.4, "pan": -0.67, "continuous": false },
   "intent": { "kind": "FIND", "candidates": ["keys", "keychain"], "t_ns": 509800000000 },
   "target": {
     "id": 3, "name": "keys",
-    "xyz_cam": [0.12, 0.35, 0.55], "xyz_world": [0.10, 0.36, 0.57],
+    "xyz_cam": [0.12, 0.15, 0.55], "xyz_world": [0.10, 0.16, 0.57],
     "conf": 0.81, "last_seen_ns": 512100000000, "frame_id": 9211, "pose_epoch": 1
   },
-  "hand": { "xyz_cam": [0.20, 0.42, 0.40], "xyz_world": [0.18, 0.43, 0.42], "conf": 0.92, "t_ns": 512100000000, "frame_id": 9211 },
-  "d_m": 0.18,
+  "hand": { "xyz_cam": [0.22, 0.13, 0.38], "xyz_world": [0.20, 0.14, 0.40], "conf": 0.92, "t_ns": 512100000000, "frame_id": 9211 },
+  "d_m": 0.198,
   "objects": [
     {
       "id": 3, "name": "keys",
-      "xyz_cam": [0.12, 0.35, 0.55], "xyz_world": [0.10, 0.36, 0.57],
+      "xyz_cam": [0.12, 0.15, 0.55], "xyz_world": [0.10, 0.16, 0.57],
       "bbox_px": [702, 548, 790, 610], "conf": 0.81,
       "last_seen_ns": 512100000000, "frame_id": 9211, "pose_epoch": 1, "in_latest_boxes": true
     },
     {
       "id": 5, "name": "bottle",
-      "xyz_cam": [-0.40, 0.10, 1.30], "xyz_world": [-0.42, 0.11, 1.33],
+      "xyz_cam": [-0.40, -0.25, 1.30], "xyz_world": [-0.42, -0.24, 1.32],
       "bbox_px": [310, 280, 390, 470], "conf": 0.88,
       "last_seen_ns": 512100000000, "frame_id": 9211, "pose_epoch": 1, "in_latest_boxes": true
     }
