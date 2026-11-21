@@ -7,12 +7,13 @@ the newest slot. This test writes a high id into a non-newest slot, restarts
 camd, and checks that the published id is high_id + 1.
 
 This uses the host-global `/dev/shm/beacon_frames`, backs up any existing
-segment, and restores it on exit. Do not run it while a real camd, percept, or
-telemd is using the ring.
+file contents, and restores those contents on exit. Restore does not handle
+live consumers, ownership changes, SIGKILL, or power loss. Do not run it while
+a real camd, percept, or telemd is using the ring.
 
-Run from the repo root after `make -C camd`:
+Run from the repo root:
 
-    python3 camd/tools/test_frame_id_seed.py
+    make -C camd test-frame-id-seed
 """
 
 from __future__ import annotations
@@ -83,7 +84,9 @@ def verify_layout() -> None:
         "frame_max_bytes": FRAME_MAX_BYTES,
         "sizeof_frames": ctypes.sizeof(Frames),
         "sizeof_slot": ctypes.sizeof(FrameSlot),
+        "offsetof_newest_slot": Frames.newest_slot.offset,
         "offsetof_slot": Frames.slot.offset,
+        "offsetof_seq": FrameSlot.seq.offset,
         "offsetof_frame_id": FrameSlot.frame_id.offset,
     }
     for key, want in expected.items():

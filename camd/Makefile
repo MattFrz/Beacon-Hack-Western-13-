@@ -2,7 +2,7 @@ CC ?= cc
 CFLAGS ?= -O2 -Wall -Wextra -std=c11 -I../include
 LDLIBS ?= -lpthread
 
-.PHONY: all run-stub one read-frames deadline-test test-frame-id-seed layout-probe clean
+.PHONY: all run-stub one read-frames deadline-test test-frame-id-seed clean
 
 all: camd read-frames deadline-test
 

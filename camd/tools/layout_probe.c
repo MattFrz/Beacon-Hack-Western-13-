@@ -13,7 +13,9 @@ int main(void)
     printf("frame_max_bytes=%zu\n", (size_t)BEACON_FRAME_MAX_BYTES);
     printf("sizeof_frames=%zu\n", sizeof(beacon_frames_t));
     printf("sizeof_slot=%zu\n", sizeof(beacon_frame_slot_t));
+    printf("offsetof_newest_slot=%zu\n", offsetof(beacon_frames_t, newest_slot));
     printf("offsetof_slot=%zu\n", offsetof(beacon_frames_t, slot));
+    printf("offsetof_seq=%zu\n", offsetof(beacon_frame_slot_t, seq));
     printf("offsetof_frame_id=%zu\n", offsetof(beacon_frame_slot_t, frame_id));
     return 0;
 }
