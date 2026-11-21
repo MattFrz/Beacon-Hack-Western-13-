@@ -1,6 +1,9 @@
 CC ?= cc
 CPPFLAGS += -I../include -D_POSIX_C_SOURCE=200809L
 CFLAGS += -std=c11 -Wall -Wextra
+ifneq (,$(filter QNX,$(shell uname -s))$(findstring qcc,$(CC)))
+CPPFLAGS += -D_QNX_SOURCE
+endif
 
 .PHONY: all test
 all: build/supervisor build/dummy

@@ -10,6 +10,9 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __QNX__
+#include <sys/neutrino.h>
+#endif
 
 extern char **environ;
 static volatile sig_atomic_t stopping;
@@ -48,12 +51,33 @@ int main(int argc, char **argv)
     const char *name = getenv("BEACON_SUPERVISOR_WORLD");
     if (!name)
         name = BEACON_SHM_WORLD;
+    char **child_args = argv + 1;
+#ifdef __QNX__
+    const char *base = strrchr(argv[1], '/');
+    int use_pulses = strcmp(base ? base + 1 : argv[1], "guided") == 0;
+    char endpoint[64];
+    if (use_pulses) {
+        child_args = calloc((size_t)argc + 2, sizeof(*child_args));
+        if (!child_args) return 1;
+        memcpy(child_args, argv + 1, (size_t)(argc - 1) * sizeof(*child_args));
+        child_args[argc - 1] = "--sup";
+        child_args[argc] = endpoint;
+    }
+#endif
     const int backoff_ms[] = {100, 500, 2000, 5000};
     size_t attempt = 0;
     while (!stopping) {
         pid_t pid;
+#ifdef __QNX__
+        int chid = -1;
+        if (use_pulses) {
+            chid = ChannelCreate(0);
+            if (chid == -1) { perror("create guided heartbeat channel"); return 1; }
+            snprintf(endpoint, sizeof(endpoint), "%ld:%d", (long)getpid(), chid);
+        }
+#endif
         uint64_t started = beacon_now_ns();
-        int error = posix_spawnp(&pid, argv[1], NULL, NULL, argv + 1, environ);
+        int error = posix_spawnp(&pid, child_args[0], NULL, NULL, child_args, environ);
         if (error) {
             errno = error;
             perror("spawn worker");
@@ -63,12 +87,39 @@ int main(int argc, char **argv)
         const beacon_world_t *world = MAP_FAILED;
         uint64_t last = started, first = 0;
         int reaped = 0;
+#ifdef __QNX__
+        uint64_t last_pulse = started;
+        int received_pulse = 0;
+#endif
         while (!stopping) {
             pid_t result = waitpid(pid, NULL, WNOHANG);
             if (result == pid) {
                 reaped = 1;
                 break;
             }
+#ifdef __QNX__
+            if (use_pulses) {
+                struct _pulse pulse;
+                uint64_t timeout = BEACON_SUP_TICK_NS;
+                if (TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_RECEIVE, NULL, &timeout, NULL) == -1) {
+                    perror("arm heartbeat timeout");
+                    break;
+                }
+                if (MsgReceivePulse(chid, &pulse, sizeof(pulse), NULL) == 0) {
+                    if (pulse.code == _PULSE_CODE_MINAVAIL + BEACON_PULSE_HB_GUIDED) {
+                        last_pulse = beacon_now_ns();
+                        received_pulse = 1;
+                    }
+                } else if (errno != ETIMEDOUT && errno != EINTR) {
+                    perror("receive guided heartbeat");
+                    break;
+                }
+                if (beacon_now_ns() - last_pulse >= 2 * BEACON_SUP_TICK_NS)
+                    break;
+                if (!received_pulse)
+                    continue;
+            }
+#endif
             if (world == MAP_FAILED)
                 world = open_world(name);
             uint64_t beat = 0;
@@ -88,6 +139,10 @@ int main(int argc, char **argv)
                 break;
             if (first && last - first >= 10000000000ULL)
                 attempt = 0;
+#ifdef __QNX__
+            if (use_pulses)
+                continue;  /* The next receive supplies the wait. */
+#endif
             poll(NULL, 0, (int)(BEACON_SUP_TICK_NS / 1000000));
         }
         if (world != MAP_FAILED)
@@ -96,6 +151,10 @@ int main(int argc, char **argv)
             kill(pid, SIGKILL);
             while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
         }
+#ifdef __QNX__
+        if (chid != -1)
+            ChannelDestroy(chid);  /* Drop queued pulses from the old child. */
+#endif
         if (!stopping) {
             fprintf(stderr, "worker fault (piezo stub on), restart in %d ms\n", backoff_ms[attempt]);
             poll(NULL, 0, backoff_ms[attempt]);
