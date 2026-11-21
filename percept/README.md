@@ -62,6 +62,8 @@ Tape check: with a recorded world/probe JSON (or JSONL from the live probe) and 
 
 It prints one JSON result with `error_pct`; exit 0 passes, 1 exceeds the default 30% limit, 2 means missing/invalid input. Use `--kind d_m` to check a same-frame hand-to-target `d_m` instead of `|xyz_cam|`. Override the gate with `--limit`; use `--json -` for stdin. A failed check keeps spoken metres and VO off. No camera runs here.
 
+Probe Python tests from the repo root: `make -C percept test-python PYTHON=/tmp/beacon-probe-venv/bin/python`.
+
 Shm reader: `src/head.cpp` builds as `percept-head`. It reads the newest `/beacon_frames` slot, prints the YOLO and depth letterbox affines, and initialises only the ABI fields of `/beacon_depth` and `/beacon_world`. No model runs yet. It writes no detections, depth, hand, or pose data.
 
 Build and check with `camd` running:

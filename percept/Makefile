@@ -1,8 +1,9 @@
+PYTHON ?= python3
 CXX ?= g++
 CXXFLAGS ?= -O2 -Wall -Wextra -std=c++17 -I../include
 LDLIBS ?= -lpthread
 
-.PHONY: all one clean
+.PHONY: all one clean test-python
 
 all: percept-head
 
@@ -14,3 +15,6 @@ one: percept-head
 
 clean:
 	rm -f percept-head
+
+test-python:
+	cd .. && $(PYTHON) -m unittest percept.tools.probe_frame_test percept.tools.probe_to_world_test percept.tools.tape_check_test percept.tools.calibrate_camera_test
