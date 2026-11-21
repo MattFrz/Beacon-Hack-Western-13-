@@ -255,7 +255,7 @@ class ReadoutTest(unittest.TestCase):
 
         line = format_readout(world)
         self.assertRegex(line, r"\brange_m=1(?:\.0+)?(?:\s|$)")
-        self.assertIn("d_m=0.2", line)
+        self.assertRegex(line, r"\bd_m=0\.2(?:0+)?(?:\s|$)")
 
     def test_readout_omits_range_when_target_has_no_xyz(self):
         world = probe_to_world(make_probe([make_detection("keys")]), t_ns=T_NS, seq=2)
@@ -277,7 +277,7 @@ class ReadoutTest(unittest.TestCase):
 
         line = format_readout(world)
         self.assertIn("mode=HOLD", line)
-        self.assertIn("d_m=0.2", line)
+        self.assertRegex(line, r"\bd_m=0\.2(?:0+)?(?:\s|$)")
         self.assertNotIn("range_m=", line)
 
     def test_main_sends_readout_to_stderr_and_jsonl_to_stdout(self):
@@ -321,7 +321,7 @@ class UdpEmitTest(unittest.TestCase):
     def run_with_world(self, argv):
         with patch.object(
             probe_to_world_module, "emit_lines", return_value=[self.world]
-        ):
+        ), contextlib.redirect_stderr(io.StringIO()):
             return probe_to_world_module.main(argv)
 
     def test_udp_datagram_matches_world_record(self):
