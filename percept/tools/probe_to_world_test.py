@@ -256,6 +256,18 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertEqual(world["mode"], "LOST")
         self.assertNotIn("d_m", world)
 
+    def test_exact_hold_max_age_stays_lost_above_float53(self):
+        now_ns = (1 << 53) + 1
+        world = probe_to_world(
+            make_probe(),
+            t_ns=now_ns,
+            last_seen_ns=now_ns - 1_500_000_000,
+            last_d_m=0.2,
+        )
+
+        self.assertEqual(world["mode"], "LOST")
+        self.assertNotIn("d_m", world)
+
     def test_older_than_hold_max_age_is_lost_without_distance(self):
         world = probe_to_world(
             make_probe(),

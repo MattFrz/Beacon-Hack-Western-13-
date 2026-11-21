@@ -72,6 +72,12 @@ def _number(value: Any) -> Optional[float]:
     return float(value) if math.isfinite(value) else None
 
 
+def _ns(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
 def _timing(timings: Mapping[str, Any], keys: Sequence[str]) -> Optional[float]:
     for key in keys:
         value = _number(timings.get(key))
@@ -163,7 +169,7 @@ def probe_to_world(
         else None
     )
 
-    seen_ns = _number(last_seen_ns)
+    seen_ns = _ns(last_seen_ns)
     if target_obj is not None and target_obj.get("in_latest_boxes"):
         mode = "LIVE"
     elif seen_ns is not None and (now_ns - seen_ns) < HOLD_MAX_NS:
