@@ -1,0 +1,46 @@
+# Runs on every PR and on main: the tests and builds each part already has.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  laptop:
+    name: Bridge and dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: laptop/*/package-lock.json
+      - name: Bridge tests
+        working-directory: laptop/bridge
+        run: npm ci && npm test
+      - name: Dashboard tests and build
+        working-directory: laptop/dashboard
+        run: npm ci && npm test && npm run build
+
+  native:
+    name: guided, supervisor, telemd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install libjpeg (telemd preview)
+        run: sudo apt-get update && sudo apt-get install -y libjpeg-turbo8-dev
+      - name: guided build and law tests
+        run: make -C guided all test
+      - name: supervisor build and restart test
+        run: make -C supervisor test
+      - name: telemd build, with and without preview
+        run: make -C telemd all preview
