@@ -13,6 +13,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from typing import get_args, get_type_hints
 from unittest.mock import patch
 
 import numpy as np
@@ -287,6 +288,44 @@ class ProbeRuntimeTest(unittest.TestCase):
             sorted(Path(session.path).name for session in FakeInferenceSession.created),
             ["depth.onnx", "yolo.onnx"],
         )
+
+    def test_ultralytics_runtime_creates_no_ort_session(self):
+        yolo_pt = self.yolo.with_suffix(".pt")
+        yolo_pt.touch()
+        args = probe_frame.build_parser().parse_args(
+            [
+                "--labels", str(self.labels),
+                "--yolo", str(yolo_pt),
+                "--yolo-runtime", "ultralytics",
+                "--fov",
+            ]
+        )
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        sessions_seen = []
+
+        def fake_detect(_frame, _args, _labels, _affine, _notes, session):
+            sessions_seen.append(session)
+            return []
+
+        with (
+            synthetic_probe_modules(),
+            patch.object(probe_frame, "detect", side_effect=fake_detect),
+            resources,
+        ):
+            self.assertIsNone(resources.yolo_session())
+            probe_frame.probe_once(args, labels, mean, std, pad, resources)
+
+        self.assertEqual(sessions_seen, [None])
+        self.assertEqual(FakeInferenceSession.created, [])
+
+    def test_prepare_annotation_matches_return(self):
+        args = self.make_args()
+        result = probe_frame.prepare(args)
+        annotation = get_type_hints(probe_frame.prepare)["return"]
+
+        self.assertEqual(len(get_args(annotation)), len(result))
+        self.assertIs(get_args(annotation)[-1], probe_frame.ProbeResources)
+        self.assertIsInstance(result[-1], probe_frame.ProbeResources)
 
     def test_camera_opened_once(self):
         args = self.make_args("--warmup", "2")

@@ -210,6 +210,9 @@ class ProbeResources:
     def yolo_session(self):
         if self.args.yolo is None:
             return None
+        # Ultralytics decodes internally; only the ort runtime uses this session.
+        if getattr(self.args, "yolo_runtime", "ort") != "ort":
+            return None
         if self._yolo_session is None:
             self._yolo_session = load_yolo_session(
                 self.args.yolo, self.session_options()
@@ -726,7 +729,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def prepare(
     args: argparse.Namespace,
-) -> Tuple[List[str], Tuple[float, float, float], Tuple[float, float, float], Tuple[int, int, int]]:
+) -> Tuple[List[str], Tuple[float, float, float], Tuple[float, float, float], Tuple[int, int, int], ProbeResources]:
     """Validate CLI paths and load static labels/preprocessing for repeated frames."""
     if not args.labels.exists():
         raise SystemExit(f"labels not found: {args.labels}")
