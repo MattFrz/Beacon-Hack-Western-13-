@@ -81,6 +81,40 @@ def _stable_id(name: str) -> int:
     return 1 + (zlib.crc32(name.encode("utf-8")) & 0x7FFFFFFF)
 
 
+def format_readout(world: Mapping[str, Any]) -> str:
+    """Format one compact lab readout line; omit unknown values."""
+    parts: List[str] = []
+
+    seq = world.get("seq")
+    if isinstance(seq, Mapping):
+        percept = seq.get("percept")
+        if percept is not None:
+            parts.append(f"seq={percept}")
+
+    mode = world.get("mode")
+    if mode is not None:
+        parts.append(f"mode={mode}")
+
+    target = world.get("target")
+    if isinstance(target, Mapping):
+        name = target.get("name")
+        if name is not None:
+            parts.append(f"name={name}")
+        xyz = _vec3(target.get("xyz_cam"))
+        if xyz is not None:
+            parts.append(f"range_m={math.dist(xyz, (0.0, 0.0, 0.0)):.3f}")
+
+    d_m = _number(world.get("d_m"))
+    if d_m is not None:
+        parts.append(f"d_m={d_m:.3f}")
+
+    objects = world.get("objects")
+    if isinstance(objects, list):
+        parts.append(f"objects={len(objects)}")
+
+    return " ".join(parts)
+
+
 def probe_to_world(
     probe: Mapping[str, Any],
     *,
@@ -272,6 +306,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     out.flush()
                 if sock is not None:
                     sock.sendto(line.encode("utf-8"), udp_target)
+                print(format_readout(world), file=sys.stderr, flush=True)
     except KeyboardInterrupt:
         return 130
     return 0

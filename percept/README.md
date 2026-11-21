@@ -33,6 +33,8 @@ cd laptop/dashboard && npm run dev
 
 Bare `--udp` targets `127.0.0.1:5005`; use `--udp HOST:PORT` for another bridge. `--out /tmp/beacon-live.jsonl` may be combined with `--udp` to record while streaming. No `--out` is needed for live-only use.
 
+Live readout: while the probe runs, watch stderr for one compact `seq=... mode=... name=... range_m=... d_m=... objects=...` line per record (`range_m=|xyz_cam|`, unknown values omitted); JSONL/UDP are unchanged.
+
 Optional chessboard calibration for a better left/right pinhole. Use a Python with OpenCV (this laptop: `/tmp/beacon-probe-venv/bin/python`). You do not need a printer: write a checkerboard, open it fullscreen, then photograph it from several angles.
 
 ```sh

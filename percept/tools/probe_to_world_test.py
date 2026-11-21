@@ -24,6 +24,7 @@ from percept.tools import probe_to_world as probe_to_world_module  # noqa: E402
 from percept.tools.probe_to_world import (  # noqa: E402
     build_parser,
     emit_lines,
+    format_readout,
     probe_to_world,
 )
 
@@ -225,6 +226,82 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertTrue(args.once)
         self.assertIsNone(args.calib)
         self.assertEqual(args.camera, 0)
+
+
+class ReadoutTest(unittest.TestCase):
+    def test_readout_reports_norm_and_record_identity(self):
+        world = probe_to_world(
+            make_probe([make_detection("bottle", [0, 0, 1.0])]), t_ns=T_NS, seq=0
+        )
+
+        line = format_readout(world)
+        self.assertNotIn("\n", line)
+        self.assertIn("seq=0", line)
+        self.assertIn("mode=LIVE", line)
+        self.assertIn("name=bottle", line)
+        self.assertRegex(line, r"\brange_m=1(?:\.0+)?(?:\s|$)")
+        self.assertIn("objects=1", line)
+
+        lateral = probe_to_world(
+            make_probe([make_detection("bottle", [3.0, 4.0, 0.0])]), t_ns=T_NS, seq=0
+        )
+        self.assertIn("range_m=5.000", format_readout(lateral))
+
+    def test_readout_includes_finite_distance(self):
+        world = probe_to_world(
+            make_probe([make_detection("bottle", [0, 0, 1.0])]), t_ns=T_NS, seq=0
+        )
+        world["d_m"] = 0.2
+
+        line = format_readout(world)
+        self.assertRegex(line, r"\brange_m=1(?:\.0+)?(?:\s|$)")
+        self.assertIn("d_m=0.2", line)
+
+    def test_readout_omits_range_when_target_has_no_xyz(self):
+        world = probe_to_world(make_probe([make_detection("keys")]), t_ns=T_NS, seq=2)
+
+        line = format_readout(world)
+        self.assertIn("name=keys", line)
+        self.assertNotIn("range_m=", line)
+
+    def test_hold_without_distance_omits_range_and_distance(self):
+        world = probe_to_world(make_probe(), t_ns=T_NS, seq=4)
+
+        line = format_readout(world)
+        self.assertIn("mode=HOLD", line)
+        self.assertNotIn("range_m=", line)
+        self.assertNotIn("d_m=", line)
+
+    def test_hold_can_show_held_distance_without_range(self):
+        world = probe_to_world(make_probe(), t_ns=T_NS, seq=6, last_d_m=0.2)
+
+        line = format_readout(world)
+        self.assertIn("mode=HOLD", line)
+        self.assertIn("d_m=0.2", line)
+        self.assertNotIn("range_m=", line)
+
+    def test_main_sends_readout_to_stderr_and_jsonl_to_stdout(self):
+        world = probe_to_world(
+            make_probe([make_detection("bottle", [0, 0, 1.0])]), t_ns=T_NS, seq=0
+        )
+        world["d_m"] = 0.2
+
+        with patch.object(
+            probe_to_world_module, "emit_lines", return_value=[world]
+        ), contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(
+            io.StringIO()
+        ) as stderr:
+            self.assertEqual(probe_to_world_module.main(["--out", "-"]), 0)
+
+        stdout_lines = stdout.getvalue().splitlines()
+        stderr_lines = stderr.getvalue().splitlines()
+        self.assertEqual(len(stdout_lines), 1)
+        self.assertEqual(json.loads(stdout_lines[0]), world)
+        self.assertEqual(len(stderr_lines), 1)
+        self.assertIn("mode=LIVE", stderr_lines[0])
+        self.assertIn("range_m=", stderr_lines[0])
+        self.assertIn("d_m=", stderr_lines[0])
+        self.assertNotIn(stderr_lines[0], stdout.getvalue())
 
 
 class UdpEmitTest(unittest.TestCase):
