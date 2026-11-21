@@ -17,6 +17,10 @@ test('the first line after kill fades the held boxes and keeps their world posit
   assert.deepEqual(hold.objects.map((obj) => obj.last_seen_ns), lastLive.objects.map((obj) => obj.last_seen_ns));
   assert.deepEqual(hold.target, { ...lastLive.target, in_latest_boxes: false });
   assert.equal(hold.d_m, lastLive.d_m);
+  assert.equal(hold.hand, null);
+  assert.equal(hold.law, lastLive.law);
+  assert.equal(hold.cue.pan, lastLive.cue.pan);
+  assert.equal(hold.cue.continuous, lastLive.cue.continuous);
   assert.ok(lines.slice(60).every((line) => line.mode !== 'LIVE'));
 });
 

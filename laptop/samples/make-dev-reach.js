@@ -29,6 +29,7 @@ export function buildDevReach(sample) {
     const seen = alive ? T0 + cycle * 3e8 - 2.5e8 : lastLive.seen; // capture time of that bundle's frame
     let mode;
     let hand;
+    let cueHand;
     let d;
     let law;
     let objects;
@@ -38,8 +39,9 @@ export function buildDevReach(sample) {
     if (alive) {
       mode = 'LIVE';
       hand = cycle >= 7 ? lerp(handStart, keys, 0.71 * Math.min((cycle - 7) / 10, 1)) : null;
-      d = hand ? dist(hand, keys) : null;
-      law = hand ? 'REACH' : 'WALK';
+      cueHand = hand;
+      d = cueHand ? dist(cueHand, keys) : null;
+      law = cueHand ? 'REACH' : 'WALK';
       objects = sample.objects.map((o) => ({
         ...o,
         last_seen_ns: seen,
@@ -47,11 +49,12 @@ export function buildDevReach(sample) {
         in_latest_boxes: true,
       }));
       target = { ...sample.target, last_seen_ns: seen, frame_id: 9000 + cycle };
-      d_m = hand ? +d.toFixed(3) : null;
+      d_m = cueHand ? +d.toFixed(3) : null;
     } else {
       mode = t_ns - lastLive.seen < HOLD_MAX_NS ? 'HOLD' : 'LOST';
-      hand = mode === 'HOLD' ? lastLive.hand : null;
-      d = hand ? dist(hand, keys) : null;
+      hand = null;
+      cueHand = mode === 'HOLD' ? lastLive.hand : null;
+      d = cueHand ? dist(cueHand, keys) : null;
       law = mode === 'LOST' ? 'LOST' : lastLive.law;
       objects = mode === 'HOLD' ? lastLive.objects.map((o) => ({ ...o, in_latest_boxes: false })) : [];
       target = mode === 'HOLD' ? { ...lastLive.target, in_latest_boxes: false } : null;
@@ -71,7 +74,7 @@ export function buildDevReach(sample) {
         caption: law === 'WALK' ? 'Keys. About one metre ahead, a little right.' : law === 'LOST' ? 'I lost the target.' : null,
         clip_ids: [],
         tick_hz: reach && d >= 0.15 ? +(1000 / intervalMs / (mode === 'HOLD' ? 2 : 1)).toFixed(1) : null, // HOLD ticks slower
-        pan: reach ? +Math.max(-1, Math.min(1, (keys[0] - hand[0]) / 0.15)).toFixed(2) : 0,
+        pan: reach && cueHand ? +Math.max(-1, Math.min(1, (keys[0] - cueHand[0]) / 0.15)).toFixed(2) : 0,
         continuous: reach && d < 0.15,
       },
       intent: { ...sample.intent, t_ns: T0 - 1e9 },
