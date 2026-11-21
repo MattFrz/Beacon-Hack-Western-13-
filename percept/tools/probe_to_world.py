@@ -4,7 +4,8 @@
 This is a thin wrapper around probe_frame.py: detection, depth, and hand work
 stays there. Phase A has no VO, so xyz_world is xyz_cam, the camera pose is
 identity, and crumbs stay empty. Without --calib, probe frames have no xyz_cam
-and this tool emits boxes only, as expected.
+and this tool emits boxes only, as expected. Each record can also go out as one
+UDP datagram to the laptop bridge.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import argparse
 import contextlib
 import json
 import math
+import socket
 import sys
 import time
 import zlib
@@ -34,6 +36,7 @@ IDENTITY_T_WORLD_FROM_CAM: Tuple[int, ...] = (
     0, 0, 0, 1,
 )
 TARGET_KEYS = ("id", "name", "xyz_cam", "xyz_world", "conf", "last_seen_ns", "frame_id", "pose_epoch")
+DEFAULT_UDP_TARGET = "127.0.0.1:5005"
 
 
 def _vec3(value: Any) -> Optional[Tuple[float, float, float]]:
@@ -172,9 +175,29 @@ def probe_to_world(
     return world
 
 
+def parse_udp_target(value: str) -> Tuple[str, int]:
+    """Parse --udp HOST:PORT into a UDP address; no name resolution here."""
+    host, sep, port_text = str(value).rpartition(":")
+    if not sep or not host or ":" in host:
+        raise ValueError(f"--udp must be HOST:PORT (got {value!r})")
+    if not port_text.isdecimal():
+        raise ValueError(f"--udp port must be a number 1-65535 (got {value!r})")
+    port = int(port_text)
+    if not 1 <= port <= 65535:
+        raise ValueError(f"--udp port must be 1-65535 (got {value!r})")
+    return host, port
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = probe_frame.build_parser()
-    parser.add_argument("--out", required=True, help="JSONL path, or - for stdout")
+    parser.add_argument("--out", help="JSONL path, or - for stdout")
+    parser.add_argument(
+        "--udp",
+        nargs="?",
+        const=DEFAULT_UDP_TARGET,
+        help="send each world object as one UDP datagram to HOST:PORT "
+        f"(bare flag uses {DEFAULT_UDP_TARGET}); default none",
+    )
     parser.add_argument(
         "--once",
         action="store_true",
@@ -208,13 +231,33 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.out is None and args.udp is None:
+        parser.error("one of --out or --udp is required")
+    udp_target: Optional[Tuple[str, int]] = None
+    if args.udp is not None:
+        try:
+            udp_target = parse_udp_target(args.udp)
+        except ValueError as exc:
+            parser.error(str(exc))
+
     try:
-        with _output(str(args.out)) as out:
+        with contextlib.ExitStack() as stack:
+            out = stack.enter_context(_output(str(args.out))) if args.out is not None else None
+            sock = (
+                stack.enter_context(socket.socket(socket.AF_INET, socket.SOCK_DGRAM))
+                if udp_target is not None
+                else None
+            )
             for world in emit_lines(args):
-                out.write(json.dumps(world, separators=(",", ":"), sort_keys=False))
-                out.write("\n")
-                out.flush()
+                line = json.dumps(world, separators=(",", ":"), sort_keys=False)
+                if out is not None:
+                    out.write(line)
+                    out.write("\n")
+                    out.flush()
+                if sock is not None:
+                    sock.sendto(line.encode("utf-8"), udp_target)
     except KeyboardInterrupt:
         return 130
     return 0

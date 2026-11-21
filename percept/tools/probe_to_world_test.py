@@ -3,8 +3,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import math
+import socket
 import sys
+import tempfile
 import unittest
 from itertools import islice
 from pathlib import Path
@@ -15,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from percept.tools import probe_frame  # noqa: E402
+from percept.tools import probe_to_world as probe_to_world_module  # noqa: E402
 from percept.tools.probe_to_world import (  # noqa: E402
     build_parser,
     emit_lines,
@@ -219,6 +225,103 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertTrue(args.once)
         self.assertIsNone(args.calib)
         self.assertEqual(args.camera, 0)
+
+
+class UdpEmitTest(unittest.TestCase):
+    def setUp(self):
+        self.receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.receiver.bind(("127.0.0.1", 0))
+        self.receiver.settimeout(2.0)
+        self.addCleanup(self.receiver.close)
+        self.target = f"127.0.0.1:{self.receiver.getsockname()[1]}"
+        self.world = probe_to_world(
+            make_probe([make_detection("keys", [0.1, 0.2, 0.5])]), t_ns=T_NS
+        )
+
+    def receive_payload(self):
+        return self.receiver.recvfrom(65535)[0]
+
+    def run_with_world(self, argv):
+        with patch.object(
+            probe_to_world_module, "emit_lines", return_value=[self.world]
+        ):
+            return probe_to_world_module.main(argv)
+
+    def test_udp_datagram_matches_world_record(self):
+        self.assertEqual(self.run_with_world(["--udp", self.target]), 0)
+
+        payload = self.receive_payload()
+        self.assertEqual(json.loads(payload), self.world)
+        self.assertEqual(
+            payload,
+            json.dumps(self.world, separators=(",", ":"), sort_keys=False).encode(
+                "utf-8"
+            ),
+        )
+
+    def test_jsonl_and_udp_are_both_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "world.jsonl"
+            self.assertEqual(
+                self.run_with_world(["--out", str(out), "--udp", self.target]), 0
+            )
+            lines = out.read_text(encoding="utf-8").splitlines()
+
+        payload = self.receive_payload()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0]), self.world)
+        self.assertEqual(payload.decode("utf-8"), lines[0])
+
+    def test_out_is_optional_when_udp_is_set(self):
+        args = build_parser().parse_args(["--udp", self.target])
+        self.assertIsNone(args.out)
+        self.assertEqual(args.udp, self.target)
+        self.assertEqual(self.run_with_world(["--udp", self.target]), 0)
+        self.assertEqual(json.loads(self.receive_payload()), self.world)
+
+    def test_missing_out_and_udp_is_error(self):
+        with patch.object(probe_to_world_module, "emit_lines") as emit_lines_mock:
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                with self.assertRaises(SystemExit):
+                    probe_to_world_module.main([])
+        emit_lines_mock.assert_not_called()
+        self.assertIn("--out", stderr.getvalue())
+        self.assertIn("--udp", stderr.getvalue())
+
+    def test_udp_payload_is_one_json_object_under_60kb(self):
+        self.assertEqual(self.run_with_world(["--udp", self.target]), 0)
+
+        payload = self.receive_payload()
+        self.assertLess(len(payload), 60000)
+        self.assertIsInstance(json.loads(payload), dict)
+        self.assertNotIn(b"\n", payload)
+        self.receiver.settimeout(0.05)
+        with self.assertRaises(socket.timeout):
+            self.receiver.recvfrom(65535)
+
+    def test_bare_udp_defaults_to_loopback_5005(self):
+        args = build_parser().parse_args(["--udp"])
+        self.assertEqual(args.udp, "127.0.0.1:5005")
+        self.assertEqual(
+            probe_to_world_module.parse_udp_target(args.udp), ("127.0.0.1", 5005)
+        )
+
+    def test_invalid_udp_target_errors_without_sending(self):
+        for bad in (
+            "127.0.0.1", "bad:port", ":5005", "a:b:5005",
+            "127.0.0.1:0", "127.0.0.1:70000", "",
+        ):
+            with self.subTest(bad=bad):
+                with patch.object(probe_to_world_module, "emit_lines") as emit_lines_mock:
+                    with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                        with self.assertRaises(SystemExit):
+                            probe_to_world_module.main(["--udp", bad])
+                emit_lines_mock.assert_not_called()
+                self.assertIn("--udp", stderr.getvalue())
+
+        self.receiver.settimeout(0.05)
+        with self.assertRaises(socket.timeout):
+            self.receiver.recvfrom(65535)
 
 
 if __name__ == "__main__":

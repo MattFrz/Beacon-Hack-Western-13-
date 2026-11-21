@@ -18,6 +18,21 @@ python3 percept/tools/probe_to_world.py \
 
 Omit `--image` to loop a webcam until Ctrl-C, or add `--once` for one capture. `--out -` writes to stdout. Without `--calib`, boxes still emit but `xyz_cam`/`xyz_world` are omitted. Replay with `cd laptop/bridge && node main.js /tmp/beacon-live.jsonl`.
 
+Live webcam to the dashboard: UDP, one world object per datagram, no replay file needed. Start the bridge and dashboard first, then the probe:
+
+```sh
+cd laptop/bridge && npm start
+cd laptop/dashboard && npm run dev
+/tmp/beacon-probe-venv/bin/python percept/tools/probe_to_world.py \
+  --yolo models/yoloe26n_320.onnx \
+  --depth models/depth_anything_v2_metric_indoor_small.onnx \
+  --hands --hand-model models/hand_landmarker.task \
+  --calib models/calib.json \
+  --udp
+```
+
+Bare `--udp` targets `127.0.0.1:5005`; use `--udp HOST:PORT` for another bridge. `--out /tmp/beacon-live.jsonl` may be combined with `--udp` to record while streaming. No `--out` is needed for live-only use.
+
 Laptop-only camera calibration (9x6 inner corners, measured square side):
 
 ```sh
