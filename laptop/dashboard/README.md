@@ -20,5 +20,10 @@ cd laptop/dashboard && npm install && npm run dev       # open http://localhost:
 | `src/useTelemetry.js` | WebSocket to the bridge (`ws://127.0.0.1:8765`): latest world state, latest JPEG, staleness |
 | `src/Scene.jsx` | 3D view. Everything is drawn in the camera frame, so `xyz_cam` goes in unchanged. Chest height, a 30° pitch and the Camera Module 3 FOV are display guesses, not telemetry. |
 | `src/App.jsx` | Header (animate-ui `Highlight` slides to the current mode, `RollingText` for law, intent and spoken captions), side panels (`SlidingNumber` for live values) |
+| `src/Scrubber.jsx` | Replay scrubber (animate-ui `Slider` and `Button`) over the last 10 min of world states |
 
-Not built yet: replay scrubber, breadcrumbs, boxes drawn on the video.
+## Replay scrubber
+
+The dashboard keeps the last 10 minutes of world states, live or replayed, and keeps them across bridge restarts. Drag the slider, use ◀ ▶, or focus the slider and use the arrow keys to freeze the view on any past message. The header then shows PAUSED, and the label gives the time back plus the Pi's clock (`Pi t`) for matching QNX traces. Dragging to the end, End, or Live returns to live. Video is not kept in history, so the camera panel hides while paused.
+
+Not built yet: breadcrumbs, boxes drawn on the video.
