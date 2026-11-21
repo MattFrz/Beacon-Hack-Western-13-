@@ -31,8 +31,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import statistics
 import sys
 import time
+import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -43,6 +45,10 @@ DEPTH_SAMPLER_BOX = "box_median"
 DEPTH_SAMPLER_PATCH = "patch_median"
 DEFAULT_PREVIEW_WIDTH = 320
 DEFAULT_PREVIEW_QUALITY = 60
+DEFAULT_DEPTH_WINDOW = 5
+DEFAULT_DEPTH_JUMP = 0.6
+DEFAULT_DEPTH_EVICT = 10
+DEFAULT_DEPTH_RECOVER = 3
 
 
 @dataclass
@@ -160,6 +166,121 @@ def load_labels(path: Path) -> List[str]:
     return labels
 
 
+def _stable_detection_id(name: str) -> int:
+    """Match probe_to_world's name id so the filter key is the world object id."""
+    return 1 + (zlib.crc32(name.encode("utf-8")) & 0x7FFFFFFF)
+
+
+@dataclass
+class _DepthState:
+    history: List[float]
+    last_seen: int
+    candidates: List[float]
+
+
+class DepthStabiliser:
+    """Per-id rolling median with jump rejection, recovery, and eviction.
+
+    advance() marks one new probe frame; ids unseen for more than evict frames
+    lose their history. A run of agreeing rejects can replace a stale median
+    after recover samples, so a real fast approach is not held forever.
+    """
+
+    def __init__(
+        self,
+        window: int = DEFAULT_DEPTH_WINDOW,
+        jump: float = DEFAULT_DEPTH_JUMP,
+        evict: int = DEFAULT_DEPTH_EVICT,
+        recover: int = DEFAULT_DEPTH_RECOVER,
+    ):
+        if window < 1:
+            raise ValueError("depth window must be at least 1")
+        if not math.isfinite(jump) or jump <= 0.0:
+            raise ValueError("depth jump ratio must be greater than 0")
+        if evict < 1:
+            raise ValueError("depth evict must be at least 1")
+        if recover < 1:
+            raise ValueError("depth recover must be at least 1")
+        self.window = int(window)
+        self.jump = float(jump)
+        self.evict = int(evict)
+        self.recover = int(recover)
+        self._states: Dict[Any, _DepthState] = {}
+        self._frame = 0
+
+    def settings(self) -> Dict[str, Any]:
+        return {
+            "window": self.window,
+            "jump": self.jump,
+            "evict": self.evict,
+            "recover": self.recover,
+        }
+
+    def advance(self) -> None:
+        self._frame += 1
+        cutoff = self._frame - self.evict
+        stale = [
+            object_id
+            for object_id, state in self._states.items()
+            if state.last_seen < cutoff
+        ]
+        for object_id in stale:
+            del self._states[object_id]
+
+    def _within_jump(self, z: float, reference: float) -> bool:
+        return abs(z - reference) / reference <= self.jump
+
+    def update(self, object_id: Any, z: Optional[float]) -> Dict[str, Any]:
+        raw = None if z is None else float(z)
+        if raw is not None and not math.isfinite(raw):
+            raw = None
+        valid = raw is not None and raw > 0.0
+
+        state = self._states.get(object_id)
+        if state is None:
+            if not valid:
+                return {"Z_m": None, "z_raw": raw, "z_rejected": True}
+            state = _DepthState(history=[raw], last_seen=self._frame, candidates=[])
+            self._states[object_id] = state
+            return {"Z_m": raw, "z_raw": raw, "z_rejected": False}
+
+        state.last_seen = self._frame
+        if not valid:
+            state.candidates.clear()
+            return {
+                "Z_m": statistics.median(state.history),
+                "z_raw": raw,
+                "z_rejected": True,
+            }
+
+        median = statistics.median(state.history)
+        if self._within_jump(raw, median):
+            state.history.append(raw)
+            if len(state.history) > self.window:
+                state.history = state.history[-self.window :]
+            state.candidates.clear()
+            return {
+                "Z_m": statistics.median(state.history),
+                "z_raw": raw,
+                "z_rejected": False,
+            }
+
+        if (
+            not state.candidates
+            or not self._within_jump(raw, statistics.median(state.candidates))
+        ):
+            state.candidates = [raw]
+        else:
+            state.candidates.append(raw)
+        if len(state.candidates) >= self.recover:
+            adopted = statistics.median(state.candidates)
+            state.history = [adopted]
+            state.candidates.clear()
+            return {"Z_m": adopted, "z_raw": raw, "z_rejected": False}
+
+        return {"Z_m": median, "z_raw": raw, "z_rejected": True}
+
+
 class ProbeResources:
     """Process-lifetime camera, ORT sessions, and hand landmarker.
 
@@ -169,6 +290,12 @@ class ProbeResources:
 
     def __init__(self, args: argparse.Namespace):
         self.args = args
+        self.depth_stabiliser = DepthStabiliser(
+            window=getattr(args, "depth_window", DEFAULT_DEPTH_WINDOW),
+            jump=getattr(args, "depth_jump", DEFAULT_DEPTH_JUMP),
+            evict=getattr(args, "depth_evict", DEFAULT_DEPTH_EVICT),
+            recover=getattr(args, "depth_recover", DEFAULT_DEPTH_RECOVER),
+        )
         self.cap: Any = None
         self._options: Any = None
         self._yolo_session: Any = None
@@ -692,6 +819,32 @@ def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: A
     return hand
 
 
+def _positive_int_arg(name: str):
+    def parse(value: str) -> int:
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"{name} must be an integer") from exc
+        if parsed < 1:
+            raise argparse.ArgumentTypeError(f"{name} must be at least 1")
+        return parsed
+
+    return parse
+
+
+def _positive_float_arg(name: str):
+    def parse(value: str) -> float:
+        try:
+            parsed = float(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"{name} must be a number") from exc
+        if not math.isfinite(parsed) or parsed <= 0.0:
+            raise argparse.ArgumentTypeError(f"{name} must be greater than 0")
+        return parsed
+
+    return parse
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group()
@@ -741,6 +894,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--depth-pad", default="114,114,114", help="letterbox BGR pad colour"
+    )
+    parser.add_argument(
+        "--depth-window",
+        type=_positive_int_arg("--depth-window"),
+        default=DEFAULT_DEPTH_WINDOW,
+        help=f"accepted-Z median window per object id (default {DEFAULT_DEPTH_WINDOW})",
+    )
+    parser.add_argument(
+        "--depth-jump",
+        type=_positive_float_arg("--depth-jump"),
+        default=DEFAULT_DEPTH_JUMP,
+        help=f"max |z-median|/median before a sample is rejected (default {DEFAULT_DEPTH_JUMP})",
+    )
+    parser.add_argument(
+        "--depth-evict",
+        type=_positive_int_arg("--depth-evict"),
+        default=DEFAULT_DEPTH_EVICT,
+        help=f"frames unseen before an id's history is dropped (default {DEFAULT_DEPTH_EVICT})",
+    )
+    parser.add_argument(
+        "--depth-recover",
+        type=_positive_int_arg("--depth-recover"),
+        default=DEFAULT_DEPTH_RECOVER,
+        help=f"agreeing rejects before a stale median is replaced (default {DEFAULT_DEPTH_RECOVER})",
     )
     parser.add_argument("--hands", action="store_true", help="run MediaPipe hands")
     parser.add_argument(
@@ -806,6 +983,14 @@ def probe_once(
     frame_h, frame_w = frame.shape[:2]
 
     notes: List[str] = []
+    stabiliser = resources.depth_stabiliser
+    stabiliser_settings = stabiliser.settings()
+    if args.depth is not None:
+        stabiliser.advance()
+        notes.append(
+            "depth stabiliser window={window} jump={jump:g} "
+            "evict={evict} recover={recover}".format(**stabiliser_settings)
+        )
     yolo_affine = make_affine(frame_w, frame_h, args.yolo_size, args.yolo_size)
     depth_affine = make_affine(frame_w, frame_h, args.depth_size, args.depth_size)
     calibration = resolve_calibration(args, frame_w, frame_h, notes)
@@ -822,6 +1007,9 @@ def probe_once(
     timings_ms["yolo"] = (time.perf_counter_ns() - started_ns) / 1e6
     for detection in detections:
         detection["frame_id"] = frame_id
+        detection["id"] = detection.get(
+            "id", _stable_detection_id(str(detection.get("name", "unknown")))
+        )
 
     depth = None
     if args.depth is not None:
@@ -830,8 +1018,14 @@ def probe_once(
         depth = predict_depth(frame, session, depth_affine, args, mean, std, pad_color)
         for detection in detections:
             u, v = detection["center_px"]
-            z = depth_at_box(depth, depth_affine, detection["bbox_px"], args.depth_scale)
-            detection["Z_m"] = z
+            raw_z = depth_at_box(
+                depth, depth_affine, detection["bbox_px"], args.depth_scale
+            )
+            sample = stabiliser.update(detection["id"], raw_z)
+            detection["z_raw"] = sample["z_raw"]
+            detection["Z_m"] = sample["Z_m"]
+            detection["z_rejected"] = sample["z_rejected"]
+            z = detection["Z_m"]
             if z is not None and calibration is not None:
                 detection["xyz_cam"] = unproject(u, v, z, calibration)
         timings_ms["depth"] = (time.perf_counter_ns() - started_ns) / 1e6
@@ -868,6 +1062,7 @@ def probe_once(
             else None
         ),
         "detections": detections,
+        "depth_stabiliser": stabiliser_settings,
         "hand": hand,
         "notes": notes,
         "timings_ms": timings_ms,

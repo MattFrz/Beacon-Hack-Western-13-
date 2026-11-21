@@ -39,6 +39,8 @@ The probe opens the camera and creates both ORT sessions and the hand landmarker
 
 Detection depth is the median over the central half of the valid box interior (`box_median`, at least four cells); fingertips use a 3x3 patch median. Bearings still come from `center_px`; the sampler name and `depth_scale` are recorded in `depth_grid`. This is noise rejection, not calibration — `tape_check.py` remains the only absolute-depth gate.
 
+The laptop path needs `--depth-scale 0.25` with the exported indoor model, which overestimates depth about 4x on this camera. Scale is still a manual, tape-gated correction, not a new default; `tape_check.py` is the only pass/fail authority and spoken metres stay off until it passes. Per-object depth is median-stabilised by detector id (`--depth-window 5`, `--depth-jump 0.6`, `--depth-evict 10`, `--depth-recover 3` by default), with the unsmoothed sample kept as `z_raw` in probe JSON.
+
 Live readout: while the probe runs, watch stderr for one compact `seq=... mode=... name=... range_m=... d_m=... objects=...` line per record (`range_m=|xyz_cam|`, unknown values omitted); JSONL/UDP are unchanged.
 
 Mode is LIVE when this record has the target in its latest boxes, HOLD while a missing target is under 1.5 s old, and LOST otherwise (no `d_m`).

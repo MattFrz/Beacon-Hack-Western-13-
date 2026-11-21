@@ -679,6 +679,51 @@ class ProbeRuntimeTest(unittest.TestCase):
         with self.assertRaises(socket.timeout):
             receiver.recvfrom(65535)
 
+    def test_stabiliser_settings_recorded(self):
+        args = self.make_args(
+            "--depth-window", "7",
+            "--depth-jump", "0.4",
+            "--depth-evict", "12",
+            "--depth-recover", "4",
+        )
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+
+        with synthetic_probe_modules(), self.fake_model_calls(), resources:
+            probe = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+
+        self.assertEqual(
+            probe["depth_stabiliser"],
+            {"window": 7, "jump": 0.4, "evict": 12, "recover": 4},
+        )
+        self.assertTrue(any("depth stabiliser" in note for note in probe["notes"]))
+
+    def test_depth_scale_applies_to_raw_and_smoothed_once(self):
+        args = self.make_args("--depth-scale", "0.25")
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        depth_values = iter((8.0, 14.0))  # scaled: 2.0 then a rejected 3.5
+
+        def scaled_depth(_frame, _session, affine, *_rest):
+            return np.full(
+                (affine.net_h, affine.net_w), next(depth_values), dtype=np.float32
+            )
+
+        with (
+            synthetic_probe_modules(),
+            self.fake_model_calls(),
+            patch.object(probe_frame, "predict_depth", side_effect=scaled_depth),
+            patch.object(probe_frame, "unproject", wraps=probe_frame.unproject) as spy,
+            resources,
+        ):
+            first = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+            second = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+
+        self.assertEqual(first["detections"][0]["z_raw"], 2.0)
+        self.assertEqual(first["detections"][0]["Z_m"], 2.0)
+        self.assertEqual(second["detections"][0]["z_raw"], 3.5)
+        self.assertEqual(second["detections"][0]["Z_m"], 2.0)
+        self.assertTrue(second["detections"][0]["z_rejected"])
+        self.assertEqual([call.args[2] for call in spy.call_args_list], [2.0, 2.0])
+
     def test_probe_unproject_receives_scaled_z_once(self):
         args = self.make_args("--depth-scale", "0.5")
         labels, mean, std, pad, resources = probe_frame.prepare(args)
@@ -700,6 +745,87 @@ class ProbeRuntimeTest(unittest.TestCase):
         self.assertEqual(probe["detections"][0]["Z_m"], 2.0)
         self.assertEqual(len(spy.call_args_list), 1)
         self.assertEqual(spy.call_args_list[0].args[2], 2.0)
+
+
+class DepthStabiliserTest(unittest.TestCase):
+    """Per-id depth smoothing; synthetic series only, no camera or models."""
+
+    def test_single_spike_rejected(self):
+        stabiliser = probe_frame.DepthStabiliser()
+        samples = [
+            stabiliser.update("chair", z)
+            for z in (2.0, 2.1, 2.0, 8.0, 2.05)
+        ]
+
+        self.assertNotIn(8.0, [sample["Z_m"] for sample in samples])
+        self.assertTrue(samples[3]["z_rejected"])
+        self.assertEqual(samples[3]["z_raw"], 8.0)
+        self.assertLess(abs(samples[3]["Z_m"] - 2.0), 0.01)
+        self.assertFalse(samples[4]["z_rejected"])
+
+    def test_slow_ramp_tracked(self):
+        stabiliser = probe_frame.DepthStabiliser()
+        smoothed = [
+            stabiliser.update("laptop", 1.0 + index / 9.0)["Z_m"]
+            for index in range(10)
+        ]
+
+        self.assertGreater(smoothed[-1], 1.75)
+        self.assertLess(abs(smoothed[-1] - 2.0), 0.25)
+        for before, after in zip(smoothed, smoothed[1:]):
+            self.assertGreaterEqual(after, before)
+
+    def test_new_object_uses_first_sample(self):
+        stabiliser = probe_frame.DepthStabiliser()
+        first = stabiliser.update("mouse", 3.7)
+
+        self.assertEqual(first["Z_m"], 3.7)
+        self.assertEqual(first["z_raw"], 3.7)
+        self.assertFalse(first["z_rejected"])
+
+    def test_consecutive_disagreement_adopted(self):
+        stabiliser = probe_frame.DepthStabiliser(recover=3)
+        for z in (2.0, 2.05, 2.0, 2.1, 2.0):
+            stabiliser.update("cup", z)
+        rejected = [stabiliser.update("cup", 5.0) for _ in range(3)]
+
+        self.assertTrue(all(sample["z_rejected"] for sample in rejected[:2]))
+        self.assertAlmostEqual(rejected[-1]["Z_m"], 5.0, places=5)
+        self.assertFalse(rejected[-1]["z_rejected"])
+
+    def test_eviction_after_gap(self):
+        stabiliser = probe_frame.DepthStabiliser(window=3, evict=2)
+        for z in (2.0, 2.0, 2.0):
+            stabiliser.update("bottle", z)
+        for _ in range(3):
+            stabiliser.advance()
+
+        fresh = stabiliser.update("bottle", 8.0)
+        self.assertEqual(fresh["Z_m"], 8.0)
+        self.assertEqual(fresh["z_raw"], 8.0)
+        self.assertFalse(fresh["z_rejected"])
+
+    def test_depth_stabiliser_flags_and_validation(self):
+        defaults = probe_frame.build_parser().parse_args([])
+        self.assertEqual(
+            (
+                defaults.depth_window,
+                defaults.depth_jump,
+                defaults.depth_evict,
+                defaults.depth_recover,
+            ),
+            (5, 0.6, 10, 3),
+        )
+        for flag, value in (
+            ("--depth-window", "0"),
+            ("--depth-jump", "0"),
+            ("--depth-evict", "0"),
+            ("--depth-recover", "0"),
+        ):
+            with self.subTest(flag=flag):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        probe_frame.build_parser().parse_args([flag, value])
 
 
 class PreviewEncodeTest(unittest.TestCase):
