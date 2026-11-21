@@ -18,6 +18,7 @@ put Wi-Fi credentials, PSKs, or `sd-stage/` contents in this file.
 | CPUs | 4 x Cortex-A76 at 1500 MHz | `pidin info` | 2026-11-21 13:51 UTC |
 | Active cooler fitted | reported by team inventory; not rechecked | teammate inventory | 2026-11-21 02:30 |
 | Thermal node | `/dev/thermal` and `/dev/thermal_ext` exist | `ls -l /dev/thermal*` | 2026-11-21 13:51 UTC |
+| Clock resolution | `clock_getres`: monotonic 0.001 s, realtime 0.001 s | Python `time.clock_getres` | 2026-11-21 13:55 UTC |
 | `qnxuser` password changed | not checked | interactive `passwd` on device | |
 | Default VNC password changed | not checked | QSTI UI / device notes | |
 
@@ -125,8 +126,16 @@ This is spec §21 step 7. It proves the QNX story before models are added.
 - [ ] Save `pidin ar` showing runmasks.
 
 Partial result: the deployed `camd` stub built on the Pi and ran under
-`sudo -n` with core 0 pinning and FIFO 50. The hogs, 16 ms deadline trace, and
-runmask dump are still open.
+`sudo -n` with core 0 pinning and FIFO 50. `deadline-test` then ran 600 and
+1800 wakeups at 60 Hz with one, two, and three hogs. With three hogs and 600
+samples, wakeups were `p95_late_ns=6312240`, `worst_late_ns=11961423`, and
+`over_period=0`. With three hogs and 1800 samples, `p95_late_ns=6902551`,
+`worst_late_ns=19566706`, and `over_period=2`.
+
+The first reading looked like a failure because the test counted anything over
+1 ms as a miss. `clock_getres(CLOCK_MONOTONIC)` is 1 ms on this image, so that
+count measures jitter, not missed 16.667 ms deadlines. Read `over_period` for
+deadline misses. A runmask dump from `pidin` is still open.
 
 ```sh
 ssh qnxpi 'pidin ar > /data/home/qnxuser/app/pidin-scheduler.txt'
@@ -156,3 +165,4 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | 2026-11-21 13:52 UTC | Audio probe | Only `/dev/snd/controlC0` existed. No USB headset or PCM device was found. |
 | 2026-11-21 13:54 UTC | Skeleton deployed to Pi | Copied `include/beacon.h`, `camd/`, and `percept/` to `/data/home/qnxuser/beacon-test`. Both built with the on-device toolchain. |
 | 2026-11-21 13:54 UTC | `camd`/`percept-head` on QNX | `sudo -n ./camd --stub --once` published `frame_id=1`, 640 x 480, stride 2560, `frametype=0`, 1228800 bytes. `read-frames` saw the slot. `percept-head --once` printed the same frame and the 320 and 210 letterbox affines. |
+| 2026-11-21 13:55 UTC | Deadline test on QNX | Clock resolution is 1 ms. With 0 hogs, 600 samples had `over_period=0`. With 3 hogs, 600 samples had `over_period=0`; 1800 samples had `over_period=2` and `p95_late_ns=6902551`. The 1 ms counter is jitter, not a 16 ms miss count. |
