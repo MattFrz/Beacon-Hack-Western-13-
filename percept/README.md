@@ -28,10 +28,12 @@ cd laptop/dashboard && npm run dev
   --depth models/depth_anything_v2_metric_indoor_small.onnx \
   --hands --hand-model models/hand_landmarker.task \
   --fov \
-  --udp
+  --udp --jpeg
 ```
 
 Bare `--udp` targets `127.0.0.1:5005`; use `--udp HOST:PORT` for another bridge. `--out /tmp/beacon-live.jsonl` may be combined with `--udp` to record while streaming. No `--out` is needed for live-only use.
+
+`--jpeg` also sends one downscaled JPEG per frame as a separate raw UDP datagram (not written to `--out` or to the world record); the bridge forwards it to the dashboard Camera panel. It requires `--udp`. Defaults are `--jpeg-width 320`, `--jpeg-quality 60`, `--jpeg-every 1`; raise `--jpeg-every` to lower the preview rate. Frames over 60 KB are dropped with one warning.
 
 The probe opens the camera and creates both ORT sessions and the hand landmarker once per process, then reuses them across frames. `--ort-intra N` (laptop default 4) sets ORT intra-op threads and `--ort-parallel` enables ORT parallel mode; these are laptop-only knobs, not QNX settings. Each record's `last_seen_ns` is the frame capture time; held HOLD data keeps its original timestamp.
 

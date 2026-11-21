@@ -41,6 +41,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LABELS = REPO_ROOT / "models" / "labels.txt"
 DEPTH_SAMPLER_BOX = "box_median"
 DEPTH_SAMPLER_PATCH = "patch_median"
+DEFAULT_PREVIEW_WIDTH = 320
+DEFAULT_PREVIEW_QUALITY = 60
 
 
 @dataclass
@@ -121,6 +123,23 @@ def letterbox(frame: Any, affine: Affine, pad_color: Tuple[int, int, int]):
     y0 = int(round(affine.pad_y))
     canvas[y0 : y0 + new_h, x0 : x0 + new_w] = resized
     return canvas
+
+
+def encode_preview(frame: Any, width: int, quality: int) -> Optional[bytes]:
+    """Encode one downscaled BGR JPEG for the bridge; None if encoding fails."""
+    import cv2
+
+    frame_h, frame_w = frame.shape[:2]
+    scale = min(1.0, float(width) / frame_w)
+    small = cv2.resize(
+        frame,
+        (max(1, round(frame_w * scale)), max(1, round(frame_h * scale))),
+        interpolation=cv2.INTER_AREA,
+    )
+    ok, encoded = cv2.imencode(
+        ".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
+    )
+    return encoded.tobytes() if ok else None
 
 
 def parse_csv3(text: str, name: str) -> Tuple[float, float, float]:
@@ -757,6 +776,8 @@ def probe_once(
     std: Tuple[float, float, float],
     pad_color: Tuple[int, int, int],
     resources: ProbeResources,
+    *,
+    want_jpeg: bool = False,
 ) -> Dict[str, Any]:
     """Capture and process one frame; timings_ms reports stage durations in ms."""
     cycle_started_ns = time.perf_counter_ns()
@@ -803,7 +824,7 @@ def probe_once(
         timings_ms["hands"] = (time.perf_counter_ns() - started_ns) / 1e6
     timings_ms["cycle"] = (time.perf_counter_ns() - cycle_started_ns) / 1e6
 
-    return {
+    result: Dict[str, Any] = {
         "frame_id": frame_id,
         "t_ns": t_ns,
         "W": frame_w,
@@ -831,6 +852,19 @@ def probe_once(
         "notes": notes,
         "timings_ms": timings_ms,
     }
+
+    if want_jpeg:
+        started_ns = time.perf_counter_ns()
+        jpeg = encode_preview(
+            frame,
+            getattr(args, "jpeg_width", DEFAULT_PREVIEW_WIDTH),
+            getattr(args, "jpeg_quality", DEFAULT_PREVIEW_QUALITY),
+        )
+        timings_ms["jpeg"] = (time.perf_counter_ns() - started_ns) / 1e6
+        if jpeg is not None:
+            result["jpeg"] = jpeg
+
+    return result
 
 
 def main() -> int:

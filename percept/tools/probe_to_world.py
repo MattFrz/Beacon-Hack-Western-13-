@@ -54,6 +54,7 @@ IDENTITY_T_WORLD_FROM_CAM: Tuple[int, ...] = (
 )
 TARGET_KEYS = ("id", "name", "xyz_cam", "xyz_world", "conf", "last_seen_ns", "frame_id", "pose_epoch")
 DEFAULT_UDP_TARGET = "127.0.0.1:5005"
+MAX_VIDEO_BYTES = 60_000
 HOLD_MAX_NS = 1_500_000_000
 
 
@@ -294,6 +295,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="capture one frame; images are always once, cameras loop until SIGINT",
     )
+    parser.add_argument(
+        "--jpeg",
+        action="store_true",
+        help="send a downscaled JPEG as a second raw UDP datagram (requires --udp)",
+    )
+    parser.add_argument(
+        "--jpeg-width",
+        type=int,
+        default=probe_frame.DEFAULT_PREVIEW_WIDTH,
+        help=f"preview width in pixels (default {probe_frame.DEFAULT_PREVIEW_WIDTH})",
+    )
+    parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=probe_frame.DEFAULT_PREVIEW_QUALITY,
+        help=f"JPEG quality (default {probe_frame.DEFAULT_PREVIEW_QUALITY})",
+    )
+    parser.add_argument(
+        "--jpeg-every",
+        type=int,
+        default=1,
+        help="send one preview every N processed frames (default 1)",
+    )
     return parser
 
 
@@ -303,11 +327,14 @@ def _output(path: str) -> contextlib.AbstractContextManager:
     return Path(path).open("w", encoding="utf-8")
 
 
-def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
+def emit_lines(
+    args: argparse.Namespace, on_video=None
+) -> Iterator[Dict[str, Any]]:
     """Yield world records; camera/sessions/landmarker live for the whole loop."""
     labels, mean, std, pad_color, resources = probe_frame.prepare(args)
     stop_after_one = args.once or args.image is not None
     seq = 0
+    frame_index = 0
     last_d_m: Optional[float] = None
     last_seen_ns: Optional[int] = None
     last_objects: Optional[List[Dict[str, Any]]] = None
@@ -315,8 +342,9 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
 
     with resources:
         while True:
+            want_jpeg = on_video is not None and frame_index % args.jpeg_every == 0
             probe = probe_frame.probe_once(
-                args, labels, mean, std, pad_color, resources
+                args, labels, mean, std, pad_color, resources, want_jpeg=want_jpeg
             )
             world = probe_to_world(
                 probe,
@@ -338,6 +366,10 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
             elif "d_m" in world:
                 last_d_m = world["d_m"]
             yield world
+            jpeg = probe.get("jpeg")
+            if want_jpeg and jpeg is not None:
+                on_video(jpeg)
+            frame_index += 1
             seq += 2
             if stop_after_one:
                 return
@@ -346,6 +378,10 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.jpeg and args.udp is None:
+        parser.error("--jpeg requires --udp: raw JPEG bytes have no JSONL form")
+    if args.jpeg and args.jpeg_every < 1:
+        parser.error("--jpeg-every must be at least 1")
     if args.out is None and args.udp is None:
         parser.error("one of --out or --udp is required")
     udp_target: Optional[Tuple[str, int]] = None
@@ -363,7 +399,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if udp_target is not None
                 else None
             )
-            for world in emit_lines(args):
+            warned_oversize = False
+
+            def send_video(jpeg: bytes) -> None:
+                nonlocal warned_oversize
+                if len(jpeg) > MAX_VIDEO_BYTES:
+                    if not warned_oversize:
+                        print(
+                            f"jpeg {len(jpeg)} bytes exceeds {MAX_VIDEO_BYTES}; "
+                            "dropping preview (lower --jpeg-width/--jpeg-quality)",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        warned_oversize = True
+                    return
+                sock.sendto(jpeg, udp_target)
+
+            for world in emit_lines(args, on_video=send_video if sock is not None else None):
                 line = json.dumps(world, separators=(",", ":"), sort_keys=False)
                 if out is not None:
                     out.write(line)

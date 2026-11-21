@@ -455,6 +455,34 @@ class ProbeRuntimeTest(unittest.TestCase):
         )
         self.assertIsNone(no_hands["health"]["last_hands_ms"])
 
+    def test_probe_once_jpeg_only_when_requested(self):
+        args = self.make_args()
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        jpeg = b"\xff\xd8preview"
+        encode_calls = []
+
+        def fake_encode(frame, width, quality):
+            encode_calls.append((frame.shape, width, quality))
+            return jpeg
+
+        with (
+            synthetic_probe_modules(),
+            self.fake_model_calls(),
+            patch.object(probe_frame, "encode_preview", side_effect=fake_encode),
+            resources,
+        ):
+            without = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+            with_jpeg = probe_frame.probe_once(
+                args, labels, mean, std, pad, resources, want_jpeg=True
+            )
+
+        self.assertNotIn("jpeg", without)
+        self.assertNotIn("jpeg", without["timings_ms"])
+        self.assertEqual(with_jpeg["jpeg"], jpeg)
+        self.assertIsInstance(with_jpeg["timings_ms"]["jpeg"], float)
+        self.assertGreaterEqual(with_jpeg["timings_ms"]["jpeg"], 0.0)
+        self.assertEqual(encode_calls, [((480, 640, 3), 320, 60)])
+
     def test_probe_unproject_receives_scaled_z_once(self):
         args = self.make_args("--depth-scale", "0.5")
         labels, mean, std, pad, resources = probe_frame.prepare(args)
@@ -476,6 +504,61 @@ class ProbeRuntimeTest(unittest.TestCase):
         self.assertEqual(probe["detections"][0]["Z_m"], 2.0)
         self.assertEqual(len(spy.call_args_list), 1)
         self.assertEqual(spy.call_args_list[0].args[2], 2.0)
+
+
+class PreviewEncodeTest(unittest.TestCase):
+    """JPEG preview encoding with a fake cv2; no camera or real OpenCV."""
+
+    def test_encode_preview_resizes_to_width_and_sets_quality(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        small = np.zeros((240, 320, 3), dtype=np.uint8)
+        calls = {}
+        fake_cv2 = types.ModuleType("cv2")
+        fake_cv2.INTER_AREA = 3
+        fake_cv2.IMWRITE_JPEG_QUALITY = 2
+
+        def record_resize(image, size, interpolation=None):
+            calls["resize"] = (image is frame, size, interpolation)
+            return small
+
+        def record_encode(ext, image, params):
+            calls["encode"] = (ext, image is small, params)
+            return True, types.SimpleNamespace(tobytes=lambda: b"\xff\xd8jpeg")
+
+        fake_cv2.resize = record_resize
+        fake_cv2.imencode = record_encode
+
+        with patch.dict(sys.modules, {"cv2": fake_cv2}):
+            encoded = probe_frame.encode_preview(frame, 320, 55)
+
+        self.assertEqual(encoded, b"\xff\xd8jpeg")
+        self.assertEqual(calls["resize"], (True, (320, 240), fake_cv2.INTER_AREA))
+        self.assertEqual(calls["encode"], (".jpg", True, [2, 55]))
+
+    def test_encode_preview_does_not_upscale_narrow_frames(self):
+        frame = np.zeros((240, 160, 3), dtype=np.uint8)
+        sizes = []
+        fake_cv2 = types.ModuleType("cv2")
+        fake_cv2.INTER_AREA = 3
+        fake_cv2.IMWRITE_JPEG_QUALITY = 2
+        fake_cv2.resize = lambda image, size, interpolation=None: sizes.append(size) or image
+        fake_cv2.imencode = lambda *_args: (True, types.SimpleNamespace(tobytes=lambda: b"jpeg"))
+
+        with patch.dict(sys.modules, {"cv2": fake_cv2}):
+            self.assertEqual(probe_frame.encode_preview(frame, 320, 60), b"jpeg")
+
+        self.assertEqual(sizes, [(160, 240)])
+
+    def test_encode_preview_returns_none_when_encoding_fails(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        fake_cv2 = types.ModuleType("cv2")
+        fake_cv2.INTER_AREA = 3
+        fake_cv2.IMWRITE_JPEG_QUALITY = 2
+        fake_cv2.resize = lambda image, _size, interpolation=None: image
+        fake_cv2.imencode = lambda *_args: (False, None)
+
+        with patch.dict(sys.modules, {"cv2": fake_cv2}):
+            self.assertIsNone(probe_frame.encode_preview(frame, 320, 60))
 
 
 class DepthSamplingTest(unittest.TestCase):

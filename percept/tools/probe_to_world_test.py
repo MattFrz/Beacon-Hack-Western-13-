@@ -30,6 +30,7 @@ from percept.tools.probe_to_world import (  # noqa: E402
 
 T_NS = 1_234_000_000
 FRAME_ID = 7
+JPEG = b"\xff\xd8\xff\xe0" + b"fake preview bytes"
 IDENTITY_T = [
     1, 0, 0, 0,
     0, 1, 0, 0,
@@ -512,6 +513,41 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertIsNone(args.calib)
         self.assertEqual(args.camera, 0)
 
+    def test_parser_has_jpeg_flags_with_defaults(self):
+        args = build_parser().parse_args(["--udp", "127.0.0.1:5005", "--jpeg"])
+        self.assertTrue(args.jpeg)
+        self.assertEqual(args.jpeg_width, 320)
+        self.assertEqual(args.jpeg_quality, 60)
+        self.assertEqual(args.jpeg_every, 1)
+
+        tuned = build_parser().parse_args(
+            [
+                "--jpeg", "--udp", "127.0.0.1:5005",
+                "--jpeg-width", "240", "--jpeg-quality", "45",
+                "--jpeg-every", "3",
+            ]
+        )
+        self.assertEqual(tuned.jpeg_width, 240)
+        self.assertEqual(tuned.jpeg_quality, 45)
+        self.assertEqual(tuned.jpeg_every, 3)
+
+    def test_jpeg_requires_udp(self):
+        with patch.object(probe_to_world_module, "emit_lines") as emit_lines_mock:
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                with self.assertRaises(SystemExit):
+                    probe_to_world_module.main(["--out", "-", "--jpeg"])
+        emit_lines_mock.assert_not_called()
+        self.assertIn("--jpeg", stderr.getvalue())
+        self.assertIn("--udp", stderr.getvalue())
+
+    def test_jpeg_bytes_never_enter_world_dict(self):
+        probe = make_probe()
+        probe["jpeg"] = JPEG
+        world = probe_to_world(probe, t_ns=T_NS)
+
+        self.assertNotIn("jpeg", world)
+        self.assertNotIn(JPEG, json.dumps(world, separators=(",", ":")).encode("utf-8"))
+
 
 class ReadoutTest(unittest.TestCase):
     def test_readout_reports_norm_and_record_identity(self):
@@ -626,7 +662,7 @@ class UdpEmitTest(unittest.TestCase):
     def setUp(self):
         self.receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.receiver.bind(("127.0.0.1", 0))
-        self.receiver.settimeout(2.0)
+        self.receiver.settimeout(5.0)
         self.addCleanup(self.receiver.close)
         self.target = f"127.0.0.1:{self.receiver.getsockname()[1]}"
         self.world = probe_to_world(
@@ -639,6 +675,18 @@ class UdpEmitTest(unittest.TestCase):
     def run_with_world(self, argv):
         with patch.object(
             probe_to_world_module, "emit_lines", return_value=[self.world]
+        ), contextlib.redirect_stderr(io.StringIO()):
+            return probe_to_world_module.main(argv)
+
+    def run_with_jpeg(self, argv, jpeg=JPEG, count=1):
+        def fake_emit_lines(_args, on_video=None):
+            yield self.world
+            if on_video is not None:
+                for _ in range(count):
+                    on_video(jpeg)
+
+        with patch.object(
+            probe_to_world_module, "emit_lines", side_effect=fake_emit_lines
         ), contextlib.redirect_stderr(io.StringIO()):
             return probe_to_world_module.main(argv)
 
@@ -700,6 +748,97 @@ class UdpEmitTest(unittest.TestCase):
         self.assertEqual(
             probe_to_world_module.parse_udp_target(args.udp), ("127.0.0.1", 5005)
         )
+
+    def test_jpeg_is_a_separate_raw_datagram(self):
+        self.assertEqual(self.run_with_jpeg(["--udp", self.target, "--jpeg"]), 0)
+
+        world_payload = self.receive_payload()
+        self.assertEqual(json.loads(world_payload), self.world)
+
+        video_payload = self.receive_payload()
+        self.assertTrue(video_payload.startswith(b"\xff\xd8"))
+        self.assertEqual(video_payload, JPEG)
+        with self.assertRaises(ValueError):
+            json.loads(video_payload)
+        self.assertNotIn(b"\n", video_payload)
+        self.assertLess(len(video_payload), 60_000)
+
+        self.receiver.settimeout(0.05)
+        with self.assertRaises(socket.timeout):
+            self.receiver.recvfrom(65535)
+
+    def test_jpeg_never_appears_in_out_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "world.jsonl"
+            self.assertEqual(
+                self.run_with_jpeg(
+                    ["--out", str(out), "--udp", self.target, "--jpeg"]
+                ),
+                0,
+            )
+            raw = out.read_bytes()
+            lines = raw.decode("utf-8").splitlines()
+
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0]), self.world)
+        self.assertNotIn(JPEG, raw)
+        self.assertNotIn(b"jpeg", raw)
+        self.assertEqual(json.loads(self.receive_payload()), self.world)
+        self.assertTrue(self.receive_payload().startswith(b"\xff\xd8"))
+
+    def test_jpeg_every_controls_video_datagram_count(self):
+        args = build_parser().parse_args(
+            ["--udp", self.target, "--jpeg", "--jpeg-every", "2"]
+        )
+        prepared = (
+            [], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0, 0, 0),
+            contextlib.nullcontext(),
+        )
+        # islice bounds the camera loop; no attempt is made to exhaust the fake.
+        wanted = []
+        collected = []
+
+        def fake_probe_once(*_args, **kwargs):
+            index = len(wanted)
+            wanted.append(kwargs.get("want_jpeg", False))
+            probe = make_probe(t_ns=T_NS + index)
+            if index % 2 == 0:
+                probe["jpeg"] = JPEG
+            return probe
+
+        with patch.object(probe_frame, "prepare", return_value=prepared), patch.object(
+            probe_frame, "probe_once", side_effect=fake_probe_once
+        ):
+            lines = list(islice(emit_lines(args, on_video=collected.append), 6))
+
+        # The last yielded record's post-yield callback runs on the next resume.
+        self.assertEqual(len(lines), 6)
+        self.assertEqual(
+            [line["seq"]["percept"] for line in lines], [0, 2, 4, 6, 8, 10]
+        )
+        self.assertEqual(wanted, [True, False, True, False, True, False])
+        self.assertEqual(collected, [JPEG, JPEG, JPEG])
+
+    def test_oversized_jpeg_dropped_with_one_warning(self):
+        oversized = b"\xff\xd8" + b"x" * 60_000
+
+        def fake_emit_lines(_args, on_video=None):
+            yield self.world
+            on_video(oversized)
+            on_video(oversized)
+
+        with patch.object(
+            probe_to_world_module, "emit_lines", side_effect=fake_emit_lines
+        ), contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(
+                probe_to_world_module.main(["--udp", self.target, "--jpeg"]), 0
+            )
+
+        self.assertEqual(json.loads(self.receive_payload()), self.world)
+        self.receiver.settimeout(0.05)
+        with self.assertRaises(socket.timeout):
+            self.receiver.recvfrom(65535)
+        self.assertEqual(stderr.getvalue().count("60000"), 1)
 
     def test_invalid_udp_target_errors_without_sending(self):
         for bad in (
