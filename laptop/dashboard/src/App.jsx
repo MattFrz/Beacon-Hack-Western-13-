@@ -93,7 +93,7 @@ export default function App() {
         <h2>Map</h2>
         <dl>
           <dt>Pose</dt>
-          <dd>{w.pose?.valid === true ? 'valid' : 'lost'}</dd>
+          <dd>{w.pose == null ? 'not sent' : w.pose.valid === true ? 'valid' : 'lost'}</dd>
           <dt>Pose age</dt>
           <dd><Num value={isNum(w.pose?.age_ns) ? w.pose.age_ns / 1e6 : null} digits={0} unit=" ms" /></dd>
           <dt>Object dots</dt>

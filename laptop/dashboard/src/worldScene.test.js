@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   crumbsToScene,
+  displayPose,
   poseSceneMatrix,
   poseTranslation,
   toScene,
@@ -30,6 +31,16 @@ test('poseSceneMatrix converts an identity pose into an identity scene matrix', 
     T_world_from_cam: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
   };
   assert.deepEqual(poseSceneMatrix(pose), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+});
+
+test('displayPose puts the wearer at the origin only when telemetry sends no pose', () => {
+  const assumed = displayPose({ t_ns: 1, target: { xyz_world: [0.1, 0.3, 0.6] } });
+  assert.deepEqual(poseSceneMatrix(assumed), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  assert.equal(wearerState(assumed).valid, true);
+
+  const lost = { valid: false, age_ns: 99 };
+  assert.equal(displayPose({ pose: lost }), lost); // a sent-but-lost pose keeps the frozen-wearer path
+  assert.equal(displayPose(null), undefined); // no data: no wearer
 });
 
 test('poseSceneMatrix emits column-major translation for Three.js fromArray', () => {

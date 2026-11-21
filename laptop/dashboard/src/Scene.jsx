@@ -4,6 +4,7 @@ import { Html, Line, OrbitControls } from '@react-three/drei';
 import { Matrix4 } from 'three';
 import {
   crumbsToScene,
+  displayPose,
   poseSceneMatrix,
   wearerState,
   worldHand,
@@ -40,10 +41,11 @@ export default function Scene({ world }) {
   const lastWearerPosition = useRef(null);
   for (const o of objects) seenIds.current.add(o.id);
 
-  const nextWearer = wearerState(world?.pose, lastWearerPosition.current);
+  const pose = displayPose(world);
+  const nextWearer = wearerState(pose, lastWearerPosition.current);
   if (nextWearer.position) lastWearerPosition.current = nextWearer.position;
   const wearer = { ...nextWearer, position: lastWearerPosition.current };
-  const poseMatrix = poseSceneMatrix(world?.pose);
+  const poseMatrix = poseSceneMatrix(pose);
 
   // telemd can send a bound target without objects[]; draw it on its own unless an object row already shows it.
   const targetId = world?.target?.id;
