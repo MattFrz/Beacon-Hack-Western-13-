@@ -19,6 +19,25 @@ Status: operations plan that builds on [`nathans-revision.md`](nathans-revision.
 | **Zain** | The laptop side: `bridge` and the 3D dashboard (below). |
 | **Matt** | Everything around the core: `supervisor` (spawn, runmasks, heartbeats, restarts, piezo fault path), `include/beacon.h` with Munadir, `telemd` and its JSON format plus a replay generator for Zain, pre-rendered clips (§10 list), the measurements in §15, the Profiler trace, Devpost and demo video. Lane C (VO, RETURN) after build steps 1–5 are green. |
 
+## Where your code goes and how to build it
+
+`main` has the shared skeleton: one folder per process, each with a README naming its owner (see the [README](../README.md) layout table). Branch off `main`, work in your folders only, and merge back through a PR. Changes to `include/beacon.h` go through Matt and Munadir. Changes to `laptop/samples/` (the telemetry format) go through Matt and Zain.
+
+**Shared conventions for the C/C++ processes**
+
+- Each process folder gets its own `Makefile` that builds with `-I../include`. Plain `make` builds for the laptop with `cc`/`c++`. `make CC="qcc -Vgcc_ntoaarch64le" CXX="q++ -Vgcc_ntoaarch64le"` cross-compiles for the Pi from a laptop with QNX SDP 8.0 sourced (`source qnxsdp-env.sh`). Then `scp` the binary to the Pi.
+- QNX-only calls (`ThreadCtl`, `procmgr_ability`, pulses, CamAPI, GPIO) go behind `#ifdef __QNX__`, so every process also builds and runs on a laptop.
+- Output goes to `build/` (gitignored). Model files go in `models/` (gitignored, except `labels.txt`).
+
+| Person | Branch | Folders | Builds with | Runs on a laptop as |
+| --- | --- | --- | --- | --- |
+| **Nathan** | `nathan/percept`, `nathan/camd` | `camd/` (C), `percept/` (C++), `models/` | Makefile per folder (above), linked against ONNX Runtime and OpenCV. Laptop export scripts (YOLOE prompt baking, ONNX export) live in `percept/tools/` and are Python. | `percept` on a webcam, printing boxes, metres and fingertip for one frame. `camd` is Pi-only (Sensor Framework). |
+| **Munadir** | `munadir/guided`, `munadir/voiced` | `guided/` (C), `voiced/` (C++), `include/beacon.h` with Matt | Makefile per folder. `voiced` links whisper.cpp (and llama.cpp later). | `guided` reading a fake target from shm, printing law and clip ids at 60 Hz. `voiced` on recorded WAVs, printing `{job, candidates}`. |
+| **Zain** | `zain/dashboard` | `laptop/bridge/`, `laptop/dashboard/`, `laptop/samples/` with Matt | Node 20+. `npm install` then `npm run dev` in `laptop/dashboard/`. `npm start` in `laptop/bridge/`. | Bridge replays a `.jsonl` file (or `world.sample.json`) over WebSocket, and the dashboard renders it. Never runs on the Pi. |
+| **Matt** | `matt/supervisor`, `matt/telemd` | `supervisor/` (C), `telemd/` (C), `sounds/`, `include/beacon.h` with Munadir, `laptop/samples/` replay files | Makefile per folder. | `supervisor` spawning and restarting a dummy child. `telemd` reading shm and sending JSON over UDP to `bridge` on `localhost`. A replay generator writes `.jsonl` into `laptop/samples/`. |
+
+Saturday integration: each person builds their own folder for QNX and copies the binaries to one directory on the Pi. `supervisor` is the only thing started by hand. It spawns the rest.
+
 ## Tonight: laptop work, no new hardware needed
 
 First 30 minutes: Matt and Munadir freeze `include/beacon.h` from spec §6 (frame ring, depth slot, world state with per-writer seqs, `intent.kind`, pulse codes). Everyone builds against that header.
