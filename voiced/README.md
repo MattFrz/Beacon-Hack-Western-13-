@@ -14,7 +14,20 @@ cd voiced && make          # build/beacon_cmd, build/world_in (laptop or on the 
 | `build/world_in` | **Fallback bridge:** receives Nathan's laptop probe (`percept/tools/probe_to_world.py --udp <pi-ip>:5006`) and writes `/beacon_world`, so `guided` on the Pi guides from a laptop camera. Pi clock and frame ids, identity pose, rows kept when out of view. Don't run it once `percept` on the Pi writes `/beacon_world`. |
 | `tools/fake_probe.py` | Sends probe-shaped JSON (a bottle drifting left to right, then a hand reaching in) to test `world_in` without a camera. Plain Python, no numpy. |
 
+### Hear a real recording (laptop, no Pi needed)
+
+Like the fake-world scenarios, but with real camera data. Nathan's probe turns a recorded video into world JSONL; `irl_test.sh` plays it through `world_in` into `guided` and saves what the wearer would hear:
+
+```sh
+python3 percept/tools/probe_to_world.py --video clip.mp4 --yolo ... --depth ... --hands --hand-model ... --fov --out clip.jsonl
+bash voiced/tools/irl_test.sh clip.jsonl "find bottle" /tmp/clip.wav
+```
+
+`replay_world.py clip.jsonl <pi-ip>:5006` sends the same recording to the Pi instead. `world_in` averages each object's position with its last reading (real depth is jumpy), so step counts don't flip every frame.
+
 ### Live loop with the laptop camera (Pi on the hotspot)
+
+One command on the Pi: `sh voiced/tools/pi_live.sh --metres` (bridge + guided on the JBL), or by hand:
 
 ```sh
 # Pi, terminal 1 (JBL Bluetooth running, see guided/README.md):
