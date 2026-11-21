@@ -24,4 +24,10 @@ With the full stub loop:
 ./camd --stub --hz 30 --frames 90
 ```
 
+Check the shm ring from another shell:
+
+```sh
+./read-frames
+```
+
 On QNX, build with `qcc` and run only with `--stub` until the CamAPI adapter lands. `CAM_W`, `CAM_H`, `stride`, and `frametype` come from the camera probe, never from this stub.

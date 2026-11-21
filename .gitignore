@@ -12,6 +12,7 @@ models/*.bin
 build/
 *.o
 camd/camd
+camd/read-frames
 
 # Laptop (Node)
 node_modules/
