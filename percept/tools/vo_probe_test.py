@@ -57,6 +57,26 @@ def make_clip(path: Path) -> float:
 
 
 class VoProbeTests(unittest.TestCase):
+    def test_record_mode_needs_no_h_chest(self):
+        """--record is pure capture; the watchdog argument belongs to probing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run(
+                [sys.executable, str(PROBE), "--record", str(Path(tmp) / "rec"),
+                 "--seconds", "0.01"],
+                capture_output=True, text=True, timeout=60, cwd=str(REPO_ROOT))
+            self.assertNotIn("--h-chest", proc.stderr,
+                             "record mode must not demand the watchdog argument")
+            self.assertNotIn("need --depth", proc.stderr,
+                             "record mode must not demand a depth source")
+
+    def test_probe_mode_requires_h_chest(self):
+        proc = subprocess.run(
+            [sys.executable, str(PROBE), "--video", "/nonexistent.avi",
+             "--flat-depth", "2.0"],
+            capture_output=True, text=True, timeout=60, cwd=str(REPO_ROOT))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("--h-chest", proc.stderr)
+
     def test_recorded_clip_recovers_scripted_translation(self):
         with tempfile.TemporaryDirectory() as tmp:
             avi = Path(tmp) / "walk.avi"

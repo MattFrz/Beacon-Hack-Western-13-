@@ -73,8 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fov", type=float, nargs="?", const=66.0,
                         help="bare = 66 deg pinhole guess; not a chessboard")
     parser.add_argument("--calib", type=Path, help="models/calib.json overrides --fov")
-    parser.add_argument("--h-chest", type=float, required=True,
-                        help="measured camera height above the floor (watchdog)")
+    parser.add_argument("--h-chest", type=float, metavar="M",
+                        help="measured camera height above the floor (watchdog); "
+                             "required for probing, not for --record")
     parser.add_argument("--vo-width", type=int, default=320,
                         help="VO gray working width (default 320)")
     parser.add_argument("--out", type=Path, help="append per-step JSONL here")
@@ -121,16 +122,20 @@ def iter_frames(path: Path) -> Iterator[np.ndarray]:
 
 def main() -> int:
     args = build_parser().parse_args()
-    if args.depth is None and args.flat_depth is None:
-        raise SystemExit("need --depth ONNX or --flat-depth Z (bring-up)")
-    if args.flat_depth is not None and args.flat_depth <= 0:
-        raise SystemExit("--flat-depth must be positive metres")
-
     if args.record is not None:
         camera = 0 if args.camera is None else args.camera
         n = record_frames(args.record, camera, args.seconds)
         print(f"recorded {n} frames to {args.record}")
         return 0
+    if args.depth is None and args.flat_depth is None:
+        raise SystemExit("need --depth ONNX or --flat-depth Z (bring-up)")
+    if args.flat_depth is not None and args.flat_depth <= 0:
+        raise SystemExit("--flat-depth must be positive metres")
+    if args.h_chest is None:
+        raise SystemExit("VO needs --h-chest M (measured camera height "
+                         "above the floor) for the watchdog")
+    if args.h_chest <= 0:
+        raise SystemExit("--h-chest must be positive metres")
 
     if args.camera is not None:
         cap = cv2.VideoCapture(args.camera)
