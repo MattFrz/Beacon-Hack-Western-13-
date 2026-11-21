@@ -1,8 +1,9 @@
 # Visual odometry integration design
 
 Date: 2026-11-21
-Status: approved approach, pre-review against the QNX track (findings in the
-last section; amend after review)
+Status: approved approach, QNX-track-reviewed; implementation in progress
+on `nathan/vo` (geometry core + probe done; walk tuning and the C++ port
+gated on hardware — see the QNX findings section for the live check)
 Owner of the code this describes: Nathan (`percept/`)
 Source of truth: [`nathans-revision.md`](../nathans-revision.md) §7–§8. Where
 this document refines §8 (KLT front-end instead of per-frame ORB), the team
@@ -229,7 +230,12 @@ the QNX OpenCV/ORT packages exist and `camd` publishes real frames.
   confirm `video` + `calib3d` link before writing `vo.cpp`. If `video` cannot
   be had, the documented fallback is **approach B** (ORB per frame,
   `features2d` only), at the measured CPU cost, decided Saturday morning at
-  the latest.
+  the latest. **Live check 2026-11-21 ~17:00 UTC:** Pi reachable; no OpenCV
+  in `/usr/lib` or under `/data`; `apkgrel` is not an installer (the QDD
+  package UI is the only path). Decision per this spec's gate: **A stands** —
+  the gate is install-and-verify, so B flips only if the `oss.qnx.com`
+  install attempt cannot provide `libopencv_video`. Install attempt pending
+  (QDD UI, device screen); deadline Saturday morning.
 - **F2 — No real frames yet.** `camd` has no CamAPI adapter; the C270 is
   JPEG-only via a temporary sensor config; `/beacon_frames` carries stub/BMP
   data. VO's on-device validation is blocked behind the same camd work as
