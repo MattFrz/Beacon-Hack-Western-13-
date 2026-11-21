@@ -151,33 +151,12 @@ def encode_preview(frame: Any, width: int, quality: int) -> Optional[bytes]:
     return encoded.tobytes() if ok else None
 
 
-def render_preview(
-    frame: Any,
-    detections: Sequence[dict],
-    depth: Any,
-    *,
-    width: int,
-    quality: int,
-    target_name: Optional[str] = None,
-    depth_scale: float = 0.0,
-) -> Optional[bytes]:
-    """Stacked preview JPEG: live RGB, RGB with YOLO boxes, depth heatmap.
-
-    Panel one is what the camera sees; panel two is what detection sees (boxes,
-    labels, ranges, with the homing target highlighted); panel three is the
-    metric depth map, colourised, when a depth pass ran. None if encoding fails.
-    """
+def _draw_boxes(panel: Any, detections: Sequence[dict], frame_w: int,
+                frame_h: int, target_name: Optional[str]) -> None:
+    """Draw scaled boxes, name + range labels; the homing target stands out."""
     import cv2
 
-    import numpy as np
-
-    frame_h, frame_w = frame.shape[:2]
-    panel_w = max(1, min(int(width), int(frame_w)))
-    panel_h = max(1, round(frame_h * panel_w / float(frame_w)))
-    clean = cv2.resize(frame, (panel_w, panel_h), interpolation=cv2.INTER_AREA)
-    panels = [clean]
-
-    boxed = clean.copy()
+    panel_h, panel_w = panel.shape[:2]
     sx = panel_w / float(frame_w)
     sy = panel_h / float(frame_h)
     for det in detections:
@@ -190,32 +169,103 @@ def render_preview(
         y2 = int(round(float(box[3]) * sy))
         is_target = target_name is not None and det.get("name") == target_name
         colour = (0, 255, 255) if is_target else (60, 220, 60)
-        thickness = 2 if is_target else 1
-        cv2.rectangle(boxed, (x1, y1), (x2, y2), colour, thickness)
+        cv2.rectangle(panel, (x1, y1), (x2, y2), colour,
+                      2 if is_target else 1)
         label = str(det.get("name", "?"))
         z = det.get("Z_m")
         if isinstance(z, (int, float)) and z == z and z > 0.0:
             label = f"{label} {float(z):.2f}m"
-        cv2.putText(boxed, label, (x1, max(8, y1 - 3)),
+        cv2.putText(panel, label, (x1, max(8, y1 - 3)),
                     getattr(cv2, "FONT_HERSHEY_SIMPLEX", 0), 0.35, colour,
                     1, getattr(cv2, "LINE_AA", 16))
-    panels.append(boxed)
+
+
+def crop_depth_padding(grid: Any, depth_affine: Any) -> Any:
+    """Drop the letterbox padding from a square depth canvas.
+
+    The depth net takes a padded square, so for a 16:9 frame the real depth is
+    only the middle band; displaying the whole canvas squashes it vertically.
+    """
+    if depth_affine is None:
+        return grid
+    if isinstance(depth_affine, dict):
+        pad_x = depth_affine.get("pad_x")
+        pad_y = depth_affine.get("pad_y")
+        scale = depth_affine.get("scale")
+        full_w = depth_affine.get("full_w")
+        full_h = depth_affine.get("full_h")
+    else:
+        pad_x = getattr(depth_affine, "pad_x", None)
+        pad_y = getattr(depth_affine, "pad_y", None)
+        scale = getattr(depth_affine, "scale", None)
+        full_w = getattr(depth_affine, "full_w", None)
+        full_h = getattr(depth_affine, "full_h", None)
+    try:
+        x0 = int(round(float(pad_x)))
+        y0 = int(round(float(pad_y)))
+        w = int(round(float(full_w) * float(scale)))
+        h = int(round(float(full_h) * float(scale)))
+    except (TypeError, ValueError):
+        return grid
+    if w <= 0 or h <= 0:
+        return grid
+    grid_h, grid_w = grid.shape[:2]
+    x1 = min(grid_w, x0 + w)
+    y1 = min(grid_h, y0 + h)
+    x0 = max(0, min(x0, x1 - 1))
+    y0 = max(0, min(y0, y1 - 1))
+    crop = grid[y0:y1, x0:x1]
+    return crop if crop.size else grid
+
+
+def render_preview(
+    frame: Any,
+    detections: Sequence[dict],
+    depth: Any,
+    *,
+    width: int,
+    quality: int,
+    target_name: Optional[str] = None,
+    depth_scale: float = 0.0,
+    depth_affine: Any = None,
+) -> Optional[bytes]:
+    """Stacked preview JPEG: RGB with YOLO boxes, then depth with the same boxes.
+
+    Panel one is what detection sees (boxes, labels, ranges, target
+    highlighted); panel two is the metric depth map colourised, carrying the
+    same boxes so an object's depth footprint is readable. None if encoding
+    fails.
+    """
+    import cv2
+
+    import numpy as np
+
+    frame_h, frame_w = frame.shape[:2]
+    panel_w = max(1, min(int(width), int(frame_w)))
+    panel_h = max(1, round(frame_h * panel_w / float(frame_w)))
+
+    boxed = cv2.resize(frame, (panel_w, panel_h),
+                       interpolation=cv2.INTER_AREA).copy()
+    _draw_boxes(boxed, detections, frame_w, frame_h, target_name)
+    panels = [boxed]
 
     if depth is not None:
         grid = np.asarray(depth, dtype=np.float32)
         grid = np.nan_to_num(grid, nan=0.0, posinf=0.0, neginf=0.0)
         if depth_scale:
             grid = grid * float(depth_scale)
-        span = float(grid.max() - grid.min()) if grid.size else 0.0
-        if grid.size and span >= 0.0:
+        grid = crop_depth_padding(grid, depth_affine)
+        if grid.size:
             norm = cv2.normalize(grid, None, 0, 255,
                                  getattr(cv2, "NORM_MINMAX", 32))
             colour_map = cv2.applyColorMap(
                 cv2.convertScaleAbs(norm),
                 getattr(cv2, "COLORMAP_INFERNO", 2),
             )
-            panels.append(cv2.resize(colour_map, (panel_w, panel_h),
-                                     interpolation=cv2.INTER_AREA))
+            depth_panel = cv2.resize(colour_map, (panel_w, panel_h),
+                                     interpolation=cv2.INTER_AREA)
+            _draw_boxes(depth_panel, detections, frame_w, frame_h, target_name)
+            panels.append(depth_panel)
 
     separator = np.full((2, panel_w, 3), 24, dtype=np.uint8)
     stacked = panels[0]
@@ -1341,6 +1391,7 @@ def probe_once(
             quality=getattr(args, "preview_quality", DEFAULT_PREVIEW_QUALITY),
             target_name=getattr(args, "preview_target", None),
             depth_scale=float(getattr(args, "depth_scale", 0.0)),
+            depth_affine=depth_affine if depth is not None else None,
         )
         timings_ms["preview"] = (time.perf_counter_ns() - started_ns) / 1e6
         if preview is not None:
