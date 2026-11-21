@@ -51,7 +51,7 @@ def make_detection(name: str, xyz=None, frame_id: int = FRAME_ID, conf: float = 
     return detection
 
 
-def make_probe(detections=None, hand=None, timings_ms=None):
+def make_probe(detections=None, hand=None, timings_ms=None, t_ns=None):
     probe = {
         "frame_id": FRAME_ID,
         "W": 640,
@@ -61,6 +61,8 @@ def make_probe(detections=None, hand=None, timings_ms=None):
     }
     if timings_ms is not None:
         probe["timings_ms"] = timings_ms
+    if t_ns is not None:
+        probe["t_ns"] = t_ns
     return probe
 
 
@@ -164,6 +166,12 @@ class ProbeToWorldTest(unittest.TestCase):
         world = probe_to_world(make_probe([no_xyz_target], hand), t_ns=T_NS)
         self.assertNotIn("d_m", world)
 
+    def test_baked_name_in_latest_boxes_is_live(self):
+        world = probe_to_world(make_probe([make_detection("keys")]), t_ns=T_NS)
+
+        self.assertEqual(world["mode"], "LIVE")
+        self.assertTrue(world["objects"][0]["in_latest_boxes"])
+
     def test_missing_same_frame_distance_holds_last_or_is_omitted(self):
         hand = {"frame_id": FRAME_ID + 1, "xyz_cam": [0.2, 0.1, 0.3]}
         target = make_detection("keys", [0.1, 0.2, 0.5])
@@ -215,13 +223,49 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertIsNone(unknown["health"]["last_yolo_ms"])
         self.assertIsNone(unknown["health"]["last_depth_ms"])
 
-    def test_no_detections_is_hold_with_null_hand(self):
+    def test_no_detections_without_history_is_lost_with_null_hand(self):
         world = probe_to_world(make_probe(), t_ns=T_NS)
 
-        self.assertEqual(world["mode"], "HOLD")
+        self.assertEqual(world["mode"], "LOST")
         self.assertEqual(world["objects"], [])
         self.assertIsNone(world["target"])
         self.assertIsNone(world["hand"])
+        self.assertNotIn("d_m", world)
+
+    def test_recent_missing_target_is_hold_with_held_distance(self):
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_000_000_000,
+            last_d_m=0.2,
+        )
+
+        self.assertEqual(world["mode"], "HOLD")
+        self.assertEqual(world["d_m"], 0.2)
+        self.assertIsNone(world["target"])
+        self.assertEqual(world["objects"], [])
+
+    def test_exactly_hold_max_age_is_lost_without_distance(self):
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_500_000_000,
+            last_d_m=0.2,
+        )
+
+        self.assertEqual(world["mode"], "LOST")
+        self.assertNotIn("d_m", world)
+
+    def test_older_than_hold_max_age_is_lost_without_distance(self):
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_600_000_000,
+            last_d_m=0.2,
+        )
+
+        self.assertEqual(world["mode"], "LOST")
+        self.assertNotIn("d_m", world)
 
     def test_hand_world_is_identity_and_conf_is_optional(self):
         hand = {
@@ -271,6 +315,44 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertEqual(lines[1]["d_m"], lines[0]["d_m"])
         self.assertEqual(probe_once.call_count, 2)
 
+    def test_emit_lines_tracks_live_hold_lost_and_clears_distance(self):
+        hand = {
+            "frame_id": FRAME_ID,
+            "xyz_cam": [0.2, 0.1, 0.3],
+            "conf": 0.9,
+        }
+        target = make_detection("keys", [0.1, 0.2, 0.5])
+        probes = [
+            make_probe([target], hand, t_ns=T_NS),
+            make_probe(t_ns=T_NS + 1_000_000_000),
+            make_probe(t_ns=T_NS + 1_600_000_000),
+            make_probe(t_ns=T_NS + 1_700_000_000),
+        ]
+        args = build_parser().parse_args(["--out", "-"])
+        prepared = ([], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0, 0, 0))
+
+        with patch.object(probe_frame, "prepare", return_value=prepared), patch.object(
+            probe_frame, "probe_once", side_effect=probes
+        ):
+            lines = list(islice(emit_lines(args), len(probes)))
+
+        self.assertEqual(
+            [line["t_ns"] for line in lines],
+            [
+                T_NS,
+                T_NS + 1_000_000_000,
+                T_NS + 1_600_000_000,
+                T_NS + 1_700_000_000,
+            ],
+        )
+        self.assertEqual(
+            [line["mode"] for line in lines], ["LIVE", "HOLD", "LOST", "LOST"]
+        )
+        self.assertAlmostEqual(lines[0]["d_m"], math.sqrt(0.06))
+        self.assertEqual(lines[1]["d_m"], lines[0]["d_m"])
+        self.assertNotIn("d_m", lines[2])
+        self.assertNotIn("d_m", lines[3])
+
     def test_parser_has_world_cli_flags(self):
         parser = build_parser()
         args = parser.parse_args(["--out", "-", "--once"])
@@ -317,7 +399,12 @@ class ReadoutTest(unittest.TestCase):
         self.assertNotIn("range_m=", line)
 
     def test_hold_without_distance_omits_range_and_distance(self):
-        world = probe_to_world(make_probe(), t_ns=T_NS, seq=4)
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            seq=4,
+            last_seen_ns=T_NS - 1_000_000_000,
+        )
 
         line = format_readout(world)
         self.assertIn("mode=HOLD", line)
@@ -325,12 +412,32 @@ class ReadoutTest(unittest.TestCase):
         self.assertNotIn("d_m=", line)
 
     def test_hold_can_show_held_distance_without_range(self):
-        world = probe_to_world(make_probe(), t_ns=T_NS, seq=6, last_d_m=0.2)
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            seq=6,
+            last_seen_ns=T_NS - 1_000_000_000,
+            last_d_m=0.2,
+        )
 
         line = format_readout(world)
         self.assertIn("mode=HOLD", line)
         self.assertRegex(line, r"\bd_m=0\.2(?:0+)?(?:\s|$)")
         self.assertNotIn("range_m=", line)
+
+    def test_lost_readout_omits_range_and_distance(self):
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            seq=8,
+            last_seen_ns=T_NS - 1_600_000_000,
+            last_d_m=0.2,
+        )
+
+        line = format_readout(world)
+        self.assertIn("mode=LOST", line)
+        self.assertNotIn("range_m=", line)
+        self.assertNotIn("d_m=", line)
 
     def test_main_sends_readout_to_stderr_and_jsonl_to_stdout(self):
         world = probe_to_world(

@@ -53,6 +53,7 @@ IDENTITY_T_WORLD_FROM_CAM: Tuple[int, ...] = (
 )
 TARGET_KEYS = ("id", "name", "xyz_cam", "xyz_world", "conf", "last_seen_ns", "frame_id", "pose_epoch")
 DEFAULT_UDP_TARGET = "127.0.0.1:5005"
+HOLD_MAX_NS = 1_500_000_000
 
 
 def _vec3(value: Any) -> Optional[Tuple[float, float, float]]:
@@ -123,6 +124,7 @@ def probe_to_world(
     t_ns: Optional[int] = None,
     seq: int = 0,
     last_d_m: Optional[float] = None,
+    last_seen_ns: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Convert one probe_frame result into one world JSONL record."""
     now_ns = time.monotonic_ns() if t_ns is None else int(t_ns)
@@ -161,6 +163,14 @@ def probe_to_world(
         else None
     )
 
+    seen_ns = _number(last_seen_ns)
+    if target_obj is not None and target_obj.get("in_latest_boxes"):
+        mode = "LIVE"
+    elif seen_ns is not None and (now_ns - seen_ns) < HOLD_MAX_NS:
+        mode = "HOLD"
+    else:
+        mode = "LOST"
+
     hand_probe = probe.get("hand")
     hand: Optional[Dict[str, Any]] = None
     if isinstance(hand_probe, Mapping):
@@ -176,7 +186,7 @@ def probe_to_world(
             hand["xyz_world"] = hand_probe["xyz_cam"]
 
     d_m: Optional[float] = None
-    if target is not None and hand is not None:
+    if mode == "LIVE" and target is not None and hand is not None:
         hand_xyz = _vec3(hand.get("xyz_cam"))
         target_xyz = _vec3(target.get("xyz_cam"))
         if (
@@ -187,7 +197,7 @@ def probe_to_world(
             and hand["frame_id"] == target["frame_id"]
         ):
             d_m = math.dist(hand_xyz, target_xyz)
-    if d_m is None and last_d_m is not None:
+    if d_m is None and mode != "LOST" and last_d_m is not None:
         held = _number(last_d_m)
         if held is not None:
             d_m = held
@@ -202,7 +212,7 @@ def probe_to_world(
         "v": 1,
         "t_ns": now_ns,
         "seq": {"percept": int(seq), "voiced": None, "guided": None},
-        "mode": "LIVE" if detections else "HOLD",
+        "mode": mode,
         "law": "NONE",
         "cue": None,
         "intent": None,
@@ -268,11 +278,22 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
     stop_after_one = args.once or args.image is not None
     seq = 0
     last_d_m: Optional[float] = None
+    last_seen_ns: Optional[int] = None
 
     while True:
         probe = probe_frame.probe_once(args, labels, mean, std, pad_color)
-        world = probe_to_world(probe, seq=seq, last_d_m=last_d_m)
-        if "d_m" in world:
+        world = probe_to_world(
+            probe,
+            t_ns=probe.get("t_ns"),
+            seq=seq,
+            last_d_m=last_d_m,
+            last_seen_ns=last_seen_ns,
+        )
+        if world["mode"] == "LIVE":
+            last_seen_ns = int(world["t_ns"])
+        if world["mode"] == "LOST":
+            last_d_m = None
+        elif "d_m" in world:
             last_d_m = world["d_m"]
         yield world
         seq += 2
