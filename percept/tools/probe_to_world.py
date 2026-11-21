@@ -226,7 +226,7 @@ def probe_to_world(
             and hand["frame_id"] == target["frame_id"]
         ):
             d_m = math.dist(hand_xyz, target_xyz)
-    if d_m is None and mode != "LOST" and last_d_m is not None:
+    if d_m is None and mode == "HOLD" and last_d_m is not None:
         held = _number(last_d_m)
         if held is not None:
             d_m = held
@@ -235,6 +235,8 @@ def probe_to_world(
     health = {
         "last_yolo_ms": _timing(timings, ("yolo", "last_yolo_ms")),
         "last_depth_ms": _timing(timings, ("depth", "last_depth_ms")),
+        "last_hands_ms": _timing(timings, ("hands", "last_hands_ms")),
+        "last_cycle_ms": _timing(timings, ("cycle", "last_cycle_ms")),
     }
 
     world: Dict[str, Any] = {
@@ -302,8 +304,8 @@ def _output(path: str) -> contextlib.AbstractContextManager:
 
 
 def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
-    """Yield world records from an already-prepared probe_frame CLI."""
-    labels, mean, std, pad_color = probe_frame.prepare(args)
+    """Yield world records; camera/sessions/landmarker live for the whole loop."""
+    labels, mean, std, pad_color, resources = probe_frame.prepare(args)
     stop_after_one = args.once or args.image is not None
     seq = 0
     last_d_m: Optional[float] = None
@@ -311,31 +313,34 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
     last_objects: Optional[List[Dict[str, Any]]] = None
     last_target: Optional[Dict[str, Any]] = None
 
-    while True:
-        probe = probe_frame.probe_once(args, labels, mean, std, pad_color)
-        world = probe_to_world(
-            probe,
-            t_ns=probe.get("t_ns"),
-            seq=seq,
-            last_d_m=last_d_m,
-            last_seen_ns=last_seen_ns,
-            last_objects=last_objects,
-            last_target=last_target,
-        )
-        if world["mode"] == "LIVE":
-            last_seen_ns = int(world["t_ns"])
-            last_objects = copy.deepcopy(world["objects"])
-            last_target = copy.deepcopy(world["target"])
-        if world["mode"] == "LOST":
-            last_objects = None
-            last_target = None
-            last_d_m = None
-        elif "d_m" in world:
-            last_d_m = world["d_m"]
-        yield world
-        seq += 2
-        if stop_after_one:
-            return
+    with resources:
+        while True:
+            probe = probe_frame.probe_once(
+                args, labels, mean, std, pad_color, resources
+            )
+            world = probe_to_world(
+                probe,
+                t_ns=probe.get("t_ns"),
+                seq=seq,
+                last_d_m=last_d_m,
+                last_seen_ns=last_seen_ns,
+                last_objects=last_objects,
+                last_target=last_target,
+            )
+            if world["mode"] == "LIVE":
+                last_seen_ns = int(world["t_ns"])
+                last_objects = copy.deepcopy(world["objects"])
+                last_target = copy.deepcopy(world["target"])
+            if world["mode"] == "LOST":
+                last_objects = None
+                last_target = None
+                last_d_m = None
+            elif "d_m" in world:
+                last_d_m = world["d_m"]
+            yield world
+            seq += 2
+            if stop_after_one:
+                return
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

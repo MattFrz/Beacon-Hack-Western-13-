@@ -33,6 +33,8 @@ cd laptop/dashboard && npm run dev
 
 Bare `--udp` targets `127.0.0.1:5005`; use `--udp HOST:PORT` for another bridge. `--out /tmp/beacon-live.jsonl` may be combined with `--udp` to record while streaming. No `--out` is needed for live-only use.
 
+The probe opens the camera and creates both ORT sessions and the hand landmarker once per process, then reuses them across frames. `--ort-intra N` (laptop default 4) sets ORT intra-op threads and `--ort-parallel` enables ORT parallel mode; these are laptop-only knobs, not QNX settings. Each record's `last_seen_ns` is the frame capture time; held HOLD data keeps its original timestamp.
+
 Live readout: while the probe runs, watch stderr for one compact `seq=... mode=... name=... range_m=... d_m=... objects=...` line per record (`range_m=|xyz_cam|`, unknown values omitted); JSONL/UDP are unchanged.
 
 Mode is LIVE when this record has the target in its latest boxes, HOLD while a missing target is under 1.5 s old, and LOST otherwise (no `d_m`).

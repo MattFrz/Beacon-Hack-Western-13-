@@ -139,29 +139,152 @@ def load_labels(path: Path) -> List[str]:
     return labels
 
 
-def load_frame(args: argparse.Namespace) -> Tuple[Any, int]:
-    import cv2
+class ProbeResources:
+    """Process-lifetime camera, ORT sessions, and hand landmarker.
 
-    if args.image:
-        frame = cv2.imread(str(args.image), cv2.IMREAD_COLOR)
-        if frame is None:
-            raise SystemExit(f"could not read image: {args.image}")
-        return frame, time.time_ns()
+    Enter once around a probe loop; handles are reused across cycles and
+    released on exit. Model handles are created lazily on first use.
+    """
 
-    cap = cv2.VideoCapture(args.camera)
-    if not cap.isOpened():
-        raise SystemExit(f"could not open camera {args.camera}")
-    try:
-        for _ in range(max(0, args.warmup)):
-            ok, ignored = cap.read()
-            if not ok:
-                raise SystemExit("camera read failed during warmup")
-        ok, frame = cap.read()
+    def __init__(self, args: argparse.Namespace):
+        self.args = args
+        self.cap: Any = None
+        self._options: Any = None
+        self._yolo_session: Any = None
+        self._depth_session: Any = None
+        self._landmarker: Any = None
+        self._hand_mode: Optional[str] = None
+        self._mp: Any = None
+
+    def __enter__(self) -> "ProbeResources":
+        if self.args.image is None:
+            import cv2
+
+            cap = cv2.VideoCapture(self.args.camera)
+            if not cap.isOpened():
+                cap.release()
+                raise SystemExit(f"could not open camera {self.args.camera}")
+            self.cap = cap
+            try:
+                for _ in range(max(0, self.args.warmup)):
+                    ok, _ignored = cap.read()
+                    if not ok:
+                        raise SystemExit("camera read failed during warmup")
+            except BaseException:
+                cap.release()
+                self.cap = None
+                raise
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+        if self._landmarker is not None:
+            close = getattr(self._landmarker, "close", None)
+            if callable(close):
+                close()
+            self._landmarker = None
+        for session in (self._yolo_session, self._depth_session):
+            if session is not None:
+                close = getattr(session, "close", None)
+                if callable(close):
+                    close()
+        self._yolo_session = None
+        self._depth_session = None
+
+    def session_options(self):
+        """CPU-only ORT options; --ort-intra/--ort-parallel are laptop knobs."""
+        if self._options is None:
+            import onnxruntime as ort
+
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = int(self.args.ort_intra)
+            if self.args.ort_parallel:
+                options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+            self._options = options
+        return self._options
+
+    def yolo_session(self):
+        if self.args.yolo is None:
+            return None
+        if self._yolo_session is None:
+            self._yolo_session = load_yolo_session(
+                self.args.yolo, self.session_options()
+            )
+        return self._yolo_session
+
+    def depth_session(self):
+        if self.args.depth is None:
+            return None
+        if self._depth_session is None:
+            self._depth_session = load_depth_session(
+                self.args.depth, self.session_options()
+            )
+        return self._depth_session
+
+    def read_frame(self) -> Tuple[Any, int, int]:
+        """Return (frame, frame_id, capture t_ns) for one fresh image."""
+        import cv2
+
+        if self.args.image is not None:
+            frame = cv2.imread(str(self.args.image), cv2.IMREAD_COLOR)
+            if frame is None:
+                raise SystemExit(f"could not read image: {self.args.image}")
+            t_ns = time.monotonic_ns()
+            return frame, t_ns, t_ns
+
+        if self.cap is None:
+            raise RuntimeError("camera resources are not open")
+        ok, frame = self.cap.read()
         if not ok or frame is None:
             raise SystemExit("camera read failed")
-        return frame, time.time_ns()
-    finally:
-        cap.release()
+        t_ns = time.monotonic_ns()
+        return frame, t_ns, t_ns
+
+    def hand_landmarks(self, rgb: Any, notes: List[str]):
+        """Detect one hand; the landmarker is created only on first use."""
+        if self._landmarker is None:
+            import mediapipe as mp
+
+            if self.args.hand_model is not None:
+                from mediapipe.tasks import python as mp_tasks
+                from mediapipe.tasks.python import vision
+
+                options = vision.HandLandmarkerOptions(
+                    base_options=mp_tasks.BaseOptions(
+                        model_asset_path=str(self.args.hand_model)
+                    ),
+                    running_mode=vision.RunningMode.IMAGE,
+                    num_hands=1,
+                    min_hand_detection_confidence=self.args.hand_conf,
+                    min_hand_presence_confidence=self.args.hand_conf,
+                )
+                self._mp = mp
+                self._hand_mode = "tasks"
+                self._landmarker = vision.HandLandmarker.create_from_options(options)
+            elif hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
+                self._hand_mode = "legacy"
+                self._landmarker = mp.solutions.hands.Hands(
+                    static_image_mode=True,
+                    max_num_hands=1,
+                    model_complexity=0,
+                    min_detection_confidence=self.args.hand_conf,
+                )
+            else:
+                notes.append(
+                    "MediaPipe legacy Hands is unavailable; pass --hand-model for Tasks API"
+                )
+                return None
+
+        if self._hand_mode == "tasks":
+            image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+            result = self._landmarker.detect(image)
+            return result.hand_landmarks[0] if result.hand_landmarks else None
+        result = self._landmarker.process(rgb)
+        if result.multi_hand_landmarks:
+            return result.multi_hand_landmarks[0].landmark
+        return None
 
 
 def load_calibration(path: Optional[Path], frame_w: int, frame_h: int, notes: List[str]):
@@ -231,10 +354,12 @@ def load_yolo(path: Path):
         return YOLO(str(path))
 
 
-def load_yolo_session(path: Path):
+def load_yolo_session(path: Path, sess_options: Any):
     import onnxruntime as ort
 
-    return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    return ort.InferenceSession(
+        str(path), providers=["CPUExecutionProvider"], sess_options=sess_options
+    )
 
 
 def detect_yolo_ort(
@@ -243,11 +368,11 @@ def detect_yolo_ort(
     labels: Sequence[str],
     yolo_affine: Affine,
     notes: List[str],
+    session: Any,
 ):
     import cv2
     import numpy as np
 
-    session = load_yolo_session(args.yolo)
     letterboxed = letterbox(frame, yolo_affine, (114, 114, 114))
     x = np.transpose(letterboxed, (2, 0, 1))[None, ...].astype(np.float32) / 255.0
     input_name = session.get_inputs()[0].name
@@ -306,12 +431,12 @@ def detect_yolo_ort(
     return detections
 
 
-def detect(frame: Any, args: argparse.Namespace, labels: Sequence[str], yolo_affine: Affine, notes: List[str]):
+def detect(frame: Any, args: argparse.Namespace, labels: Sequence[str], yolo_affine: Affine, notes: List[str], session: Any):
     if args.yolo is None:
         notes.append("no --yolo: detections empty")
         return []
     if args.yolo_runtime == "ort":
-        return detect_yolo_ort(frame, args, labels, yolo_affine, notes)
+        return detect_yolo_ort(frame, args, labels, yolo_affine, notes, session)
 
     model = load_yolo(args.yolo)
     result = model(frame, imgsz=args.yolo_size, conf=args.conf, verbose=False)[0]
@@ -357,10 +482,12 @@ def detect(frame: Any, args: argparse.Namespace, labels: Sequence[str], yolo_aff
     return detections
 
 
-def load_depth_session(path: Path):
+def load_depth_session(path: Path, sess_options: Any):
     import onnxruntime as ort
 
-    return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    return ort.InferenceSession(
+        str(path), providers=["CPUExecutionProvider"], sess_options=sess_options
+    )
 
 
 def predict_depth(
@@ -420,50 +547,17 @@ def unproject(u: float, v: float, z: float, calibration: Calibration) -> List[fl
     return [x, y, z]
 
 
-def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: Any, depth_affine: Affine, calibration: Optional[Calibration], scale: float, notes: List[str]):
+def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: Any, depth_affine: Affine, calibration: Optional[Calibration], scale: float, notes: List[str], resources: ProbeResources):
     if not args.hands:
         return None
 
     import cv2
-    import mediapipe as mp
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    landmark = None
-
-    if args.hand_model is not None:
-        if not args.hand_model.exists():
-            raise SystemExit(f"hand model not found: {args.hand_model}")
-        from mediapipe.tasks import python as mp_tasks
-        from mediapipe.tasks.python import vision
-
-        options = vision.HandLandmarkerOptions(
-            base_options=mp_tasks.BaseOptions(model_asset_path=str(args.hand_model)),
-            running_mode=vision.RunningMode.IMAGE,
-            num_hands=1,
-            min_hand_detection_confidence=args.hand_conf,
-            min_hand_presence_confidence=args.hand_conf,
-        )
-        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        with vision.HandLandmarker.create_from_options(options) as landmarker:
-            result = landmarker.detect(image)
-        if result.hand_landmarks:
-            landmark = result.hand_landmarks[0][8]
-    elif hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
-        with mp.solutions.hands.Hands(
-            static_image_mode=True,
-            max_num_hands=1,
-            model_complexity=0,
-            min_detection_confidence=args.hand_conf,
-        ) as hands:
-            result = hands.process(rgb)
-        if result.multi_hand_landmarks:
-            landmark = result.multi_hand_landmarks[0].landmark[8]
-    else:
-        notes.append("MediaPipe legacy Hands is unavailable; pass --hand-model for Tasks API")
+    landmarks = resources.hand_landmarks(rgb, notes)
+    if landmarks is None:
         return None
-
-    if landmark is None:
-        return None
+    landmark = landmarks[8]
 
     u = float(landmark.x) * frame.shape[1]
     v = float(landmark.y) * frame.shape[0]
@@ -485,6 +579,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image", type=Path, help="read one image instead of the camera")
     parser.add_argument("--camera", type=int, default=0, help="webcam index, default 0")
     parser.add_argument("--warmup", type=int, default=3, help="frames to drop before capture")
+    parser.add_argument(
+        "--ort-intra",
+        type=int,
+        default=4,
+        help="ORT intra_op_num_threads per session (laptop only; QNX spec uses <=3)",
+    )
+    parser.add_argument(
+        "--ort-parallel",
+        action="store_true",
+        help="use ORT parallel execution mode (laptop only; default sequential)",
+    )
     parser.add_argument(
         "--labels", type=Path, default=DEFAULT_LABELS, help="runtime vocabulary"
     )
@@ -560,7 +665,7 @@ def prepare(
     pad = parse_csv3(args.depth_pad, "--depth-pad")
     pad_color = tuple(int(round(v)) for v in pad)
     labels = load_labels(args.labels)
-    return labels, mean, std, pad_color
+    return labels, mean, std, pad_color, ProbeResources(args)
 
 
 def probe_once(
@@ -569,9 +674,11 @@ def probe_once(
     mean: Tuple[float, float, float],
     std: Tuple[float, float, float],
     pad_color: Tuple[int, int, int],
+    resources: ProbeResources,
 ) -> Dict[str, Any]:
     """Capture and process one frame; timings_ms reports stage durations in ms."""
-    frame, frame_id = load_frame(args)
+    cycle_started_ns = time.perf_counter_ns()
+    frame, frame_id, t_ns = resources.read_frame()
     frame_h, frame_w = frame.shape[:2]
 
     notes: List[str] = []
@@ -579,9 +686,15 @@ def probe_once(
     depth_affine = make_affine(frame_w, frame_h, args.depth_size, args.depth_size)
     calibration = resolve_calibration(args, frame_w, frame_h, notes)
 
-    timings_ms: Dict[str, Optional[float]] = {"yolo": None, "depth": None}
+    timings_ms: Dict[str, Optional[float]] = {
+        "yolo": None,
+        "depth": None,
+        "hands": None,
+        "cycle": None,
+    }
+    yolo_session = resources.yolo_session()
     started_ns = time.perf_counter_ns()
-    detections = detect(frame, args, labels, yolo_affine, notes)
+    detections = detect(frame, args, labels, yolo_affine, notes, yolo_session)
     timings_ms["yolo"] = (time.perf_counter_ns() - started_ns) / 1e6
     for detection in detections:
         detection["frame_id"] = frame_id
@@ -589,7 +702,7 @@ def probe_once(
     depth = None
     if args.depth is not None:
         started_ns = time.perf_counter_ns()
-        session = load_depth_session(args.depth)
+        session = resources.depth_session()
         depth = predict_depth(frame, session, depth_affine, args, mean, std, pad_color)
         for detection in detections:
             u, v = detection["center_px"]
@@ -599,12 +712,18 @@ def probe_once(
                 detection["xyz_cam"] = unproject(u, v, z, calibration)
         timings_ms["depth"] = (time.perf_counter_ns() - started_ns) / 1e6
 
+    started_ns = time.perf_counter_ns()
     hand = find_fingertip(
-        frame, frame_id, args, depth, depth_affine, calibration, args.depth_scale, notes
+        frame, frame_id, args, depth, depth_affine, calibration, args.depth_scale, notes,
+        resources,
     )
+    if args.hands:
+        timings_ms["hands"] = (time.perf_counter_ns() - started_ns) / 1e6
+    timings_ms["cycle"] = (time.perf_counter_ns() - cycle_started_ns) / 1e6
 
     return {
         "frame_id": frame_id,
+        "t_ns": t_ns,
         "W": frame_w,
         "H": frame_h,
         "vocabulary": labels,
@@ -627,8 +746,15 @@ def probe_once(
 
 def main() -> int:
     args = build_parser().parse_args()
-    labels, mean, std, pad_color = prepare(args)
-    print(json.dumps(probe_once(args, labels, mean, std, pad_color), indent=2, sort_keys=False))
+    labels, mean, std, pad_color, resources = prepare(args)
+    with resources:
+        print(
+            json.dumps(
+                probe_once(args, labels, mean, std, pad_color, resources),
+                indent=2,
+                sort_keys=False,
+            )
+        )
     return 0
 
 

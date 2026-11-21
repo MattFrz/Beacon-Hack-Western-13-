@@ -180,15 +180,43 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertEqual(world["mode"], "LIVE")
         self.assertTrue(world["objects"][0]["in_latest_boxes"])
 
-    def test_missing_same_frame_distance_holds_last_or_is_omitted(self):
+    def test_live_without_hand_omits_d_m_even_with_last(self):
         hand = {"frame_id": FRAME_ID + 1, "xyz_cam": [0.2, 0.1, 0.3]}
         target = make_detection("keys", [0.1, 0.2, 0.5])
         probe = make_probe([target], hand)
 
         self.assertNotIn("d_m", probe_to_world(probe, t_ns=T_NS))
-        self.assertEqual(
-            probe_to_world(probe, t_ns=T_NS, last_d_m=1.25)["d_m"], 1.25
+        self.assertNotIn(
+            "d_m", probe_to_world(probe, t_ns=T_NS, last_d_m=1.25)
         )
+        no_hand = probe_to_world(make_probe([target]), t_ns=T_NS, last_d_m=1.25)
+        self.assertEqual(no_hand["mode"], "LIVE")
+        self.assertNotIn("d_m", no_hand)
+
+    def test_held_d_m_applies_only_to_hold_not_live_or_lost(self):
+        target = make_detection("keys", [0.1, 0.2, 0.5])
+        live = probe_to_world(
+            make_probe([target]), t_ns=T_NS, last_d_m=0.2
+        )
+        hold = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_000_000_000,
+            last_d_m=0.2,
+        )
+        lost = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_600_000_000,
+            last_d_m=0.2,
+        )
+
+        self.assertEqual(live["mode"], "LIVE")
+        self.assertNotIn("d_m", live)
+        self.assertEqual(hold["mode"], "HOLD")
+        self.assertEqual(hold["d_m"], 0.2)
+        self.assertEqual(lost["mode"], "LOST")
+        self.assertNotIn("d_m", lost)
 
     def test_phase_a_pose_is_identity_with_no_crumbs(self):
         world = probe_to_world(
@@ -222,14 +250,26 @@ class ProbeToWorldTest(unittest.TestCase):
 
     def test_health_timings_are_numbers_when_provided(self):
         world = probe_to_world(
-            make_probe(timings_ms={"yolo": 12.5, "depth": 34}), t_ns=T_NS
+            make_probe(
+                timings_ms={
+                    "yolo": 12.5,
+                    "depth": 34,
+                    "hands": 5.5,
+                    "cycle": 61.0,
+                }
+            ),
+            t_ns=T_NS,
         )
         self.assertEqual(world["health"]["last_yolo_ms"], 12.5)
         self.assertEqual(world["health"]["last_depth_ms"], 34)
+        self.assertEqual(world["health"]["last_hands_ms"], 5.5)
+        self.assertEqual(world["health"]["last_cycle_ms"], 61.0)
 
         unknown = probe_to_world(make_probe(), t_ns=T_NS)
         self.assertIsNone(unknown["health"]["last_yolo_ms"])
         self.assertIsNone(unknown["health"]["last_depth_ms"])
+        self.assertIsNone(unknown["health"]["last_hands_ms"])
+        self.assertIsNone(unknown["health"]["last_cycle_ms"])
 
     def test_no_detections_without_history_is_lost_with_null_hand(self):
         world = probe_to_world(make_probe(), t_ns=T_NS)
@@ -381,7 +421,7 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertEqual(first["seq"]["percept"], 0)
         self.assertEqual(second["seq"]["percept"], 2)
 
-    def test_emit_lines_increments_seq_and_holds_distance(self):
+    def test_emit_lines_increments_seq_and_omits_stale_live_distance(self):
         hand = {
             "frame_id": FRAME_ID,
             "xyz_cam": [0.2, 0.1, 0.3],
@@ -393,16 +433,20 @@ class ProbeToWorldTest(unittest.TestCase):
             make_probe([target], dict(hand, frame_id=FRAME_ID + 1)),
         ]
         args = build_parser().parse_args(["--out", "-"])
-        prepared = ([], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0, 0, 0))
+        prepared = (
+            [], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0, 0, 0),
+            contextlib.nullcontext(),
+        )
+        probe_iter = iter(probes)
 
         with patch.object(probe_frame, "prepare", return_value=prepared), patch.object(
-            probe_frame, "probe_once", side_effect=probes
+            probe_frame, "probe_once", side_effect=lambda *_a, **_k: next(probe_iter)
         ) as probe_once:
             lines = list(islice(emit_lines(args), 2))
 
         self.assertEqual([line["seq"]["percept"] for line in lines], [0, 2])
         self.assertAlmostEqual(lines[0]["d_m"], math.sqrt(0.06))
-        self.assertEqual(lines[1]["d_m"], lines[0]["d_m"])
+        self.assertNotIn("d_m", lines[1])
         self.assertEqual(probe_once.call_count, 2)
 
     def test_emit_lines_tracks_live_hold_lost_and_clears_distance(self):
@@ -419,10 +463,14 @@ class ProbeToWorldTest(unittest.TestCase):
             make_probe(t_ns=T_NS + 1_700_000_000),
         ]
         args = build_parser().parse_args(["--out", "-"])
-        prepared = ([], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0, 0, 0))
+        prepared = (
+            [], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0, 0, 0),
+            contextlib.nullcontext(),
+        )
+        probe_iter = iter(probes)
 
         with patch.object(probe_frame, "prepare", return_value=prepared), patch.object(
-            probe_frame, "probe_once", side_effect=probes
+            probe_frame, "probe_once", side_effect=lambda *_a, **_k: next(probe_iter)
         ):
             stream = emit_lines(args)
             lines = [next(stream)]
