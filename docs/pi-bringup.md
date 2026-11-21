@@ -41,7 +41,10 @@ passwd
 Install from `oss.qnx.com` with the QDD package UI or the image package tool.
 On this image `pkginfo`, `pkgadd`, and `pkgremove` are absent. `apkgrel` is the
 only obvious package-named binary in `/usr/bin`. Python 3.14 and `pip` 25.1.1
-are present, but no CV/ML Python packages were found.
+are present, but no CV/ML Python packages were found. PyPI did not provide a
+QNX wheel for numpy 2.5.5; pip fell back to a source build and failed in Meson
+with `Cython requires python3 dependency for link testing`. Use QNX ports or
+`oss.qnx.com` binaries, not plain PyPI wheels, for the native packages.
 
 Record the exact package name and version shown by the tool. The research
 versions below are targets, not observations.
@@ -166,3 +169,4 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | 2026-11-21 13:54 UTC | Skeleton deployed to Pi | Copied `include/beacon.h`, `camd/`, and `percept/` to `/data/home/qnxuser/beacon-test`. Both built with the on-device toolchain. |
 | 2026-11-21 13:54 UTC | `camd`/`percept-head` on QNX | `sudo -n ./camd --stub --once` published `frame_id=1`, 640 x 480, stride 2560, `frametype=0`, 1228800 bytes. `read-frames` saw the slot. `percept-head --once` printed the same frame and the 320 and 210 letterbox affines. |
 | 2026-11-21 13:55 UTC | Deadline test on QNX | Clock resolution is 1 ms. With 0 hogs, 600 samples had `over_period=0`. With 3 hogs, 600 samples had `over_period=0`; 1800 samples had `over_period=2` and `p95_late_ns=6902551`. The 1 ms counter is jitter, not a 16 ms miss count. |
+| 2026-11-21 14:02 UTC | pip install into local target | `pip3 install --target /data/home/qnxuser/beacon-test/pythonlibs numpy opencv-python-headless onnxruntime mediapipe` failed on numpy metadata generation. No QNX wheel was found; the source build failed with a Cython link-test error. No package was installed. |
