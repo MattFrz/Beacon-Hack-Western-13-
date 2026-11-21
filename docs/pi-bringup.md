@@ -87,18 +87,26 @@ probe. Save the frame under `/data/home/qnxuser/`, not in git.
 
 | Camera | Unit number | `W x H` | Frametype | Focus lock possible | Frame saved to | Date |
 | --- | --- | --- | --- | --- | --- | --- |
-| C270 USB | unit 5 configured, no USB device enumerated | not captured | not captured | unknown | no frame | 2026-11-21 13:52 UTC |
+| C270 USB | unit 5 in shipped config; unit 1 with temporary JPEG config | 640 x 480 configured | JPEG only | unknown | live frame rendered and screenshotted to `/tmp/c270-frame.bmp`; not a raw sensor frame in git | 2026-11-21 14:35 UTC |
 | Camera Module 3 CSI | units 3 and 4 configured as `imx708` | 2304 x 1296 configured | `nv12` configured | unknown | no frame | 2026-11-21 13:52 UTC |
 
-`/etc/config/sensor/sensor_rpi5.conf` also defines simulator units 1 and 2,
-USB units 5 to 7, and ISP tuning for units 3 and 4. `camera_example1_callback`
-lists only `CAMERA_UNIT_1` and `CAMERA_UNIT_2`. Running
-`camera_example1_callback -u 1` returned `Failed in call to read: err = 25
-numbytes 0`. Starting `sensor` under `sudo` stayed alive in the foreground,
-but detached attempts did not leave a `sensor` process in `pidin ar`.
+`/etc/config/sensor/sensor_rpi5.conf` defines simulator units 1 and 2, USB
+units 5 to 7, and ISP tuning for units 3 and 4. Plain `pidin ar` as `qnxuser`
+only lists the user's own processes; use `sudo pidin ar` to see the Sensor
+service. The shipped C270 entry is unit 5, but the camera only lists JPEG
+formats in `mjpeg_example -l`; `camera_example1_callback` forces ycbycr and
+returns `Failed in call to read: err = 25 numbytes 0`.
 
-Focus-lock gate is still open. No frame was captured, so `CAM_W`, `CAM_H`, and
-frametype are still unset.
+A temporary `/tmp/beacon_sensor_mjpeg.conf` starts unit 1 with
+`default_video_format = jpeg`. With Sensor restarted from that config,
+`mjpeg_example` reports `CAMERA_STATUS_CONNECTED` and renders the live camera.
+`sudo screenshot -file=/tmp/c270-frame.bmp` saved a 1024x600 screenshot of the
+displayed feed. That file is a screen capture, not the raw 640x480 JPEG frame,
+and it is not committed.
+
+Focus-lock gate is still open. `camd` has no decoded camera frames yet, so
+`CAM_W`, `CAM_H`, and frametype are still unset in `include/beacon.h`. The C270
+remains a bring-up fallback, not the chosen camera.
 
 ## 4. USB audio
 
@@ -181,3 +189,4 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | 2026-11-21 14:24 UTC | C270 enumerated | `usb` now shows Logitech `0x046d:0x0825` C270 HD WEBCAM on USB 0. `/dev/sensor/camera5` exists. `camera_example1_callback -u 5` still returns `Failed in call to read: err = 25 numbytes 0`. No frame captured. |
 | 2026-11-21 14:28 UTC | Sensor process visibility | `sudo pidin ar` shows the Sensor service already running as `sensor -U 521:521 -b external -r /data/share/sensor -c /etc/config/sensor/sensor_rpi5.conf`. Plain `pidin ar` as `qnxuser` only showed the current shell, so earlier `no-sensor` checks were not valid. New sensor instances exited; this is not yet a camera fix. |
 | 2026-11-21 14:30 UTC | Raw YOLO decode and depth bounds | `probe_frame.py` now decodes the raw `(1, 21, 2100)` YOLOE output through ONNX Runtime with letterbox, inverse, and NMS. It detected four people in `bus.jpg`; combined with depth, sampled Z was 6.1 to 10.4 m. Fixed a right-edge `depth_at_full` index bug found by review. |
+| 2026-11-21 14:35 UTC | Live C270 frame | C270 exposes JPEG only: `mjpeg_example -l` lists JPEG at 640x480 and other sizes. `camera_example1_callback` forces ycbycr and still fails with err 25. Restarted Sensor with a temporary `/tmp/beacon_sensor_mjpeg.conf` using `default_video_format = jpeg`; `mjpeg_example` reported `CAMERA_STATUS_CONNECTED`, decoded JPEG, and rendered a live scene. `sudo screenshot -file=/tmp/c270-frame.bmp` captured it. This proves camera capture; it is not yet a raw frame in `/beacon_frames` and does not freeze C270 geometry in `include/beacon.h`. |
