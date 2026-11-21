@@ -22,6 +22,9 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
+#define SMOOTH_ALPHA    0.5f          /* new reading weight for object positions */
+#define SMOOTH_FRESH_NS 700000000ull  /* only smooth if the last reading is this recent */
+
 static volatile sig_atomic_t g_stop;
 static void on_signal(int s) { (void)s; g_stop = 1; }
 
@@ -144,12 +147,19 @@ static int apply(const char *json, uint64_t now)
             const char *live = find_key(p, oe, "in_latest_boxes");
             int is_live = !live || *live == 't';   /* HOLD replays arrive as false: skip */
             if (is_live && get_str(p, oe, "name", name, sizeof(name)) && get_vec3(p, oe, "xyz_cam", xyz)) {
-                uint32_t id = (uint32_t)get_num(p, oe, "id", 0);
+                const char *idp = find_key(p, oe, "id");
+                uint32_t id = idp ? (uint32_t)strtoul(idp, NULL, 10) : 0;
                 beacon_object_t *o = &g_p.objects[row_for(name, id)];
+                /* Real depth jumps around: average with the last position if it was
+                 * seen recently, so "two steps" / "three steps" don't flip each frame. */
+                int recent = o->used && o->id == id && now - o->last_seen_ns < SMOOTH_FRESH_NS;
+                if (recent)
+                    for (int k = 0; k < 3; ++k)
+                        xyz[k] = o->xyz_cam[k] + SMOOTH_ALPHA * (xyz[k] - o->xyz_cam[k]);
                 memset(o, 0, sizeof(*o));
                 o->used = 1;
                 o->id = id;
-                strncpy(o->name, name, BEACON_NAME_LEN - 1);
+                snprintf(o->name, BEACON_NAME_LEN, "%s", name);
                 memcpy(o->xyz_cam, xyz, sizeof(xyz));
                 memcpy(o->xyz_world, xyz, sizeof(xyz)); /* identity pose */
                 o->conf = get_num(p, oe, "conf", 0.8f);
