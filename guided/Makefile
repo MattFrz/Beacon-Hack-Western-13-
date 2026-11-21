@@ -10,14 +10,16 @@ CFLAGS  += -std=c11 -Wall -Wextra -I../include -Isrc -D_POSIX_C_SOURCE=200809L
 ifneq (,$(findstring qcc,$(CC)))
   CFLAGS += -D_QNX_SOURCE
   LDLIBS := -lm
+  GUIDED_LIBS := -lasound
 else ifeq ($(shell uname -s),QNX)
   CFLAGS += -D_QNX_SOURCE
   LDLIBS := -lm
+  GUIDED_LIBS := -lasound
 else
   LDLIBS := -lpthread -lm -lrt
 endif
 
-GUIDED_SRC := src/main.c src/law.c src/audio.c src/platform.c
+GUIDED_SRC := src/main.c src/law.c src/audio.c src/audio_out.c src/clips.c src/platform.c
 
 .PHONY: all test clean
 all: $(BUILD)/guided $(BUILD)/fakeworld $(BUILD)/test_law
@@ -26,7 +28,7 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 $(BUILD)/guided: $(GUIDED_SRC) src/*.h ../include/beacon.h | $(BUILD)
-	$(CC) $(CFLAGS) -o $@ $(GUIDED_SRC) $(LDLIBS)
+	$(CC) $(CFLAGS) -o $@ $(GUIDED_SRC) $(LDLIBS) $(GUIDED_LIBS)
 
 $(BUILD)/fakeworld: tools/fakeworld.c ../include/beacon.h | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ tools/fakeworld.c $(LDLIBS)

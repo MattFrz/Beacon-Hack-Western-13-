@@ -1,12 +1,16 @@
 /* audio.c: guided's audio thread. See audio.h.
  *
- * Laptop: prints what the wearer would hear.
- * QNX: same printing for now; USB playback through io-audio is a TODO until a
- * USB headset or speaker is on the Pi (the JBL Go 3 is Bluetooth-only).
+ * Mixes the voice clips (clips.c), REACH ticks and the continuous tone into
+ * 10 ms stereo blocks and hands them to audio_out.c: a WAV file or nothing on
+ * a laptop, the QNX sound device or the Bluetooth PCM pipe on the Pi.
+ * Also prints what the wearer hears.
  */
 #include "audio.h"
+#include "audio_out.h"
+#include "clips.h"
 #include "platform.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -111,7 +115,6 @@ static void print_say(const guided_cmd_t *c)
         n += (size_t)snprintf(line + n, sizeof(line) - n, "%s%s", i ? " " : "", w);
     }
     printf("[%7.3f] SAY%s  \"%s\"\n", secs(), c->priority ? "!" : " ", line);
-    /* TODO(QNX): play sounds/<clip>.wav (and sounds/name_<label>.wav) through io-audio. */
 }
 
 static const char *law_name(int law)
@@ -126,15 +129,136 @@ static const char *mode_name(int mode)
     return (mode >= 0 && mode <= BEACON_MODE_LOST) ? n[mode] : "?";
 }
 
+/* ------------------------------------------------------------------ synth */
+#define SPEECH_GAIN 0.90f
+#define TICK_GAIN   0.40f
+#define TONE_GAIN   0.22f
+#define TICK_LEN    (AUDIO_RATE / 50)   /* 20 ms click */
+#define RAMP        (AUDIO_RATE / 333)  /* 3 ms fade in and out, no pops */
+#define MAX_QUEUED  8
+
+typedef struct { const clip_t *list[CLIPS_MAX_PLAYLIST]; int n; } playlist_t;
+
+static struct {
+    playlist_t queue[MAX_QUEUED];   /* cues waiting to be spoken */
+    int        q_head, q_len;
+    playlist_t cur;                 /* cue being spoken */
+    int        cur_i;
+    size_t     cur_pos;
+    int        tick_left;           /* samples left in the current click */
+    float      tick_freq, tick_amp, tick_pan, tick_phase;
+    int        tone_on;
+    float      tone_pan, tone_phase, tone_level;
+} S;
+
+static void speech_clear(void)
+{
+    S.q_len = 0;
+    S.cur.n = 0;
+    S.cur_i = 0;
+    S.cur_pos = 0;
+}
+
+static void speech_push(const guided_cmd_t *c)
+{
+    playlist_t pl;
+    pl.n = clips_playlist(c->clips, c->n_clips, c->name, pl.list, CLIPS_MAX_PLAYLIST);
+    if (pl.n == 0)
+        return;
+    if (c->priority)           /* LOST, STOP, NACKs cut whatever is playing */
+        speech_clear();
+    if (S.q_len == MAX_QUEUED) { /* full: drop the oldest waiting cue */
+        S.q_head = (S.q_head + 1) % MAX_QUEUED;
+        S.q_len--;
+    }
+    S.queue[(S.q_head + S.q_len) % MAX_QUEUED] = pl;
+    S.q_len++;
+}
+
+static float speech_next(void)
+{
+    for (;;) {
+        if (S.cur_i < S.cur.n) {
+            const clip_t *c = S.cur.list[S.cur_i];
+            if (S.cur_pos < c->n)
+                return c->samples[S.cur_pos++] / 32768.0f;
+            S.cur_i++;
+            S.cur_pos = 0;
+            continue;
+        }
+        if (S.q_len == 0)
+            return 0.0f;
+        S.cur = S.queue[S.q_head];
+        S.q_head = (S.q_head + 1) % MAX_QUEUED;
+        S.q_len--;
+        S.cur_i = 0;
+        S.cur_pos = 0;
+    }
+}
+
+static void pan_gains(float pan, float *l, float *r)
+{
+    float a = (pan + 1.0f) * 0.78539816f; /* equal-power pan, pi/4 at centre */
+    *l = cosf(a);
+    *r = sinf(a);
+}
+
+static void render_block(int16_t *out, int frames)
+{
+    const float two_pi = 6.2831853f;
+    for (int i = 0; i < frames; ++i) {
+        float sp = speech_next() * SPEECH_GAIN;
+        float l = sp, r = sp;
+        if (S.tick_left > 0) {
+            int k = TICK_LEN - S.tick_left;
+            float env = 1.0f;
+            if (k < RAMP)
+                env = (float)k / RAMP;
+            else if (S.tick_left < RAMP)
+                env = (float)S.tick_left / RAMP;
+            float v = sinf(S.tick_phase) * env * S.tick_amp * TICK_GAIN, gl, gr;
+            pan_gains(S.tick_pan, &gl, &gr);
+            l += v * gl;
+            r += v * gr;
+            S.tick_phase += two_pi * S.tick_freq / AUDIO_RATE;
+            S.tick_left--;
+        }
+        float target = S.tone_on ? 1.0f : 0.0f; /* fade the tone in and out */
+        S.tone_level += (target - S.tone_level) * 0.01f;
+        if (S.tone_level > 0.001f) {
+            float v = sinf(S.tone_phase) * S.tone_level * TONE_GAIN, gl, gr;
+            pan_gains(S.tone_pan, &gl, &gr);
+            l += v * gl;
+            r += v * gr;
+            S.tone_phase += two_pi * 1320.0f / AUDIO_RATE;
+        }
+        if (S.tick_phase > two_pi)
+            S.tick_phase -= two_pi;
+        if (S.tone_phase > two_pi)
+            S.tone_phase -= two_pi;
+        l = l > 1.0f ? 1.0f : (l < -1.0f ? -1.0f : l);
+        r = r > 1.0f ? 1.0f : (r < -1.0f ? -1.0f : r);
+        out[2 * i] = (int16_t)(l * 32767.0f);
+        out[2 * i + 1] = (int16_t)(r * 32767.0f);
+    }
+}
+
 static void *audio_main(void *arg)
 {
     (void)arg;
     platform_set_thread_sched(BEACON_PRIO_AUDIO, BEACON_RUNMASK_CORE0);
 
+    int loaded = clips_load(g_cfg.sounds_dir);
+    fprintf(stderr, "guided: %d voice clips loaded from %s\n", loaded, g_cfg.sounds_dir);
+    if (audio_out_open(g_cfg.out) != 0)
+        audio_out_open("none");
+
     uint32_t seen_gen = 0;
     double last_tick_print = -1.0, last_stats_print = 0.0;
     int ticks_since_print = 0;
-    struct timespec nap = { 0, 2000000 }; /* 2 ms */
+    int16_t block[AUDIO_FRAME * AUDIO_CHANNELS];
+    const uint64_t block_ns = 1000000000ull * AUDIO_FRAME / AUDIO_RATE;
+    uint64_t next = beacon_now_ns();
 
     while (atomic_load(&g_run)) {
         /* flush first, then speech */
@@ -143,6 +267,7 @@ static void *audio_main(void *arg)
         if ((int32_t)(f - t) > 0) {
             atomic_store_explicit(&g_tail, f, memory_order_release);
             t = f;
+            speech_clear();
         }
         uint32_t h = atomic_load_explicit(&g_head, memory_order_acquire);
         while (t != h) {
@@ -150,6 +275,7 @@ static void *audio_main(void *arg)
             t++;
             atomic_store_explicit(&g_tail, t, memory_order_release);
             print_say(&c);
+            speech_push(&c);
         }
 
         /* ticks and tone: newest wins */
@@ -158,10 +284,18 @@ static void *audio_main(void *arg)
             uint32_t missed = tk.gen - seen_gen - 1;
             seen_gen = tk.gen;
             if (tk.cmd.kind == GUIDED_CMD_TONE_ON) {
+                S.tone_on = 1;
+                S.tone_pan = tk.cmd.pan;
                 printf("[%7.3f] TONE  on   pan %+.2f\n", secs(), tk.cmd.pan);
             } else if (tk.cmd.kind == GUIDED_CMD_TONE_OFF) {
+                S.tone_on = 0;
                 printf("[%7.3f] TONE  off\n", secs());
             } else {
+                S.tick_left = TICK_LEN;
+                S.tick_phase = 0.0f;
+                S.tick_pan = tk.cmd.pan;
+                S.tick_amp = tk.cmd.amp * (tk.cmd.dark ? 0.6f : 1.0f);
+                S.tick_freq = tk.cmd.dark ? 523.0f : 880.0f; /* HOLD ticks are lower */
                 ticks_since_print += 1 + (int)missed;
                 double now = secs();
                 if (g_cfg.verbose || now - last_tick_print >= 0.5) {
@@ -173,21 +307,35 @@ static void *audio_main(void *arg)
             }
         }
 
-        /* stats every 5 s, from the printer thread, never from the 16 ms thread */
-        double now = secs();
-        if (now - last_stats_print >= 5.0) {
+        /* stats every 5 s, from this thread, never from the 16 ms thread */
+        double now_s = secs();
+        if (now_s - last_stats_print >= 5.0) {
             stats_payload_t st;
             if (beacon_seq_read(&g_stats.seq, &st, &g_stats.p, sizeof(st), 4, NULL)) {
                 printf("[%7.3f] STAT  law %-6s mode %-4s d %5.2f m | loops %llu misses %llu worst %.0f us p95 %.0f us\n",
-                       now, law_name(st.law), mode_name(st.mode), st.d_m,
+                       now_s, law_name(st.law), mode_name(st.mode), st.d_m,
                        (unsigned long long)st.stats.loops, (unsigned long long)st.stats.misses,
                        st.stats.worst_late_ns / 1e3, st.stats.p95_late_ns / 1e3);
             }
-            last_stats_print = now;
+            last_stats_print = now_s;
         }
         fflush(stdout);
-        nanosleep(&nap, NULL);
+
+        /* one 10 ms block; a device or pipe paces us, otherwise the clock does */
+        render_block(block, AUDIO_FRAME);
+        audio_out_write(block, AUDIO_FRAME);
+        if (!audio_out_paced()) {
+            next += block_ns;
+            uint64_t now_ns = beacon_now_ns();
+            if (next > now_ns) {
+                struct timespec ts = { (time_t)(next / 1000000000ull), (long)(next % 1000000000ull) };
+                clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+            } else if (now_ns - next > 100000000ull) {
+                next = now_ns; /* fell far behind (laptop hiccup): do not burst */
+            }
+        }
     }
+    audio_out_close();
     return NULL;
 }
 

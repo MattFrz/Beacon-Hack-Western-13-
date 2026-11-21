@@ -38,16 +38,36 @@ Example (`lost`):
 guided: 930 loops, 0 missed deadlines, worst lateness 208 us, p95 150 us
 ```
 
-Flags: `--metres` speaks metres (spec §11: only after the tape-measure check passes; off by default), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX).
+Flags: `--metres` speaks metres (spec §11: only after the tape-measure check passes; off by default), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX), `--audio` (below), `--sounds DIR` (voice clips; default `sounds/` or `../sounds/`).
+
+## Sound
+
+`guided`'s audio thread loads the 43 clips in `sounds/` at startup and mixes speech, REACH ticks (880 Hz, 523 Hz in HOLD) and the continuous tone into 10 ms stereo blocks. Cues use the phrase clips when they match: "Keys." + "About two metres." + "A little left.".
+
+| `--audio` | Where it goes |
+| --- | --- |
+| `none` (default) | Nowhere; only the printed log |
+| `out.wav` | A WAV file of exactly what the wearer hears (laptop testing) |
+| `fifo:PATH` | The JBL over Bluetooth, through [Combadge-HTN/qnx-bluetooth](https://github.com/Combadge-HTN/qnx-bluetooth)'s PCM pipe (44.1 kHz stereo, resampled from 16 kHz). Waits quietly until the Bluetooth program is reading and reconnects if it restarts. |
+| `qnx` | The QNX sound device (USB headset or speaker) via io-audio. Untested on the Pi. |
+
+Listen on a laptop: `tools/run_scenario.sh lost --metres --audio /tmp/lost.wav`.
+
+JBL on the Pi (from the qnx-bluetooth README):
+
+1. Terminal 1: `cd ~/projects/qnx-bluetooth && test -p audio.pcm || mkfifo -m 600 audio.pcm`, then `sudo QNX_PCM_VOLUME_SHIFT=0 sh ./run-radio.sh`. Press `a`, wait for "Stream established", press `f`, wait for "PCM FIFO ready".
+2. Terminal 2: `guided --audio fifo:$HOME/projects/qnx-bluetooth/audio.pcm ...`.
+
+Bluetooth adds roughly 0.1–0.3 s of delay, which is fine for speech but makes ticks lag a fast hand; a USB headset (`--audio qnx`) has much less.
 
 ## On the Pi
 
-`make` on the Pi (QNX Developer Desktop has a compiler), or cross-compile with `make CC="qcc -Vgcc_ntoaarch64le"`. Not built on QNX yet.
+`make` on the Pi (QNX Developer Desktop has a compiler), or cross-compile with `make CC="qcc -Vgcc_ntoaarch64le"`. Links `-lasound` on QNX. Not built on QNX yet.
 
 ## Still to do
 
 - [ ] Build and run on the loaner Pi; capture the busy-loop test (spec §13 step 1) and a System Profiler trace.
-- [ ] USB audio out through `io-audio`: play `sounds/<clip>.wav` and `sounds/name_<label>.wav` (needs a USB headset or speaker; the JBL Go 3 is Bluetooth-only).
+- [ ] Hear it on the JBL through the Bluetooth pipe; try `--audio qnx` if a USB headset turns up.
 - [ ] GPIO piezo through the transistor once the parts arrive (`platform_piezo_*`).
 - [ ] Confirm the supervisor heartbeat pulse with Matt's `supervisor`.
 - [ ] Swap `beacon_mode()`'s 1.0 s LIVE window for `max(1.0 s, 2 × p95)` once `percept` publishes `p95_vision_ns` (already wired; it reads `health.p95_vision_ns`).
