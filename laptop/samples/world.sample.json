@@ -1,0 +1,49 @@
+{
+  "v": 1,
+  "t_ns": 512340000000,
+  "seq": { "percept": 1842, "voiced": 12, "guided": 30716 },
+  "mode": "LIVE",
+  "law": "REACH",
+  "cue": { "caption": "Keys. About half a metre ahead, a little right.", "clip_ids": [], "tick_hz": 6.5, "pan": 0.3, "continuous": false },
+  "intent": { "kind": "FIND", "candidates": ["keys", "keychain"], "t_ns": 509800000000 },
+  "target": {
+    "id": 3, "name": "keys",
+    "xyz_cam": [0.12, 0.35, 0.55], "xyz_world": [0.10, 0.36, 0.57],
+    "conf": 0.81, "last_seen_ns": 512100000000, "frame_id": 9211, "pose_epoch": 1
+  },
+  "hand": { "xyz_cam": [0.20, 0.42, 0.40], "xyz_world": [0.18, 0.43, 0.42], "conf": 0.92, "t_ns": 512100000000, "frame_id": 9211 },
+  "d_m": 0.18,
+  "objects": [
+    {
+      "id": 3, "name": "keys",
+      "xyz_cam": [0.12, 0.35, 0.55], "xyz_world": [0.10, 0.36, 0.57],
+      "bbox_px": [702, 548, 790, 610], "conf": 0.81,
+      "last_seen_ns": 512100000000, "frame_id": 9211, "pose_epoch": 1, "in_latest_boxes": true
+    },
+    {
+      "id": 5, "name": "bottle",
+      "xyz_cam": [-0.40, 0.10, 1.30], "xyz_world": [-0.42, 0.11, 1.33],
+      "bbox_px": [310, 280, 390, 470], "conf": 0.88,
+      "last_seen_ns": 512100000000, "frame_id": 9211, "pose_epoch": 1, "in_latest_boxes": true
+    }
+  ],
+  "pose": {
+    "valid": true, "pose_epoch": 1, "t_ns": 512100000000, "age_ns": 240000000,
+    "T_world_from_cam": [1, 0, 0, -0.02, 0, 1, 0, 0.01, 0, 0, 1, 0.02, 0, 0, 0, 1]
+  },
+  "crumbs": [
+    { "xyz_world": [0.0, 0.0, 0.0], "t_ns": 500000000000 },
+    { "xyz_world": [-0.02, 0.01, 0.02], "t_ns": 500400000000 }
+  ],
+  "health": {
+    "procs": {
+      "supervisor": { "alive": true, "hb_ns": 512330000000 },
+      "camd": { "alive": true, "hb_ns": 512320000000 },
+      "guided": { "alive": true, "hb_ns": 512335000000 },
+      "percept": { "alive": true, "hb_ns": 512100000000 },
+      "voiced": { "alive": true, "hb_ns": 509800000000 }
+    },
+    "last_yolo_ms": 210, "last_depth_ms": 130, "p95_vision_ns": 420000000,
+    "timing": { "misses_16ms": 0, "worst_late_us": 380 }
+  }
+}

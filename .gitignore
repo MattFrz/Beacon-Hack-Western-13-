@@ -1,2 +1,18 @@
 # Loaner QSTI staging (Wi-Fi PSK, onboot). Do not commit.
 sd-stage/
+
+# Large model files (see models/README.md)
+*.onnx
+*.tflite
+*.task
+*.gguf
+models/*.bin
+
+# Build output
+build/
+*.o
+
+# Laptop (Node)
+node_modules/
+dist/
+laptop/bridge/recordings/

@@ -4,7 +4,7 @@ Date: 2026-11-21
 Status: Nathan's revision — product, geometry, and QNX mechanism. Implementation source of truth for this repo.
 Path: `docs/nathans-revision.md`
 Repo: `/home/nate/Projects/Beacon-Hack-Western-13-`
-Supersedes, for product and geometry: `Beacon Hack Western build plan.md` (Nov 20) and the neighbour notes in `/home/nate/Projects/hackwestern13/docs/beacon-design.md`. Those remain research/ops background. Where they disagree with this file, this file wins.
+Supersedes, for product and geometry: `Beacon Hack Western build plan.md` (Nov 20; removed from the repo, see git history) and the neighbour notes in `/home/nate/Projects/hackwestern13/docs/beacon-design.md`. Those remain research/ops background. Where they disagree with this file, this file wins.
 
 Working name: Beacon.
 
