@@ -65,6 +65,15 @@ dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .procs li.down, .procs li.down::before { color: var(--lost); }
 .procs li span:first-child { margin-right: auto; }
 aside img { width: 100%; border-radius: 4px; }
+.events { margin: 0; padding: 0; list-style: none; }
+.events button { display: flex; gap: 8px; width: 100%; padding: 3px 0; border: 0; background: none; color: inherit; font: inherit; font-variant-numeric: tabular-nums; text-align: left; cursor: pointer; }
+.events button:hover span { text-decoration: underline; }
+.events button:focus-visible { outline: 2px solid var(--live); outline-offset: 2px; }
+.events span { margin-right: auto; }
+.events time { color: var(--muted); }
+.events .down, .events .LOST { color: var(--lost); }
+.events .HOLD { color: var(--hold); }
+.events .up, .events .LIVE { color: var(--live); }
 
 @media (max-width: 760px) {
   .app { grid-template: auto 60vh auto auto / 1fr; height: auto; }

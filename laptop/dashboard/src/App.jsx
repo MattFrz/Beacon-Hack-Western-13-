@@ -3,6 +3,7 @@ import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
 import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
 import { useState } from 'react';
 import { captionFromClips } from './clips.js';
+import Events from './Events.jsx';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import { useTelemetry } from './useTelemetry.js';
@@ -111,6 +112,9 @@ export default function App() {
             </li>
           ))}
         </ul>
+
+        <h2>Events</h2>
+        <Events log={log} setCursor={setCursor} />
 
         <h2>Timing</h2>
         <dl>
