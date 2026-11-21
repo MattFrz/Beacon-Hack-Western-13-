@@ -42,6 +42,13 @@ Check the shm ring from another shell:
 ./read-frames
 ```
 
+Verify frame-ID seeding across restarts, including a high id in a non-newest
+slot (Linux only, uses `/dev/shm`):
+
+```sh
+make test-frame-id-seed
+```
+
 QNX deadline check with hogs on cores 1-3:
 
 ```sh
