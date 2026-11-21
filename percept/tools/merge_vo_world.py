@@ -39,6 +39,7 @@ FRAME_ID_MAX = 10_000  # probe --video frame ids are monotonic ns; ignore those
 ANCHOR_GATE_M = 1.5     # association radius: sighting -> same-class anchor
 ANCHOR_MAX_OBS = 120    # robust position window per anchor
 LIVE_ONLY_NAMES = {"person"}  # people move; anchoring them pins a ghost
+INTERP_MAX_GAP_NS = 2_000_000_000  # bridge refused gaps up to 2 s for display
 
 
 def read_jsonl(path: Path) -> List[Dict[str, object]]:
@@ -175,6 +176,29 @@ def build_crumbs(vo_records: List[Dict[str, object]], dt_ns: int):
     return crumbs
 
 
+def blend_pose(Ta: List[float], Tb: List[float], alpha: float) -> List[float]:
+    """Display-side bridge across a refused gap: translation lerps, rotation
+    lerps then is re-orthonormalized (Gram-Schmidt on the columns)."""
+    cols = [[Ta[c] + alpha * (Tb[c] - Ta[c]),
+             Ta[4 + c] + alpha * (Tb[4 + c] - Ta[4 + c]),
+             Ta[8 + c] + alpha * (Tb[8 + c] - Ta[8 + c])] for c in range(3)]
+    for i in range(3):
+        for j in range(i):
+            d = sum(cols[i][k] * cols[j][k] for k in range(3))
+            cols[i] = [cols[i][k] - d * cols[j][k] for k in range(3)]
+        norm = math.sqrt(sum(v * v for v in cols[i])) or 1.0
+        cols[i] = [v / norm for v in cols[i]]
+    return [
+        cols[0][0], cols[1][0], cols[2][0],
+        Ta[3] + alpha * (Tb[3] - Ta[3]),
+        cols[0][1], cols[1][1], cols[2][1],
+        Ta[7] + alpha * (Tb[7] - Ta[7]),
+        cols[0][2], cols[1][2], cols[2][2],
+        Ta[11] + alpha * (Tb[11] - Ta[11]),
+        0, 0, 0, 1,
+    ]
+
+
 def merge(world_path: Path, vo_path: Path, out_path: Path,
           fps: float = 30.0) -> int:
     if fps <= 0:
@@ -224,18 +248,45 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
                                   and newest["frame_id"] == last_valid_frame)
                 pose_t_ns = last_valid_frame * dt_ns
                 age_ns = frame_ns - pose_t_ns
+            pose_T = list(last_valid_T)
+            interpolated = False
+            if not pose_valid and last_valid_frame is not None:
+                # Display-side bridge: offline the whole VO timeline is known,
+                # so a refused gap can be bridged to the next valid pose
+                # within the horizon instead of freezing the wearer marker.
+                next_valid = None
+                j = vo_i
+                while j < len(vo_records):
+                    if vo_records[j].get("valid"):
+                        next_valid = vo_records[j]
+                        break
+                    j += 1
+                if (next_valid is not None
+                        and (next_valid["frame_id"] - F) * dt_ns
+                        <= INTERP_MAX_GAP_NS):
+                    denom = next_valid["frame_id"] - last_valid_frame
+                    if denom > 0:
+                        alpha = (F - last_valid_frame) / denom
+                        pose_T = blend_pose(last_valid_T,
+                                            next_valid["T_world_from_cam"],
+                                            alpha)
+                        pose_valid = True
+                        interpolated = True
+                        pose_t_ns = frame_ns
+                        age_ns = 0
             rec["pose"] = {
                 "valid": pose_valid,
+                "interpolated": interpolated,
                 "pose_epoch": 1,
                 "t_ns": pose_t_ns,
                 "age_ns": age_ns,
-                "T_world_from_cam": list(last_valid_T),
+                "T_world_from_cam": pose_T,
             }
 
             for key in ("target", "hand"):
                 part = rec.get(key)
                 if isinstance(part, dict) and "xyz_cam" in part:
-                    p_world = transform_point(last_valid_T, part["xyz_cam"])
+                    p_world = transform_point(pose_T, part["xyz_cam"])
                     if p_world is not None:
                         part["xyz_world"] = p_world
                 if isinstance(part, dict) and "t_ns" in part:
@@ -250,7 +301,7 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
                 for obj in objects:
                     if not isinstance(obj, dict) or "xyz_cam" not in obj:
                         continue
-                    p_world = transform_point(last_valid_T, obj["xyz_cam"])
+                    p_world = transform_point(pose_T, obj["xyz_cam"])
                     if p_world is None:
                         continue
                     name = obj.get("name") if isinstance(obj.get("name"), str) else None

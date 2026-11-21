@@ -93,6 +93,38 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(pose["T_world_from_cam"], T(1.0))  # kept, not moved
         self.assertEqual(pose["age_ns"], (9 - 5) * DT_NS)
 
+    def test_invalid_gap_pose_is_interpolated_between_valid_steps(self):
+        """Offline the whole VO timeline is known: a refused gap gets a bridged
+        pose (lerp translation, nearest rotation) flagged interpolated=true,
+        instead of freezing the wearer marker with pose lost."""
+        merged = self.run_merge(
+            [world_record(5), world_record(7), world_record(9)],
+            [vo_record(5, True, 1.0), vo_record(7, False, 0.0),
+             vo_record(9, True, 2.0)])
+        mid = merged[1]["pose"]
+        self.assertTrue(mid["valid"])
+        self.assertTrue(mid["interpolated"])
+        self.assertEqual(mid["T_world_from_cam"][3], 1.5)  # halfway lerp
+        self.assertEqual(mid["t_ns"], 7 * DT_NS)
+        # the honest endpoints stay honest
+        self.assertFalse(merged[0]["pose"].get("interpolated", False))
+        self.assertFalse(merged[2]["pose"].get("interpolated", False))
+
+    def test_gap_longer_than_horizon_keeps_pose_lost(self):
+        """A long refusal has no trustworthy bridge: keep the held pose and the
+        pose-lost flag instead of inventing motion."""
+        merged = self.run_merge(
+            [world_record(5), world_record(7), world_record(9)],
+            [vo_record(5, True, 1.0), vo_record(7, False, 0.0),
+             vo_record(50, True, 2.0)])
+        mid = merged[1]["pose"]
+        self.assertFalse(mid["valid"])
+        self.assertFalse(mid.get("interpolated", False))
+        self.assertEqual(mid["T_world_from_cam"], T(1.0))  # held
+        # the gap is still open at frame 9: held, not bridged
+        self.assertFalse(merged[2]["pose"]["valid"])
+        self.assertEqual(merged[2]["pose"]["T_world_from_cam"], T(1.0))
+
     def test_no_vo_yet_means_invalid_identity_pose(self):
         merged = self.run_merge([world_record(1)], [vo_record(4, True, 0.5)])
         pose = merged[0]["pose"]
