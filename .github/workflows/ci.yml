@@ -60,3 +60,23 @@ jobs:
         run: make -C supervisor test
       - name: telemd build, with and without preview
         run: make -C telemd all preview
+
+  graphify:
+    name: graphify graph updated
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Code or doc changes must ship a refreshed graphify-out/graph.json (AGENTS.md)
+        run: |
+          changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD)
+          # shortcut: these extensions mirror what graphify reads in this repo; extend the list if it starts reading new types
+          tracked=$(printf '%s\n' "$changed" | grep -vE '^graphify-out/|package-lock\.json$' | grep -E '\.(c|h|cpp|py|js|jsx|json|sh|ps1|yml|md|html|txt)$' || true)
+          if [ -n "$tracked" ] && ! printf '%s\n' "$changed" | grep -qx 'graphify-out/graph.json'; then
+            echo "::error::This PR changes code or docs but not graphify-out/graph.json. Refresh the graph (see AGENTS.md) and commit graphify-out/."
+            printf '%s\n' "$tracked"
+            exit 1
+          fi
+          echo "Graph refreshed, or no code/doc changes."
