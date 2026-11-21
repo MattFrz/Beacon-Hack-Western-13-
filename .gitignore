@@ -2,15 +2,29 @@
 sd-stage/
 
 # Large model files (see models/README.md)
+__pycache__/
+*.py[cod]
 *.onnx
+*.onnx.data
 *.tflite
 *.task
 *.gguf
+*.pt
+*.part
 models/*.bin
+
+# Laptop/C270 intrinsics: local calibration only, never commit
+models/calib.json
 
 # Build output
 build/
 *.o
+camd/camd
+camd/read-frames
+camd/dump-frame
+camd/deadline-test
+camd/layout-probe
+percept/percept-head
 
 # Laptop (Node)
 node_modules/

@@ -11,7 +11,7 @@
 
 - [Simulator demo replay](sim-reach-lost.jsonl) — 15 seconds recorded through `fakeworld lost`, `guided`, `telemd`, and the live bridge. Watch the hand approach the keys, tracking switch from LIVE to HOLD to LOST, and the keys reappear on the left. The caption shows the reach ticks and then the continuous tone after recovery. To loop the recording, run `npm run replay:sim` from `laptop/bridge` with the dashboard open.
 - [`world.sample.json`](world.sample.json): one world-state message, mid-reach on the keys with a bottle in view.
-- [`dev-reach.jsonl`](dev-reach.jsonl): a 9 s replay made by [`make-dev-reach.js`](make-dev-reach.js) from the sample: WALK cue, reach (ticks, then continuous tone), `slay percept` at 6 s, HOLD, LOST. A stopgap so the dashboard can be built without the Pi; Matt's generator and real recordings replace it.
+- [`dev-reach.jsonl`](dev-reach.jsonl): a 9 s replay made by [`make-dev-reach.js`](make-dev-reach.js) from the sample: WALK cue, reach (ticks, then continuous tone), `slay percept` at 6 s, HOLD, LOST. A stopgap so the dashboard can be built without the Pi; Matt's generator and real recordings replace it. HOLD keeps the last objects faded (`in_latest_boxes: false`) with no frozen hand, while LOST clears them to an empty cloud (`objects: []`, no `d_m`).
 
 ## Field notes
 
