@@ -222,6 +222,25 @@ JBL, opened the FIFO at gain 1/1, started the stream, and consumed all 63,945
 frames of the 16 kHz → 44.1 kHz converted chime. `pairings.tlv` survived the
 reboot. On a clean TERM/HUP, GPIO, UART and `.radio-lock` are restored.
 
+Boot persistence is installed in `/usr/etc/startup/post_startup.sh`, after the
+`io-snd` block and before the final `exit 0`. The guarded snippet runs:
+
+```sh
+on -d -p 10 sh /data/home/qnxuser/projects/qnx-bluetooth/bt_audio_service.sh \
+    >/dev/null 2>&1 </dev/null
+```
+
+Backup:
+`/data/home/qnxuser/beacon-backups/post_startup.sh.20261121T160026Z`.
+Rollback is to copy that backup back over `post_startup.sh` and reboot. The
+first log line after boot may show `1970-01-01T00:00:10Z` because the service
+starts before time sync; that is cosmetic.
+
+Verified 2026-11-21 16:00 UTC: after `sudo shutdown -f` and SSH returning,
+`pidin ar` showed the service, launcher and radio process with no manual
+launch; the log showed `Auto-connecting`, `PCM FIFO ready (auto)` and
+`Stream started`. GPIO staying in ALT4 is expected while the radio is active.
+
 If an aborted session leaves the radio claimed, with no radio process running:
 
 ```sh
@@ -316,3 +335,5 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | 2026-11-21 15:27–15:41 UTC | Supervisor child bring-up | Added `supervisor/run-radio-auto.sh` and `supervisor/bt_audio_service.sh` with pinned auto-connect, auto FIFO, reconnect timer and cleanup. An SSH hangup left the BT controller wedged; the stock upstream binary failed identically, so the auto patches were not the cause. Recovered GPIO/UART with `uart_probe --idle-after-abort`. |
 | 2026-11-21 15:42 UTC | Pi reboot | Rebooted with `sudo shutdown -f` (QNX shutdown defaults to reboot; `-r` is invalid). GPIO/UART came back idle and `pairings.tlv` survived. |
 | 2026-11-21 15:47 UTC | Auto service validated | With the QNX_AUTO binary restored after the stock test: supervisor child connected to `18:90:67:DE:BC:EF` without key presses, opened `audio.pcm` at gain 1/1, started the stream, and consumed 63945 frames. Hardware was restored manually after the SSH test session hangup. |
+| 2026-11-21 15:52 UTC | Detached launch | Relaunched the service with QNX `on -d -p 10` so it survives SSH disconnect. Confirmed the service, launcher and radio process remained after the launching SSH session closed, with the JBL connected and stream started. |
+| 2026-11-21 16:00 UTC | Boot persistence | Added a guarded detached launch to `/usr/etc/startup/post_startup.sh` after `io-snd`; backup saved under `/data/home/qnxuser/beacon-backups/`. Rebooted with `sudo shutdown -f`; service started automatically, reconnected to the pinned JBL, opened the FIFO and started the stream with no manual steps. |
