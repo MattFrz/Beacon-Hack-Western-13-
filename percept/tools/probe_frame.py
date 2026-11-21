@@ -494,8 +494,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def prepare(
+    args: argparse.Namespace,
+) -> Tuple[List[str], Tuple[float, float, float], Tuple[float, float, float], Tuple[int, int, int]]:
+    """Validate CLI paths and load static labels/preprocessing for repeated frames."""
     if not args.labels.exists():
         raise SystemExit(f"labels not found: {args.labels}")
     if args.yolo is not None and not args.yolo.exists():
@@ -511,8 +513,18 @@ def main() -> int:
     std = parse_csv3(args.depth_std, "--depth-std")
     pad = parse_csv3(args.depth_pad, "--depth-pad")
     pad_color = tuple(int(round(v)) for v in pad)
-
     labels = load_labels(args.labels)
+    return labels, mean, std, pad_color
+
+
+def probe_once(
+    args: argparse.Namespace,
+    labels: Sequence[str],
+    mean: Tuple[float, float, float],
+    std: Tuple[float, float, float],
+    pad_color: Tuple[int, int, int],
+) -> Dict[str, Any]:
+    """Capture and process one frame; timings_ms reports stage durations in ms."""
     frame, frame_id = load_frame(args)
     frame_h, frame_w = frame.shape[:2]
 
@@ -521,12 +533,16 @@ def main() -> int:
     depth_affine = make_affine(frame_w, frame_h, args.depth_size, args.depth_size)
     calibration = load_calibration(args.calib, frame_w, frame_h, notes)
 
+    timings_ms: Dict[str, Optional[float]] = {"yolo": None, "depth": None}
+    started_ns = time.perf_counter_ns()
     detections = detect(frame, args, labels, yolo_affine, notes)
+    timings_ms["yolo"] = (time.perf_counter_ns() - started_ns) / 1e6
     for detection in detections:
         detection["frame_id"] = frame_id
 
     depth = None
     if args.depth is not None:
+        started_ns = time.perf_counter_ns()
         session = load_depth_session(args.depth)
         depth = predict_depth(frame, session, depth_affine, args, mean, std, pad_color)
         for detection in detections:
@@ -535,12 +551,13 @@ def main() -> int:
             detection["Z_m"] = z
             if z is not None and calibration is not None:
                 detection["xyz_cam"] = unproject(u, v, z, calibration)
+        timings_ms["depth"] = (time.perf_counter_ns() - started_ns) / 1e6
 
     hand = find_fingertip(
         frame, frame_id, args, depth, depth_affine, calibration, args.depth_scale, notes
     )
 
-    output = {
+    return {
         "frame_id": frame_id,
         "W": frame_w,
         "H": frame_h,
@@ -558,8 +575,14 @@ def main() -> int:
         "detections": detections,
         "hand": hand,
         "notes": notes,
+        "timings_ms": timings_ms,
     }
-    print(json.dumps(output, indent=2, sort_keys=False))
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    labels, mean, std, pad_color = prepare(args)
+    print(json.dumps(probe_once(args, labels, mean, std, pad_color), indent=2, sort_keys=False))
     return 0
 
 
