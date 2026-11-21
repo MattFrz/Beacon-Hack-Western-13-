@@ -33,17 +33,20 @@ cd laptop/dashboard && npm run dev
 
 Bare `--udp` targets `127.0.0.1:5005`; use `--udp HOST:PORT` for another bridge. `--out /tmp/beacon-live.jsonl` may be combined with `--udp` to record while streaming. No `--out` is needed for live-only use.
 
-Laptop-only camera calibration (9x6 inner corners, measured square side):
+Laptop-only camera calibration. Use a Python with OpenCV (this laptop: `/tmp/beacon-probe-venv/bin/python`). You do not need a printer: write a checkerboard, open it fullscreen, then photograph it from several angles.
 
 ```sh
-python3 percept/tools/calibrate_camera.py \
-  --images '/tmp/beacon-chess/*.jpg' \
-  --rows 6 --cols 9 --square-m 0.025 \
+/tmp/beacon-probe-venv/bin/python percept/tools/calibrate_camera.py \
+  --write-board /tmp/beacon-chessboard.png
+# open that PNG fullscreen, measure one square with a ruler, then either:
+/tmp/beacon-probe-venv/bin/python percept/tools/calibrate_camera.py \
+  --camera 0 --rows 6 --cols 9 --square-m 0.025 \
   --out models/calib.json
+# --camera waits for Enter between shots so you can move the board.
+# or save 8+ photos and pass --images '/tmp/beacon-chess/*.jpg'
 ```
 
-Capture at the exact resolution used by the probe; `calib.json` is laptop-local
-and gitignored, and does not make metric depth spoken without a tape check.
+`--square-m` is the real size of one square, not a default to trust. On a laptop screen it is usually smaller than 0.025 m. Capture at the same resolution the probe will use. `calib.json` is laptop-local and gitignored. It does not make spoken metres legal without a tape check.
 
 Shm reader: `src/head.cpp` builds as `percept-head`. It reads the newest `/beacon_frames` slot, prints the YOLO and depth letterbox affines, and initialises only the ABI fields of `/beacon_depth` and `/beacon_world`. No model runs yet. It writes no detections, depth, hand, or pose data.
 

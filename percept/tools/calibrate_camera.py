@@ -9,6 +9,7 @@ metric: the tape check is still a separate human step.
 
 Example:
 
+    python3 percept/tools/calibrate_camera.py --write-board /tmp/beacon-chessboard.png
     python3 percept/tools/calibrate_camera.py \
       --images '/tmp/beacon-chess/*.jpg' \
       --rows 6 --cols 9 --square-m 0.025 \
@@ -31,6 +32,38 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 MIN_BOARDS = 6
+MAX_RMS_PX = 1.5
+MIN_POSE_SPREAD_M = 0.02
+
+
+def write_board(path: Path, rows: int = 6, cols: int = 9, square_px: int = 80) -> Path:
+    """Write a printable/screen chessboard with the requested inner-corner counts."""
+    import cv2
+    import numpy as np
+
+    if rows < 2 or cols < 2:
+        raise ValueError("need at least 2x2 inner corners")
+    if square_px <= 0:
+        raise ValueError("square_px must be positive")
+    squares_x = cols + 1
+    squares_y = rows + 1
+    margin = square_px
+    board = np.full(
+        (squares_y * square_px + 2 * margin, squares_x * square_px + 2 * margin),
+        255,
+        dtype=np.uint8,
+    )
+    for row in range(squares_y):
+        for col in range(squares_x):
+            if (col + row) % 2 == 0:
+                y0 = margin + row * square_px
+                x0 = margin + col * square_px
+                board[y0 : y0 + square_px, x0 : x0 + square_px] = 0
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(path), board):
+        raise SystemExit(f"could not write chessboard {path}")
+    return path
 
 
 def make_calibration(
@@ -87,6 +120,11 @@ def calibrate_images(
     import cv2
     import numpy as np
 
+    if square_m <= 0:
+        raise ValueError("square_m must be positive")
+    if rows < 2 or cols < 2:
+        raise ValueError("need at least 2x2 inner corners")
+
     paths = list(paths)
     if len(paths) < MIN_BOARDS:
         raise ValueError(
@@ -123,9 +161,20 @@ def calibrate_images(
 
     if size is None:
         raise ValueError("no calibration images")
-    _, k_matrix, _, _, _ = cv2.calibrateCamera(
+    rms, k_matrix, _, rvecs, tvecs = cv2.calibrateCamera(
         object_points, image_points, size, None, None
     )
+    if not math.isfinite(float(rms)) or float(rms) > MAX_RMS_PX:
+        raise ValueError(
+            f"reprojection error {float(rms):.2f} px is too high "
+            f"(limit {MAX_RMS_PX} px); recapture with a flatter, sharper board"
+        )
+    translations = np.asarray([np.asarray(tvec).reshape(3) for tvec in tvecs])
+    spread = float(np.linalg.norm(translations.max(axis=0) - translations.min(axis=0)))
+    if spread < MIN_POSE_SPREAD_M:
+        raise ValueError(
+            "views are too similar; move or tilt the board between captures"
+        )
     fx, fy = float(k_matrix[0, 0]), float(k_matrix[1, 1])
     cx, cy = float(k_matrix[0, 2]), float(k_matrix[1, 2])
     if not all(math.isfinite(v) for v in (fx, fy, cx, cy)) or fx <= 0 or fy <= 0:
@@ -133,8 +182,13 @@ def calibrate_images(
     return make_calibration(fx, fy, cx, cy, size[0], size[1])
 
 
-def capture_frames(camera: int, count: int, directory: Path) -> List[Path]:
-    """Capture --count chessboard views from a webcam into a temporary folder."""
+def capture_frames(
+    camera: int,
+    count: int,
+    directory: Path,
+    prompt=input,
+) -> List[Path]:
+    """Capture --count chessboard views, pausing so the board can move."""
     import cv2
 
     cap = cv2.VideoCapture(camera)
@@ -143,6 +197,10 @@ def capture_frames(camera: int, count: int, directory: Path) -> List[Path]:
     paths: List[Path] = []
     try:
         for index in range(count):
+            if index > 0:
+                prompt(
+                    f"captured {index}/{count}. Reposition the board, then press Enter"
+                )
             ok, frame = cap.read()
             if not ok or frame is None:
                 raise SystemExit(f"camera {camera} read failed at frame {index}")
@@ -184,14 +242,28 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("models/calib.json"),
         help="output JSON path (default models/calib.json)",
     )
+    parser.add_argument(
+        "--write-board",
+        type=Path,
+        help="write a chessboard PNG for a screen or printer, then exit",
+    )
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.write_board is not None:
+        if args.images is not None or args.camera is not None:
+            parser.error("--write-board cannot be combined with --images or --camera")
+        write_board(args.write_board, rows=args.rows, cols=args.cols)
+        print(
+            f"wrote {args.write_board}. Open it fullscreen. Measure one square "
+            "with a ruler and pass that as --square-m when you calibrate."
+        )
+        return 0
     if (args.images is None) == (args.camera is None):
-        parser.error("pass exactly one of --images or --camera")
+        parser.error("pass exactly one of --images, --camera, or --write-board")
     if args.camera is not None and args.frames < MIN_BOARDS:
         parser.error(f"--frames must be at least {MIN_BOARDS}")
 

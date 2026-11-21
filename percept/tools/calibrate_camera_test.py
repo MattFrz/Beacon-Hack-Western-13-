@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -167,9 +168,72 @@ class CalibrateCameraTest(unittest.TestCase):
             cam.build_parser().parse_args(["--help"])
         self.assertEqual(caught.exception.code, 0)
         text = stdout.getvalue()
-        for flag in ("--images", "--rows", "--cols", "--square-m", "--out", "--camera"):
+        for flag in (
+            "--images",
+            "--rows",
+            "--cols",
+            "--square-m",
+            "--out",
+            "--camera",
+            "--write-board",
+        ):
             self.assertIn(flag, text)
         self.assertEqual(cam.build_parser().get_default("out"), Path("models/calib.json"))
+
+    def test_write_board_is_detectable(self):
+        import cv2
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "board.png"
+            cam.write_board(path, rows=ROWS, cols=COLS)
+            image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+            self.assertIsNotNone(image)
+            corners = cam.find_corners(image, ROWS, COLS)
+            self.assertIsNotNone(corners)
+            self.assertEqual(len(corners), ROWS * COLS)
+
+    def test_capture_frames_prompts_between_views(self):
+        import cv2
+        import numpy as np
+
+        class FakeCap:
+            def __init__(self):
+                self.index = 0
+
+            def isOpened(self):
+                return True
+
+            def read(self):
+                frame = np.full((HEIGHT, WIDTH, 3), 40 * (self.index + 1), dtype=np.uint8)
+                self.index += 1
+                return True, frame
+
+            def release(self):
+                pass
+
+        prompts = []
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(cv2, "VideoCapture", return_value=FakeCap()):
+                paths = cam.capture_frames(
+                    0, 2, Path(directory), prompt=prompts.append
+                )
+            self.assertEqual(len(paths), 2)
+            self.assertTrue(all(path.exists() for path in paths))
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("reposition", prompts[0].lower())
+
+    def test_nonpositive_square_raises(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = write_synthetic_views(directory)
+            with self.assertRaisesRegex(ValueError, "square"):
+                cam.calibrate_images(paths, rows=ROWS, cols=COLS, square_m=0.0)
+
+    def test_identical_views_raise(self):
+        with tempfile.TemporaryDirectory() as directory:
+            one = write_synthetic_views(directory, poses=POSES[:1])
+            paths = one * cam.MIN_BOARDS
+            with self.assertRaisesRegex(ValueError, "too similar"):
+                cam.calibrate_images(paths, rows=ROWS, cols=COLS, square_m=SQUARE_M)
 
 
 if __name__ == "__main__":
