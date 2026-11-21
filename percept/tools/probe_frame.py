@@ -15,7 +15,7 @@ Example:
       --image /tmp/keys.jpg \
       --yolo models/yoloe26n_320.onnx \
       --depth models/depth_anything_v2_metric_indoor_small.onnx \
-      --hands \
+      --hands --hand-model models/hand_landmarker.task \
       --calib models/calib.json
 
 Ultralytics handles the YOLO letterbox internally and returns boxes in original
@@ -254,11 +254,12 @@ def predict_depth(
     args: argparse.Namespace,
     mean: Tuple[float, float, float],
     std: Tuple[float, float, float],
+    pad_color: Tuple[int, int, int],
 ):
     import cv2
     import numpy as np
 
-    letterboxed = letterbox(frame, affine, args.depth_pad)
+    letterboxed = letterbox(frame, affine, pad_color)
     rgb = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     rgb = (rgb - np.asarray(mean, dtype=np.float32)) / np.asarray(std, dtype=np.float32)
     x = np.transpose(rgb, (2, 0, 1))[None, ...].astype(np.float32)
@@ -300,7 +301,7 @@ def unproject(u: float, v: float, z: float, calibration: Calibration) -> List[fl
     return [x, y, z]
 
 
-def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: Any, depth_affine: Affine, calibration: Optional[Calibration], scale: float):
+def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: Any, depth_affine: Affine, calibration: Optional[Calibration], scale: float, notes: List[str]):
     if not args.hands:
         return None
 
@@ -308,18 +309,43 @@ def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: A
     import mediapipe as mp
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    with mp.solutions.hands.Hands(
-        static_image_mode=True,
-        max_num_hands=1,
-        model_complexity=0,
-        min_detection_confidence=args.hand_conf,
-    ) as hands:
-        result = hands.process(rgb)
+    landmark = None
 
-    if not result.multi_hand_landmarks:
+    if args.hand_model is not None:
+        if not args.hand_model.exists():
+            raise SystemExit(f"hand model not found: {args.hand_model}")
+        from mediapipe.tasks import python as mp_tasks
+        from mediapipe.tasks.python import vision
+
+        options = vision.HandLandmarkerOptions(
+            base_options=mp_tasks.BaseOptions(model_asset_path=str(args.hand_model)),
+            running_mode=vision.RunningMode.IMAGE,
+            num_hands=1,
+            min_hand_detection_confidence=args.hand_conf,
+            min_hand_presence_confidence=args.hand_conf,
+        )
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        with vision.HandLandmarker.create_from_options(options) as landmarker:
+            result = landmarker.detect(image)
+        if result.hand_landmarks:
+            landmark = result.hand_landmarks[0][8]
+    elif hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
+        with mp.solutions.hands.Hands(
+            static_image_mode=True,
+            max_num_hands=1,
+            model_complexity=0,
+            min_detection_confidence=args.hand_conf,
+        ) as hands:
+            result = hands.process(rgb)
+        if result.multi_hand_landmarks:
+            landmark = result.multi_hand_landmarks[0].landmark[8]
+    else:
+        notes.append("MediaPipe legacy Hands is unavailable; pass --hand-model for Tasks API")
         return None
 
-    landmark = result.multi_hand_landmarks[0].landmark[8]
+    if landmark is None:
+        return None
+
     u = float(landmark.x) * frame.shape[1]
     v = float(landmark.y) * frame.shape[0]
     z = depth_at_full(depth, depth_affine, u, v, scale)
@@ -365,6 +391,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--hands", action="store_true", help="run MediaPipe hands")
     parser.add_argument(
+        "--hand-model",
+        type=Path,
+        help="MediaPipe Tasks .task model; needed when legacy solutions.Hands is absent",
+    )
+    parser.add_argument(
         "--hand-conf", type=float, default=0.5, help="MediaPipe detection confidence"
     )
     parser.add_argument(
@@ -383,6 +414,8 @@ def main() -> int:
         raise SystemExit(f"depth model not found: {args.depth}")
     if args.calib is not None and not args.calib.exists():
         raise SystemExit(f"calibration not found: {args.calib}")
+    if args.hand_model is not None and not args.hand_model.exists():
+        raise SystemExit(f"hand model not found: {args.hand_model}")
 
     mean = parse_csv3(args.depth_mean, "--depth-mean")
     std = parse_csv3(args.depth_std, "--depth-std")
@@ -405,7 +438,7 @@ def main() -> int:
     depth = None
     if args.depth is not None:
         session = load_depth_session(args.depth)
-        depth = predict_depth(frame, session, depth_affine, args, mean, std)
+        depth = predict_depth(frame, session, depth_affine, args, mean, std, pad_color)
         for detection in detections:
             u, v = detection["center_px"]
             z = depth_at_full(depth, depth_affine, u, v, args.depth_scale)
@@ -414,7 +447,7 @@ def main() -> int:
                 detection["xyz_cam"] = unproject(u, v, z, calibration)
 
     hand = find_fingertip(
-        frame, frame_id, args, depth, depth_affine, calibration, args.depth_scale
+        frame, frame_id, args, depth, depth_affine, calibration, args.depth_scale, notes
     )
 
     output = {

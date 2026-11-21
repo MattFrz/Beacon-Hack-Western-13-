@@ -4,7 +4,7 @@ Large files are not committed (see `.gitignore`). Owner: Nathan. Bake list and e
 
 - `yoloe26n_320.onnx` (baked prompts, detect-only) and `labels.txt`. The labels file is the runtime vocabulary and is committed.
 - Depth Anything V2 Metric Indoor Small ONNX
-- MediaPipe hand models
+- MediaPipe hand models (`hand_landmarker.task` for the Tasks API, or the legacy palm/landmark TFLite pair)
 - whisper.cpp `ggml-tiny.en.bin`, optional llama.cpp GGUF
 
 Note where each file came from here so anyone can rebuild the folder.
