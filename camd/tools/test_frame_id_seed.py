@@ -6,6 +6,10 @@ stub-then-BMP run cannot distinguish max-across-slots seeding from reading only
 the newest slot. This test writes a high id into a non-newest slot, restarts
 camd, and checks that the published id is high_id + 1.
 
+This uses the host-global `/dev/shm/beacon_frames`, backs up any existing
+segment, and restores it on exit. Do not run it while a real camd, percept, or
+telemd is using the ring.
+
 Run from the repo root after `make -C camd`:
 
     python3 camd/tools/test_frame_id_seed.py
@@ -17,12 +21,15 @@ import ctypes
 import mmap
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CAMD = REPO_ROOT / "camd" / "camd"
 READ_FRAMES = REPO_ROOT / "camd" / "read-frames"
+LAYOUT_PROBE = REPO_ROOT / "camd" / "layout-probe"
 SHM_PATH = Path("/dev/shm/beacon_frames")
 
 ABI_VERSION = 1
@@ -62,6 +69,32 @@ def run(cmd: list[Path]) -> str:
     return result.stdout + result.stderr
 
 
+def verify_layout() -> None:
+    if not LAYOUT_PROBE.exists():
+        raise SystemExit("build layout-probe first: make -C camd")
+    values = {}
+    for line in run([LAYOUT_PROBE]).splitlines():
+        key, _, value = line.partition("=")
+        values[key] = int(value)
+
+    expected = {
+        "abi": ABI_VERSION,
+        "frame_slots": FRAME_SLOTS,
+        "frame_max_bytes": FRAME_MAX_BYTES,
+        "sizeof_frames": ctypes.sizeof(Frames),
+        "sizeof_slot": ctypes.sizeof(FrameSlot),
+        "offsetof_slot": Frames.slot.offset,
+        "offsetof_frame_id": FrameSlot.frame_id.offset,
+    }
+    for key, want in expected.items():
+        got = values.get(key)
+        if got != want:
+            raise SystemExit(
+                f"layout mismatch for {key}: C={got}, Python={want}; "
+                "update the mirror in this test"
+            )
+
+
 def plant_non_newest_high_id() -> None:
     SHM_PATH.unlink(missing_ok=True)
     run([CAMD, "--stub", "--once"])
@@ -94,13 +127,28 @@ def main() -> None:
     if HIGH_ID_SLOT == NEWEST_SLOT:
         raise SystemExit("test setup error: high-id slot must not be newest")
 
-    plant_non_newest_high_id()
-    run([CAMD, "--stub", "--once"])
-    got = published_frame_id()
-    expected = PLANTED_ID + 1
-    if got != expected:
-        raise SystemExit(f"frame id seed failed: got {got}, expected {expected}")
-    print(f"frame-id seed regression passed: {got}")
+    verify_layout()
+
+    backup: Path | None = None
+    if SHM_PATH.exists():
+        fd, backup_name = tempfile.mkstemp(prefix="beacon_frames_backup_")
+        os.close(fd)
+        backup = Path(backup_name)
+        shutil.copy2(SHM_PATH, backup)
+
+    try:
+        plant_non_newest_high_id()
+        run([CAMD, "--stub", "--once"])
+        got = published_frame_id()
+        expected = PLANTED_ID + 1
+        if got != expected:
+            raise SystemExit(f"frame id seed failed: got {got}, expected {expected}")
+        print(f"frame-id seed regression passed: {got}")
+    finally:
+        SHM_PATH.unlink(missing_ok=True)
+        if backup is not None:
+            shutil.copy2(backup, SHM_PATH)
+            backup.unlink()
 
 
 if __name__ == "__main__":
