@@ -608,7 +608,7 @@ Not a vector DB. Not CLIP. Not a live text encoder on the Pi.
 
 Before Saturday, on a laptop:
 
-1. Choose 16–32 nouns for the judging space. Locked starter list (edit only if the venue changes): `keys`, `keychain`, `bottle`, `cup`, `mug`, `phone`, `chair`, `door`, `person`, `backpack`, `handbag`, `book`, `laptop`, `sink`, `fountain`, `dispenser`, `table`, `keyboard`, `mouse`, `headphones`, `charger`, `badge`, `lanyard`, `wallet`, `glasses`, `monitor`, `pizza`, `can`, `jacket`, `cable`, `shoes`, `whiteboard`. Runtime names are `models/labels.txt`.
+1. Choose 16–64 nouns for the judging space. Locked starter list (edit only if the venue changes): `keys`, `keychain`, `bottle`, `cup`, `mug`, `phone`, `chair`, `door`, `person`, `backpack`, `handbag`, `book`, `laptop`, `sink`, `fountain`, `dispenser`, `table`, `keyboard`, `mouse`, `headphones`, `charger`, `badge`, `lanyard`, `wallet`, `glasses`, `monitor`, `pizza`, `can`, `jacket`, `cable`, `shoes`, `whiteboard`, `bowl`, `plate`, `fork`, `knife`, `spoon`, `scissors`, `pen`, `pencil`, `notebook`, `paper`, `remote`, `tv`, `lamp`, `window`, `wall`, `floor`, `stairs`, `elevator`, `sign`, `shelf`, `cabinet`, `drawer`, `refrigerator`, `microwave`, `kettle`, `oven`, `soap`, `towel`, `toothbrush`, `plant`, `umbrella`, `coat`. Runtime names are `models/labels.txt`.
 2. Bake those prompts into YOLOE-26n. Save prompt embeddings. Export **static ONNX** at 320 px, **detect-only** if the exporter allows. The MobileCLIP encoder never ships.
 3. Ship the ONNX file plus a `labels.txt` that is the only runtime vocabulary.
 
