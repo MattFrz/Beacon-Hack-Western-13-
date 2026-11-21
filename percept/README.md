@@ -36,6 +36,7 @@ Bare `--udp` targets `127.0.0.1:5005`; use `--udp HOST:PORT` for another bridge.
 Live readout: while the probe runs, watch stderr for one compact `seq=... mode=... name=... range_m=... d_m=... objects=...` line per record (`range_m=|xyz_cam|`, unknown values omitted); JSONL/UDP are unchanged.
 
 Mode is LIVE when this record has the target in its latest boxes, HOLD while a missing target is under 1.5 s old, and LOST otherwise (no `d_m`).
+HOLD replays the last LIVE objects and target with `in_latest_boxes=false` for a fading dashboard cloud; LOST clears that replay.
 
 Optional chessboard calibration for a better left/right pinhole. Use a Python with OpenCV (this laptop: `/tmp/beacon-probe-venv/bin/python`). You do not need a printer: write a checkerboard, open it fullscreen, then photograph it from several angles.
 

@@ -66,6 +66,14 @@ def make_probe(detections=None, hand=None, timings_ms=None, t_ns=None):
     return probe
 
 
+def make_last_bottle():
+    live = probe_to_world(
+        make_probe([make_detection("bottle", [0.0, 0.0, 1.0])]),
+        t_ns=T_NS - 1_000_000_000,
+    )
+    return live["objects"], live["target"]
+
+
 class ProbeToWorldTest(unittest.TestCase):
     def test_detection_xyz_cam_copies_to_xyz_world(self):
         xyz = [0.12, 0.15, 0.55]
@@ -245,6 +253,61 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertIsNone(world["target"])
         self.assertEqual(world["objects"], [])
 
+    def test_hold_replays_last_live_objects_and_target_faded(self):
+        last_objects, last_target = make_last_bottle()
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_000_000_000,
+            last_d_m=0.2,
+            last_objects=last_objects,
+            last_target=last_target,
+        )
+
+        self.assertEqual(world["mode"], "HOLD")
+        self.assertEqual(world["d_m"], 0.2)
+        self.assertEqual(world["target"]["name"], "bottle")
+        self.assertIs(world["target"]["in_latest_boxes"], False)
+        self.assertEqual(len(world["objects"]), 1)
+        self.assertIs(world["objects"][0]["in_latest_boxes"], False)
+        self.assertEqual(world["objects"][0]["xyz_cam"], [0.0, 0.0, 1.0])
+
+    def test_hold_does_not_alias_last_live_objects_or_target(self):
+        last_objects, last_target = make_last_bottle()
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_000_000_000,
+            last_d_m=0.2,
+            last_objects=last_objects,
+            last_target=last_target,
+        )
+
+        world["objects"][0]["xyz_cam"][2] = 99.0
+        world["objects"][0]["name"] = "cup"
+        world["target"]["xyz_cam"][2] = 99.0
+
+        self.assertEqual(last_objects[0]["xyz_cam"], [0.0, 0.0, 1.0])
+        self.assertEqual(last_objects[0]["name"], "bottle")
+        self.assertIs(last_objects[0]["in_latest_boxes"], True)
+        self.assertEqual(last_target["xyz_cam"], [0.0, 0.0, 1.0])
+
+    def test_lost_ignores_last_live_objects_and_target(self):
+        last_objects, last_target = make_last_bottle()
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_500_000_000,
+            last_d_m=0.2,
+            last_objects=last_objects,
+            last_target=last_target,
+        )
+
+        self.assertEqual(world["mode"], "LOST")
+        self.assertNotIn("d_m", world)
+        self.assertEqual(world["objects"], [])
+        self.assertIsNone(world["target"])
+
     def test_exactly_hold_max_age_is_lost_without_distance(self):
         world = probe_to_world(
             make_probe(),
@@ -333,7 +396,7 @@ class ProbeToWorldTest(unittest.TestCase):
             "xyz_cam": [0.2, 0.1, 0.3],
             "conf": 0.9,
         }
-        target = make_detection("keys", [0.1, 0.2, 0.5])
+        target = make_detection("bottle", [0.0, 0.0, 1.0])
         probes = [
             make_probe([target], hand, t_ns=T_NS),
             make_probe(t_ns=T_NS + 1_000_000_000),
@@ -346,7 +409,10 @@ class ProbeToWorldTest(unittest.TestCase):
         with patch.object(probe_frame, "prepare", return_value=prepared), patch.object(
             probe_frame, "probe_once", side_effect=probes
         ):
-            lines = list(islice(emit_lines(args), len(probes)))
+            stream = emit_lines(args)
+            lines = [next(stream)]
+            lines[0]["objects"][0]["xyz_cam"][2] = 99.0
+            lines.extend(islice(stream, len(probes) - 1))
 
         self.assertEqual(
             [line["t_ns"] for line in lines],
@@ -360,9 +426,19 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertEqual(
             [line["mode"] for line in lines], ["LIVE", "HOLD", "LOST", "LOST"]
         )
-        self.assertAlmostEqual(lines[0]["d_m"], math.sqrt(0.06))
+        self.assertTrue(lines[0]["objects"][0]["in_latest_boxes"])
+        self.assertAlmostEqual(lines[0]["d_m"], math.sqrt(0.54))
+        self.assertEqual(lines[1]["objects"][0]["name"], "bottle")
+        self.assertIs(lines[1]["objects"][0]["in_latest_boxes"], False)
+        self.assertEqual(lines[1]["objects"][0]["xyz_cam"], [0.0, 0.0, 1.0])
+        self.assertEqual(lines[1]["target"]["name"], "bottle")
+        self.assertIs(lines[1]["target"]["in_latest_boxes"], False)
         self.assertEqual(lines[1]["d_m"], lines[0]["d_m"])
+        self.assertEqual(lines[2]["objects"], [])
+        self.assertIsNone(lines[2]["target"])
         self.assertNotIn("d_m", lines[2])
+        self.assertEqual(lines[3]["objects"], [])
+        self.assertIsNone(lines[3]["target"])
         self.assertNotIn("d_m", lines[3])
 
     def test_parser_has_world_cli_flags(self):
@@ -423,27 +499,35 @@ class ReadoutTest(unittest.TestCase):
         self.assertNotIn("range_m=", line)
         self.assertNotIn("d_m=", line)
 
-    def test_hold_can_show_held_distance_without_range(self):
+    def test_hold_readout_shows_held_name_range_and_distance(self):
+        last_objects, last_target = make_last_bottle()
         world = probe_to_world(
             make_probe(),
             t_ns=T_NS,
             seq=6,
             last_seen_ns=T_NS - 1_000_000_000,
             last_d_m=0.2,
+            last_objects=last_objects,
+            last_target=last_target,
         )
 
         line = format_readout(world)
         self.assertIn("mode=HOLD", line)
+        self.assertIn("name=bottle", line)
+        self.assertRegex(line, r"\brange_m=1(?:\.0+)?(?:\s|$)")
         self.assertRegex(line, r"\bd_m=0\.2(?:0+)?(?:\s|$)")
-        self.assertNotIn("range_m=", line)
+        self.assertIn("objects=1", line)
 
     def test_lost_readout_omits_range_and_distance(self):
+        last_objects, last_target = make_last_bottle()
         world = probe_to_world(
             make_probe(),
             t_ns=T_NS,
             seq=8,
             last_seen_ns=T_NS - 1_600_000_000,
             last_d_m=0.2,
+            last_objects=last_objects,
+            last_target=last_target,
         )
 
         line = format_readout(world)

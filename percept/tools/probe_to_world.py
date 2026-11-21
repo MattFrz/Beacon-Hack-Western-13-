@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import json
 import math
 import socket
@@ -131,6 +132,8 @@ def probe_to_world(
     seq: int = 0,
     last_d_m: Optional[float] = None,
     last_seen_ns: Optional[int] = None,
+    last_objects: Optional[List[Dict[str, Any]]] = None,
+    last_target: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Convert one probe_frame result into one world JSONL record."""
     now_ns = time.monotonic_ns() if t_ns is None else int(t_ns)
@@ -176,6 +179,25 @@ def probe_to_world(
         mode = "HOLD"
     else:
         mode = "LOST"
+
+    if mode == "HOLD" and target_obj is None:
+        if isinstance(last_objects, list):
+            objects = copy.deepcopy(last_objects)
+            for obj in objects:
+                if isinstance(obj, Mapping):
+                    obj["in_latest_boxes"] = False
+            if isinstance(last_target, Mapping):
+                target = copy.deepcopy(dict(last_target))
+                target["in_latest_boxes"] = False
+            else:
+                target = None
+                for name in TARGET_NAMES:
+                    for obj in objects:
+                        if isinstance(obj, Mapping) and obj.get("name") == name:
+                            target = {key: obj[key] for key in TARGET_KEYS if key in obj}
+                            break
+                    if target is not None:
+                        break
 
     hand_probe = probe.get("hand")
     hand: Optional[Dict[str, Any]] = None
@@ -285,6 +307,8 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
     seq = 0
     last_d_m: Optional[float] = None
     last_seen_ns: Optional[int] = None
+    last_objects: Optional[List[Dict[str, Any]]] = None
+    last_target: Optional[Dict[str, Any]] = None
 
     while True:
         probe = probe_frame.probe_once(args, labels, mean, std, pad_color)
@@ -294,10 +318,16 @@ def emit_lines(args: argparse.Namespace) -> Iterator[Dict[str, Any]]:
             seq=seq,
             last_d_m=last_d_m,
             last_seen_ns=last_seen_ns,
+            last_objects=last_objects,
+            last_target=last_target,
         )
         if world["mode"] == "LIVE":
             last_seen_ns = int(world["t_ns"])
+            last_objects = copy.deepcopy(world["objects"])
+            last_target = copy.deepcopy(world["target"])
         if world["mode"] == "LOST":
+            last_objects = None
+            last_target = None
             last_d_m = None
         elif "d_m" in world:
             last_d_m = world["d_m"]
