@@ -52,6 +52,17 @@ On this NixOS laptop, MediaPipe Tasks needed `libEGL.so.1` from `libglvnd` on
 models/hand_landmarker.task` found a fingertip in the MediaPipe `woman_hands.jpg`
 sample.
 
+Demo-class probes on 2026-11-21, using the raw ORT decode path:
+
+| Image | Result |
+| --- | --- |
+| Wikimedia `PET_Bottle_Water.jpg` | `bottle` at 0.36 and 0.29 with the default 0.25 threshold |
+| Wikimedia `Car_keys.jpg` | `keychain` at 0.166 with `--conf 0.15`; missed at the default 0.25 threshold |
+
+The keys result is weak. It supports the synonym-table need for `keys` versus
+`keychain`, but it is not a Sunday-ready threshold. Probe the actual demo
+objects through the C270 before choosing a runtime confidence value.
+
 Local SHA-256 values for the exported files:
 
 | File | SHA-256 |
