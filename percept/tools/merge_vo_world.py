@@ -10,6 +10,11 @@ The merged timeline is the frame index at `--fps` (both passes' wall-clock
 times are processing time, not capture time), so the bridge replays the walk
 at its true pace. Pose honesty is preserved: an untrusted VO step keeps the
 last valid pose, flags valid=false, and ages it.
+
+Static objects persist as anchors: each sighting within a 1.5 m same-class
+gate updates an anchor whose emitted position is the component-wise median
+of its sightings, so pose/depth jitter averages out and objects stay put
+(faded) even when not currently detected. People stay live-only.
 """
 
 from __future__ import annotations
@@ -31,6 +36,9 @@ IDENTITY_T = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
 CRUMB_MIN_DT_NS = 400_000_000
 CRUMB_MIN_MOVE_M = 0.05
 FRAME_ID_MAX = 10_000  # probe --video frame ids are monotonic ns; ignore those
+ANCHOR_GATE_M = 1.5     # association radius: sighting -> same-class anchor
+ANCHOR_MAX_OBS = 120    # robust position window per anchor
+LIVE_ONLY_NAMES = {"person"}  # people move; anchoring them pins a ghost
 
 
 def read_jsonl(path: Path) -> List[Dict[str, object]]:
@@ -87,6 +95,54 @@ def median(values: List[int]) -> int:
     return ordered[len(ordered) // 2]
 
 
+def component_median(obs: List[List[float]]) -> List[float]:
+    """Robust anchor position: per-axis median of the sighting window."""
+    return [sorted(c)[len(c) // 2] for c in zip(*obs)]
+
+
+class Anchor:
+    """A persistent world object: every sighting within the gate updates the
+    window; the emitted position is its component-wise median, so pose and
+    depth jitter average out instead of teleporting the marker."""
+
+    def __init__(self, name: str, world: List[float], frame_ns: int,
+                 frame_id: int):
+        self.name = name
+        self.id = name
+        self.obs: List[List[float]] = [world]
+        self.last_seen_ns = frame_ns
+        self.last_frame_id = frame_id
+        self.latest_cam: Optional[List[float]] = None
+        self.latest_bbox: Optional[List[float]] = None
+        self.latest_conf: Optional[float] = None
+
+    def position(self) -> List[float]:
+        return component_median(self.obs[-ANCHOR_MAX_OBS:])
+
+    def update(self, world: List[float], frame_ns: int, frame_id: int):
+        self.obs.append(world)
+        if len(self.obs) > ANCHOR_MAX_OBS:
+            del self.obs[:len(self.obs) - ANCHOR_MAX_OBS]
+        self.last_seen_ns = frame_ns
+        self.last_frame_id = frame_id
+
+    def emit(self, in_latest_boxes: bool) -> Dict[str, object]:
+        out: Dict[str, object] = {
+            "id": self.id, "name": self.name,
+            "xyz_world": self.position(),
+            "last_seen_ns": self.last_seen_ns,
+            "frame_id": self.last_frame_id,
+            "pose_epoch": 1, "in_latest_boxes": in_latest_boxes,
+        }
+        if self.latest_cam is not None:
+            out["xyz_cam"] = self.latest_cam
+        if self.latest_bbox is not None:
+            out["bbox_px"] = self.latest_bbox
+        if self.latest_conf is not None:
+            out["conf"] = self.latest_conf
+        return out
+
+
 def build_crumbs(vo_records: List[Dict[str, object]], dt_ns: int):
     """Crumb trail with the frame it belongs to, from valid VO steps."""
     crumbs: List[Dict[str, object]] = []
@@ -141,6 +197,8 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
     last_valid_T = list(IDENTITY_T)
     last_valid_frame: Optional[int] = None
     vo_i = 0  # newest VO record with frame_id <= F
+    anchors: List[Anchor] = []           # persistent world-object map
+    anchor_counters: Dict[str, int] = {}
     n_out = 0
     with out_path.open("w", encoding="utf-8") as out:
         for i, rec in enumerate(world_records):
@@ -185,15 +243,45 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
                 if isinstance(part, dict) and "last_seen_ns" in part:
                     part["last_seen_ns"] = frame_ns
             objects = rec.get("objects")
+            live_objects: List[Dict[str, object]] = []
+            seen_anchors: set = set()
             if isinstance(objects, list):
+                counters: Dict[str, int] = anchor_counters
                 for obj in objects:
-                    if isinstance(obj, dict):
-                        p_world = (transform_point(last_valid_T, obj["xyz_cam"])
-                                   if "xyz_cam" in obj else None)
-                        if p_world is not None:
-                            obj["xyz_world"] = p_world
-                        if "last_seen_ns" in obj:
-                            obj["last_seen_ns"] = frame_ns
+                    if not isinstance(obj, dict) or "xyz_cam" not in obj:
+                        continue
+                    p_world = transform_point(last_valid_T, obj["xyz_cam"])
+                    if p_world is None:
+                        continue
+                    name = obj.get("name") if isinstance(obj.get("name"), str) else None
+                    if name is None or name in LIVE_ONLY_NAMES:
+                        # live-only: rendered exactly when detected, never anchored
+                        obj["xyz_world"] = p_world
+                        obj["last_seen_ns"] = frame_ns
+                        live_objects.append(obj)
+                        continue
+                    # associate to the nearest same-class anchor within the gate
+                    best: Optional[Anchor] = None
+                    best_d = ANCHOR_GATE_M
+                    for anchor in anchors:
+                        if anchor.name != name:
+                            continue
+                        d = math.dist(anchor.position(), p_world)
+                        if d <= best_d:
+                            best, best_d = anchor, d
+                    if best is None:
+                        best = Anchor(name, p_world, frame_ns, F)
+                        counters[name] = counters.get(name, 0) + 1
+                        best.id = name + '-' + str(counters[name])
+                        anchors.append(best)
+                    else:
+                        best.update(p_world, frame_ns, F)
+                    best.latest_cam = list(obj["xyz_cam"])
+                    best.latest_bbox = obj.get("bbox_px")
+                    best.latest_conf = obj.get("conf")
+                    seen_anchors.add(best)
+            rec["objects"] = ([a.emit(a in seen_anchors) for a in anchors]
+                              + live_objects)
             rec["crumbs"] = [dict(c) for c in crumbs if c["frame_id"] <= F]
             for c in rec["crumbs"]:
                 c.pop("frame_id", None)

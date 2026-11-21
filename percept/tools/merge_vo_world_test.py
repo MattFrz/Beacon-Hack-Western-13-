@@ -32,16 +32,20 @@ def T(tx: float):
 
 
 def world_record(frame_id: int, xyz_cam=(1.0, 0.0, 2.0)):
+    return record_with(frame_id, [{
+        "id": 7, "name": "bottle", "bbox_px": [1, 2, 3, 4], "conf": 0.9,
+        "xyz_cam": list(xyz_cam), "xyz_world": list(xyz_cam),
+        "last_seen_ns": 999_999_999, "frame_id": frame_id,
+        "pose_epoch": 1, "in_latest_boxes": True,
+    }])
+
+
+def record_with(frame_id: int, objects):
     return {
         "v": 1, "t_ns": 999_999_999, "seq": {"percept": frame_id},
         "mode": "LIVE", "law": "NONE", "cue": None, "intent": None,
         "target": None, "hand": None,
-        "objects": [{
-            "id": 7, "name": "bottle", "bbox_px": [1, 2, 3, 4], "conf": 0.9,
-            "xyz_cam": list(xyz_cam), "xyz_world": list(xyz_cam),
-            "last_seen_ns": 999_999_999, "frame_id": frame_id,
-            "pose_epoch": 1, "in_latest_boxes": True,
-        }],
+        "objects": objects,
         "pose": {"valid": True, "pose_epoch": 1, "t_ns": 999_999_999,
                  "age_ns": 0, "T_world_from_cam": T(0)},
         "crumbs": [], "health": {},
@@ -117,6 +121,69 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(merged[0]["pose"]["T_world_from_cam"], T(0.0))
         self.assertEqual(merged[1]["pose"]["T_world_from_cam"], T(1.0))
         self.assertEqual(merged[1]["objects"][0]["xyz_world"], [2.0, 0.0, 2.0])
+
+    def test_anchor_persists_through_detection_gap(self):
+        merged = self.run_merge(
+            [world_record(2), record_with(12, []), record_with(20, [])],
+            [vo_record(2, True, 0.0), vo_record(12, True, 0.1),
+             vo_record(20, True, 0.2)])
+        objs = merged[2]["objects"]
+        self.assertEqual(len(objs), 1)
+        bottle = objs[0]
+        self.assertEqual(bottle["name"], "bottle")
+        self.assertEqual(bottle["xyz_world"], [1.0, 0.0, 2.0])
+        self.assertEqual(bottle["last_seen_ns"], 2 * DT_NS)
+        self.assertFalse(bottle["in_latest_boxes"])  # faded, not dropped
+
+    def test_anchor_median_absorbs_jitter_and_dedupes(self):
+        cams = [(1.0, 0.0, 2.0), (1.5, 0.0, 2.5), (1.1, 0.0, 2.1)]
+        merged = self.run_merge(
+            [world_record(2, xyz_cam=cams[0]),
+             world_record(5, xyz_cam=cams[1]),
+             world_record(8, xyz_cam=cams[2])],
+            [vo_record(2, True, 1.0), vo_record(5, True, 1.0),
+             vo_record(8, True, 1.0)])
+        # same bottle, jittered sightings within the 1.5 m gate -> one anchor
+        objs = merged[2]["objects"]
+        self.assertEqual([o["name"] for o in objs], ["bottle"])
+        world = [(2.0, 0.0, 2.0), (2.5, 0.0, 2.5), (2.1, 0.0, 2.1)]
+        med = [sorted(c)[len(c) // 2] for c in zip(*world)]
+        self.assertEqual(objs[0]["xyz_world"], med)
+        self.assertTrue(objs[0]["in_latest_boxes"])
+
+    def test_person_stays_live_only(self):
+        def person_at(fid, x):
+            return record_with(fid, [{
+                "id": 1, "name": "person", "bbox_px": [1, 2, 3, 4],
+                "conf": 0.9, "xyz_cam": [x, 0.0, 2.0],
+                "xyz_world": [x, 0.0, 2.0], "last_seen_ns": 999_999_999,
+                "frame_id": fid, "pose_epoch": 1, "in_latest_boxes": True,
+            }])
+        merged = self.run_merge(
+            [person_at(2, 0.0), person_at(5, 0.0), record_with(8, [])],
+            [vo_record(2, True, 0.0), vo_record(5, True, 0.0),
+             vo_record(8, True, 0.0)])
+        self.assertEqual([o["name"] for o in merged[0]["objects"]], ["person"])
+        self.assertEqual([o["name"] for o in merged[1]["objects"]], ["person"])
+        # no persistent person anchor: gone from the map when not detected
+        self.assertEqual(merged[2]["objects"], [])
+
+    def test_gate_splits_distant_same_class_objects(self):
+        def chair(i, x):
+            return {"id": i, "name": "chair", "bbox_px": [1, 2, 3, 4],
+                    "conf": 0.9, "xyz_cam": [x, 0.0, 1.0],
+                    "xyz_world": [x, 0.0, 1.0],
+                    "last_seen_ns": 999_999_999, "frame_id": 2,
+                    "pose_epoch": 1, "in_latest_boxes": True}
+        chairs = record_with(2, [chair(1, 0.0), chair(2, 3.0)])
+        merged = self.run_merge(
+            [chairs, record_with(5, [])],
+            [vo_record(2, True, 0.0), vo_record(5, True, 0.0)])
+        names = sorted(o["name"] for o in merged[1]["objects"])
+        self.assertEqual(names, ["chair", "chair"])
+        positions = sorted(o["xyz_world"][0] for o in merged[1]["objects"])
+        self.assertEqual(positions, [0.0, 3.0])
+        self.assertFalse(any(o["in_latest_boxes"] for o in merged[1]["objects"]))
 
     def test_record_without_frame_id_uses_calibrated_ordinal(self):
         blank = world_record(5)
