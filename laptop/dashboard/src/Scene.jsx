@@ -25,6 +25,10 @@ const COLORS = {
   HOLD: '#ffb020',
 };
 
+// telemd sends null for a position that is not finite, so check before measuring.
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const norm = (v) => Math.hypot(...v);
+
 export default function Scene({ world }) {
   const { mode } = world ?? {};
   const objects = worldObjects(world);
@@ -40,6 +44,13 @@ export default function Scene({ world }) {
   if (nextWearer.position) lastWearerPosition.current = nextWearer.position;
   const wearer = { ...nextWearer, position: lastWearerPosition.current };
   const poseMatrix = poseSceneMatrix(world?.pose);
+
+  // telemd can send a bound target without objects[]; draw it on its own unless an object row already shows it.
+  const targetId = world?.target?.id;
+  const targetAlone = Boolean(target) && !objects.some((o) => o.id === targetId);
+  const targetFaded =
+    world?.target?.in_latest_boxes === false ||
+    (isNum(world?.t_ns) && isNum(world?.target?.last_seen_ns) && world.t_ns - world.target.last_seen_ns > 1e9);
 
   return (
     <Canvas camera={{ position: [2.0, 2.2, 2.0], fov: 45 }}>
@@ -70,6 +81,15 @@ export default function Scene({ world }) {
       })}
 
       {hand && <Marker position={hand} color={COLORS.hand} size={0.025} label="hand" labelBelow />}
+
+      {targetAlone && (
+        <Marker
+          position={target}
+          color={COLORS.target}
+          faded={targetFaded}
+          label={`${world?.target?.name ?? 'target'} ${norm(target).toFixed(2)} m`}
+        />
+      )}
 
       {hand && target && COLORS[mode] && (
         <Line

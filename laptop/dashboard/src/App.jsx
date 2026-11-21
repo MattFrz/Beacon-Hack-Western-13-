@@ -2,6 +2,7 @@ import { Highlight, HighlightItem } from '@animate-ui/react/primitives/effects/h
 import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
 import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
 import { useState } from 'react';
+import { captionFromClips } from './clips.js';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import { useTelemetry } from './useTelemetry.js';
@@ -9,6 +10,8 @@ import { crumbsToScene, worldObjects } from './worldScene.js';
 
 const MODES = ['LIVE', 'HOLD', 'LOST'];
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+// 0 means "not measured yet" for vision timings (no real YOLO run takes 0 ms), so show "–", not "0 ms".
+const measured = (v) => (isNum(v) && v > 0 ? v : null);
 const msAgo = (now, then) => (isNum(now) && isNum(then) ? (now - then) / 1e6 : null);
 const panWord = (p) => (!isNum(p) ? '–' : p < -0.1 ? 'left' : p > 0.1 ? 'right' : 'centre');
 
@@ -63,7 +66,7 @@ export default function App() {
 
       <main className={hasData ? '' : 'stale'}>
         <Scene world={shown} />
-        <Caption law={w.law} cue={w.cue} />
+        <Caption law={w.law} cue={w.cue} targetName={w.target?.name} />
       </main>
       <Scrubber log={log} cursor={cursor} setCursor={setCursor} />
 
@@ -112,9 +115,9 @@ export default function App() {
         <h2>Timing</h2>
         <dl>
           <dt>YOLO / depth</dt>
-          <dd><Num value={health.last_yolo_ms} /> / <Num value={health.last_depth_ms} unit=" ms" /></dd>
+          <dd><Num value={measured(health.last_yolo_ms)} /> / <Num value={measured(health.last_depth_ms)} unit=" ms" /></dd>
           <dt>Vision p95</dt>
-          <dd><Num value={health.p95_vision_ns / 1e6} unit=" ms" /></dd>
+          <dd><Num value={measured(health.p95_vision_ns / 1e6)} unit=" ms" /></dd>
           <dt>16 ms misses</dt>
           <dd><Num value={health.timing?.misses_16ms} /></dd>
           <dt>Worst late</dt>
@@ -134,19 +137,21 @@ export default function App() {
 }
 
 // What the wearer hears right now: the spoken sentence, or the reach ticks.
-function Caption({ law, cue }) {
-  if (cue?.caption) {
+// REACH comes first: guided keeps its last spoken clips after speech stops for the reach.
+function Caption({ law, cue, targetName }) {
+  if (law === 'REACH' && cue) {
     return (
       <p className="caption">
-        “<Rolling text={cue.caption} stagger={0.012} />”
+        {cue.continuous ? 'Continuous tone' : <>Ticks <Num value={cue.tick_hz} digits={1} unit=" Hz" /></>}, pan{' '}
+        {panWord(cue.pan)}
       </p>
     );
   }
-  if (law !== 'REACH') return null;
+  const text = cue?.caption ?? (cue?.clip_ids?.length ? captionFromClips(cue.clip_ids, targetName) : null);
+  if (!text) return null;
   return (
     <p className="caption">
-      {cue?.continuous ? 'Continuous tone' : <>Ticks <Num value={cue?.tick_hz} digits={1} unit=" Hz" /></>}, pan{' '}
-      {panWord(cue?.pan)}
+      “<Rolling text={text} stagger={0.012} />”
     </p>
   );
 }

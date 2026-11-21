@@ -6,6 +6,7 @@
     "start": "node main.js",
     "replay": "node main.js ../samples/world.sample.json",
     "replay:dev": "node main.js ../samples/dev-reach.jsonl",
+    "replay:sim": "node main.js ../samples/sim-reach-lost.jsonl",
     "test": "node --test"
   },
   "dependencies": {

@@ -22,6 +22,9 @@ cd laptop/dashboard && npm install && npm run dev       # open http://localhost:
 | `src/worldScene.js` | Pure coordinate helpers: OpenCV world to three.js, pose translation/matrix, object/hand/crumb extraction. |
 | `src/App.jsx` | Header (animate-ui `Highlight` slides to the current mode, `RollingText` for law, intent and spoken captions), side panels (`SlidingNumber` for live values) |
 | `src/Scrubber.jsx` | Replay scrubber (animate-ui `Slider` and `Button`) over the last 10 min of world states |
+| `src/clips.js` | Caption text for guided's clip ids, in `enum beacon_clip` order. `npm test` fails if the enum in `include/beacon.h` changes. |
+
+The 3D view draws the bound `target` even when `objects[]` is missing, as in `telemd`'s target-only messages.
 
 ## Replay scrubber
 
