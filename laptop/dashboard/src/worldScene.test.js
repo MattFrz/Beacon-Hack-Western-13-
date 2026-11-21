@@ -85,6 +85,32 @@ test('worldObjects uses xyz_world and skips objects without it', () => {
   assert.equal(objects[0].faded, false);
 });
 
+test('worldObjects fades a just-started HOLD box that is not stale yet', () => {
+  const world = {
+    mode: 'HOLD',
+    t_ns: 1000,
+    objects: [{ id: 1, name: 'keys', xyz_world: [0.1, 0.2, 0.3], in_latest_boxes: false, last_seen_ns: 1000 }],
+  };
+  const objects = worldObjects(world);
+  assert.equal(objects.length, 1);
+  assert.equal(objects[0].faded, true);
+});
+
+test('worldObjects keeps a fresh LIVE box unfaded', () => {
+  const world = {
+    mode: 'LIVE',
+    t_ns: 1000,
+    objects: [{ id: 1, name: 'keys', xyz_world: [0.1, 0.2, 0.3], in_latest_boxes: true, last_seen_ns: 1000 }],
+  };
+  const objects = worldObjects(world);
+  assert.equal(objects.length, 1);
+  assert.equal(objects[0].faded, false);
+});
+
+test('worldObjects returns an empty cloud for a LOST world', () => {
+  assert.deepEqual(worldObjects({ mode: 'LOST', t_ns: 1000, objects: [], target: null }), []);
+});
+
 test('worldHand and worldTarget use world coordinates', () => {
   const world = {
     hand: { xyz_world: [0.2, 0.3, 0.4] },
