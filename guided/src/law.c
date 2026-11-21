@@ -47,11 +47,11 @@ static guided_cmd_t *push_cmd(guided_out_t *out, int kind)
     return c;
 }
 
-static void say(guided_out_t *out, int priority, const uint16_t *clips, int n, const char *name)
+static guided_cmd_t *say(guided_out_t *out, int priority, const uint16_t *clips, int n, const char *name)
 {
     guided_cmd_t *c = push_cmd(out, GUIDED_CMD_SAY);
     if (!c)
-        return;
+        return NULL;
     c->priority = (uint8_t)priority;
     if (n > GUIDED_MAX_CLIPS)
         n = GUIDED_MAX_CLIPS;
@@ -60,11 +60,28 @@ static void say(guided_out_t *out, int priority, const uint16_t *clips, int n, c
     c->n_clips = (uint8_t)n;
     if (name)
         strncpy(c->name, name, BEACON_NAME_LEN - 1);
+    return c;
 }
 
 static void say1(guided_out_t *out, int priority, uint16_t clip)
 {
     say(out, priority, &clip, 1, NULL);
+}
+
+/* WALK templates and NACK clips are kept for REPEAT (§10). */
+static void say_remember(guided_state_t *st, guided_out_t *out, int priority,
+                         const uint16_t *clips, int n, const char *name)
+{
+    guided_cmd_t *c = say(out, priority, clips, n, name);
+    if (c) {
+        st->last_say = *c;
+        st->have_last_say = 1;
+    }
+}
+
+static void nack(guided_state_t *st, guided_out_t *out, int priority, uint16_t clip)
+{
+    say_remember(st, out, priority, &clip, 1, NULL);
 }
 
 static void tone_off(guided_state_t *st, guided_out_t *out)
@@ -160,15 +177,18 @@ static void copy_target_from(beacon_target_t *t, const beacon_object_t *o)
     t->bound = 1;
 }
 
-/* First candidate (in order) with a stored row seen within 1.5 s. Ties on a
- * name: nearest in cam if live, else nearest in world if pose is valid. */
+/* First candidate (in order, skipping those in skip_mask) with a stored row
+ * seen within 1.5 s. Ties on a name: nearest in cam if live, else nearest in
+ * world if pose is valid. Returns the candidate index bound, or -1. */
 static int bind_target(guided_state_t *st, const beacon_percept_block_t *p,
-                       const beacon_intent_t *in, uint64_t now)
+                       const beacon_intent_t *in, uint64_t now, uint32_t skip_mask)
 {
     float me_w[3];
     translation(p->pose.T_world_from_cam, me_w);
 
     for (uint32_t c = 0; c < in->n_candidates && c < BEACON_MAX_CANDIDATES; ++c) {
+        if (skip_mask & (1u << c))
+            continue;
         const char *want = in->candidates[c];
         int best = -1;
         float best_d = 1e30f;
@@ -195,10 +215,10 @@ static int bind_target(guided_state_t *st, const beacon_percept_block_t *p,
         }
         if (best >= 0) {
             copy_target_from(&st->target, &p->objects[best]);
-            return 1;
+            return (int)c;
         }
     }
-    return 0;
+    return -1;
 }
 
 /* Keep the bound target's geometry in step with its objects[] row. */
@@ -234,21 +254,56 @@ static void handle_intent(guided_state_t *st, const beacon_percept_block_t *p,
 {
     switch (in->kind) {
     case BEACON_INTENT_FIND:
-    case BEACON_INTENT_GO:
+    case BEACON_INTENT_GO: {
         st->stopped = 0;
         st->returning = 0;
         leave_reach(st, out);
         reset_guidance(st);
-        if (!bind_target(st, p, in, now)) {
+        st->bind_intent = *in;
+        st->have_bind_intent = 1;
+        st->tried_mask = 0;
+        int c = bind_target(st, p, in, now, 0);
+        if (c < 0) {
             st->target.bound = 0;
-            say1(out, 1, BEACON_CLIP_NOT_SEEN);
+            nack(st, out, 1, BEACON_CLIP_NOT_SEEN);
+        } else {
+            st->tried_mask |= 1u << c;
+        }
+        break;
+    }
+    case BEACON_INTENT_REJECT: {
+        /* "Not that one": drop this bind, try the next unused candidate name
+         * still in objects[] and younger than 1.5 s. Never leave the set. */
+        push_cmd(out, GUIDED_CMD_FLUSH_SPEECH);
+        leave_reach(st, out);
+        reset_guidance(st);
+        st->returning = 0;
+        int c = -1;
+        if (st->have_bind_intent && st->target.bound)
+            c = bind_target(st, p, &st->bind_intent, now, st->tried_mask);
+        if (c < 0) {
+            st->target.bound = 0;
+            nack(st, out, 1, BEACON_CLIP_NOT_SEEN);
+        } else {
+            st->tried_mask |= 1u << c;
+        }
+        break;
+    }
+    case BEACON_INTENT_REPEAT:
+        /* Replay the last WALK template or NACK clip; no new inference (§10). */
+        if (st->have_last_say) {
+            guided_cmd_t *c = push_cmd(out, GUIDED_CMD_SAY);
+            if (c)
+                *c = st->last_say;
+        } else {
+            say1(out, 0, BEACON_CLIP_NOT_SEEN);
         }
         break;
     case BEACON_INTENT_RETURN:
         st->stopped = 0;
         leave_reach(st, out);
         if (!p->pose.valid || p->crumb_n == 0) {
-            say1(out, 1, BEACON_CLIP_CANNOT_RETRACE);
+            nack(st, out, 1, BEACON_CLIP_CANNOT_RETRACE);
             st->returning = 0;
         } else {
             st->returning = 1;
@@ -269,13 +324,13 @@ static void handle_intent(guided_state_t *st, const beacon_percept_block_t *p,
         say1(out, 1, BEACON_CLIP_STOPPING);
         break;
     case BEACON_INTENT_NACK_UNHEARD:
-        say1(out, 0, BEACON_CLIP_DID_NOT_CATCH);
+        nack(st, out, 0, BEACON_CLIP_DID_NOT_CATCH);
         break;
     case BEACON_INTENT_NACK_UNSEEN:
-        say1(out, 0, BEACON_CLIP_NOT_SEEN);
+        nack(st, out, 0, BEACON_CLIP_NOT_SEEN);
         break;
     case BEACON_INTENT_NACK_CANT:
-        say1(out, 0, BEACON_CLIP_CANNOT_HELP);
+        nack(st, out, 0, BEACON_CLIP_CANNOT_HELP);
         break;
     default:
         break;
@@ -324,7 +379,8 @@ static int measure_d(const guided_state_t *st, const beacon_percept_block_t *p, 
     float n = v3_norm(v);
     *d = n;
     *lat = v[0];
-    *amp = n > 1e-4f ? clampf(v[2] / n, 0.0f, 1.0f) : 1.0f; /* §10: cos(theta), clamped at 0 */
+    /* §10: max(0.25, cos(theta)): off-axis stays audible, never silent */
+    *amp = n > 1e-4f ? clampf(v[2] / n, 0.25f, 1.0f) : 1.0f;
     return 1;
 }
 
@@ -373,7 +429,7 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
                     pc[1] = 0.0f; /* walking cue: ignore height */
                     uint16_t clips[GUIDED_MAX_CLIPS];
                     int n = guided_walk_clips(pc, st->cfg.metres_enabled, 0, clips, GUIDED_MAX_CLIPS);
-                    say(out, 0, clips, n, NULL);
+                    say_remember(st, out, 0, clips, n, NULL);
                     st->last_walk_ns = now;
                 }
                 return;
@@ -493,7 +549,7 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
         if (st->last_walk_ns == 0 || now - st->last_walk_ns >= every) {
             uint16_t clips[GUIDED_MAX_CLIPS];
             int n = guided_walk_clips(st->target.xyz_cam, st->cfg.metres_enabled, 1, clips, GUIDED_MAX_CLIPS);
-            say(out, 0, clips, n, st->target.name);
+            say_remember(st, out, 0, clips, n, st->target.name);
             st->last_walk_ns = now;
         }
     }

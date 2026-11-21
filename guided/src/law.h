@@ -59,6 +59,15 @@ typedef struct {
     uint64_t last_intent_t_ns;
     int      stopped;
 
+    /* REJECT: the FIND/GO request we bound from, and which candidates were tried */
+    int             have_bind_intent;
+    beacon_intent_t bind_intent;
+    uint32_t        tried_mask;
+
+    /* REPEAT: last WALK template or NACK clip, replayed as is (§10) */
+    int          have_last_say;
+    guided_cmd_t last_say;
+
     /* RETURN */
     int      returning;
     uint32_t ret_start_i, ret_total, ret_k;

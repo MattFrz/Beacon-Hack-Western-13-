@@ -1,12 +1,12 @@
 # guided
 
-Owner: Munadir. C, core 0 (`0x1`), `SCHED_FIFO` 58. The 60 Hz synthesizer: mode (§6), bind (§9), laws (§10), piezo, audio thread. No models, no blocking writes on the 16 ms thread. QNX calls behind `#ifdef __QNX__` so it runs on a laptop.
+Owner: Munadir. C, core 0 (`0x1`), `SCHED_FIFO` 58. The 60 Hz synthesizer: mode, bind, laws (including REPEAT / REJECT), piezo, audio thread. No models, no blocking writes on the 16 ms thread. QNX calls behind `#ifdef __QNX__` so it runs on a laptop. Design: [`docs/nathans-revision.md`](../docs/nathans-revision.md) §6, §9, §10.
 
 ## Layout
 
 | File | What |
 | --- | --- |
-| `src/law.c`, `src/law.h` | All decisions, pure (no I/O, no clock): bind (§9), mode (§6, via `beacon_mode()` in `beacon.h`), REACH / WALK / RETURN / LOST / STOP (§10), Range 1 `d` with the `frame_id` check (§7). Unit-tested. |
+| `src/law.c`, `src/law.h` | All decisions, pure (no I/O, no clock): bind (§9), mode (§6, via `beacon_mode()` in `beacon.h`), REACH / WALK / RETURN / LOST / STOP / REPEAT / REJECT (§10), Range 1 `d` with the `frame_id` check (§7). Unit-tested. |
 | `src/main.c` | The 60 Hz loop: seqlock reads of `seq_percept` / `seq_voiced`, `guided_step()`, audio hand-off, piezo, publish `seq_guided`, absolute-deadline sleep, miss and lateness stats. |
 | `src/audio.c` | Audio thread at prio 40: speech ring (drops speech when full), newest-wins tick/tone slot. Prints what the wearer hears. |
 | `src/platform.c` | QNX-only calls: `ThreadCtl` runmask, `SCHED_FIFO`, heartbeat pulse to the supervisor, GPIO piezo (TODO). |
@@ -23,7 +23,7 @@ make test       # unit tests
 tools/run_scenario.sh reach --metres
 ```
 
-Scenarios: `reach`, `lost` (`slay percept` mid-reach, keys moved, `pose_epoch` bumped), `walk` ("refill water" binds `bottle`), `unseen`, `stop`, `return`.
+Scenarios: `reach`, `lost` (`slay percept` mid-reach, keys moved, `pose_epoch` bumped), `walk` ("refill water" binds `bottle`), `unseen`, `stop`, `return`, `reject` ("not that one" moves from `keys` to `keychain`, then "say that again").
 
 Example (`lost`):
 

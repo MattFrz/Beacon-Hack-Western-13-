@@ -273,6 +273,75 @@ static void test_percept_dies_mid_reach(void)
     CHECK(lost, "then LOST");
 }
 
+static int said_name(const guided_out_t *o, const char *name)
+{
+    for (int i = 0; i < o->n_cmds; ++i)
+        if (o->cmds[i].kind == GUIDED_CMD_SAY && !strcmp(o->cmds[i].name, name))
+            return 1;
+    return 0;
+}
+
+static void test_reject_and_repeat(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 0);
+    uint64_t now = 90 * S;
+#define TABLE(t) do { obj(0, 1, "keys", 0.10f, 0.30f, 0.60f, (t), 1, 4);                       obj(1, 3, "keychain", -0.35f, 0.25f, 0.90f, (t), 1, 4);                       obj(2, 5, "bottle", 0.0f, 0.1f, 1.5f, (t), 1, 4); } while (0)
+    TABLE(now);
+
+    beacon_intent_t in = intent(BEACON_INTENT_REPEAT, NULL, NULL, 1, now);
+    guided_step(&st, &P, &in, now, &out);
+    CHECK(said(&out, BEACON_CLIP_NOT_SEEN), "REPEAT with nothing spoken yet says 'I have not seen that'");
+
+    in = intent(BEACON_INTENT_FIND, "keys", "keychain", 2, now);
+    guided_step(&st, &P, &in, now, &out);
+    CHECK(st.target.id == 1 && said_name(&out, "keys"), "FIND binds keys and speaks its cue");
+
+    TABLE(now + S);
+    in = intent(BEACON_INTENT_REJECT, NULL, NULL, 3, now + S);
+    guided_step(&st, &P, &in, now + S, &out);
+    CHECK(st.target.bound && st.target.id == 3, "REJECT moves to the next candidate (keychain)");
+    CHECK(said_name(&out, "keychain"), "and speaks the new cue right away");
+
+    TABLE(now + 2 * S);
+    in = intent(BEACON_INTENT_REPEAT, NULL, NULL, 4, now + 2 * S);
+    guided_step(&st, &P, &in, now + 2 * S, &out);
+    CHECK(said_name(&out, "keychain") && out.n_cmds == 1, "REPEAT replays the last cue exactly once");
+
+    TABLE(now + 3 * S);
+    in = intent(BEACON_INTENT_REJECT, NULL, NULL, 5, now + 3 * S);
+    guided_step(&st, &P, &in, now + 3 * S, &out);
+    CHECK(!st.target.bound && said(&out, BEACON_CLIP_NOT_SEEN), "REJECT with no candidates left clears the bind");
+    CHECK(!said_name(&out, "bottle"), "REJECT never leaves the candidate set");
+#undef TABLE
+}
+
+static void test_off_axis_amp_floor(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 0);
+    uint64_t now = 100 * S;
+    obj(0, 1, "keys", 0.30f, 0.30f, 0.60f, now, 1, 8);
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    float min_amp = 1.0f;
+    int ticks = 0;
+    for (int i = 0; i < 120; ++i) {
+        now += 16 * MS;
+        obj(0, 1, "keys", 0.30f, 0.30f, 0.60f, now, 1, 8);
+        hand(-0.05f, 0.30f, 0.62f, now, 8);   /* 35 cm to the side, same depth */
+        guided_step(&st, &P, &in, now, &out);
+        for (int k = 0; k < out.n_cmds; ++k)
+            if (out.cmds[k].kind == GUIDED_CMD_TICK) {
+                ticks++;
+                if (out.cmds[k].amp < min_amp) min_amp = out.cmds[k].amp;
+            }
+    }
+    CHECK(ticks > 0, "off-axis hand still gets REACH ticks");
+    CHECK(min_amp >= 0.25f - 1e-6f, "tick amplitude never drops below 0.25");
+}
+
 static void test_stop(void)
 {
     guided_state_t st;
@@ -317,6 +386,8 @@ int main(void)
     test_lost_once_and_no_numbers();
     test_frame_mismatch_holds_d();
     test_percept_dies_mid_reach();
+    test_reject_and_repeat();
+    test_off_axis_amp_floor();
     test_stop();
     test_return_refused_without_pose();
     test_tick_curve();

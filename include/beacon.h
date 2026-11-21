@@ -1,6 +1,9 @@
 /* beacon.h: the shared contract every process compiles against.
  *
- * Owners: Matt + Munadir. Source: docs/nathans-revision.md §5.1 and §6.
+ * Owners: Matt + Munadir. Source: docs/nathans-revision.md §5.1 and §6
+ * (current revision: intent.kind includes REPEAT and REJECT).
+ * CAM_W / CAM_H / frametype only after the Camera Module 3 probe; do not
+ * write C270 sizes here.
  *
  * STATUS: DRAFT by Munadir, waiting for Matt's sign-off. Field names follow
  * the spec. Additions that are NOT in spec §6 are marked "ADDITION" so they
@@ -222,6 +225,8 @@ enum beacon_intent_kind {
     BEACON_INTENT_GO,
     BEACON_INTENT_RETURN,
     BEACON_INTENT_STOP,
+    BEACON_INTENT_REPEAT,          /* replay the last WALK template or NACK clip */
+    BEACON_INTENT_REJECT,          /* drop the bind, try the next candidate name */
     BEACON_INTENT_NACK_UNHEARD,
     BEACON_INTENT_NACK_UNSEEN,
     BEACON_INTENT_NACK_CANT

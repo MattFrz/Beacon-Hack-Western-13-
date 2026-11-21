@@ -13,6 +13,8 @@
  *   unseen  "where is my phone" with no phone in view
  *   stop    reach, then "stop"
  *   return  walk an L, then "take me back" along the breadcrumbs
+ *   reject  keys and keychain in view: "not that one" moves to the keychain,
+ *           "say that again" repeats, a second "not that one" runs out
  */
 #include "beacon.h"
 
@@ -120,7 +122,8 @@ static void say_intent(uint32_t kind, const char *c0, const char *c1, const char
     beacon_seq_write_begin(&g_w->seq_voiced);
     g_w->intent = in;
     beacon_seq_write_end(&g_w->seq_voiced);
-    static const char *kn[] = { "NONE", "FIND", "GO", "RETURN", "STOP", "NACK_UNHEARD", "NACK_UNSEEN", "NACK_CANT" };
+    static const char *kn[] = { "NONE", "FIND", "GO", "RETURN", "STOP", "REPEAT", "REJECT",
+                                "NACK_UNHEARD", "NACK_UNSEEN", "NACK_CANT" };
     fprintf(stderr, "fakeworld: intent %s %s\n", kn[kind], c0 ? c0 : "");
 }
 
@@ -204,6 +207,27 @@ int main(int argc, char **argv)
             if (!said_find && t >= 0.5) {
                 say_intent(BEACON_INTENT_GO, "fountain", "dispenser", "sink", "bottle", now);
                 said_find = 1;
+            }
+        } else if (!strcmp(sc, "reject")) {
+            /* keys and a keychain both on the table: "not that one", then "say that again" */
+            put_object(0, 1, "keys", 0.10f, 0.30f, 0.60f, 1, now);
+            put_object(1, 3, "keychain", -0.35f, 0.25f, 0.90f, 1, now);
+            put_hand(0, 0, 0, 0, now);
+            if (!said_find && t >= 0.5) {
+                say_intent(BEACON_INTENT_FIND, "keys", "keychain", NULL, NULL, now);
+                said_find = 1;
+            }
+            if (said_find == 1 && t >= 4.0) {
+                say_intent(BEACON_INTENT_REJECT, NULL, NULL, NULL, NULL, now);
+                said_find = 2;
+            }
+            if (said_find == 2 && t >= 5.5) {
+                say_intent(BEACON_INTENT_REPEAT, NULL, NULL, NULL, NULL, now);
+                said_find = 3;
+            }
+            if (said_find == 3 && t >= 7.0) {
+                say_intent(BEACON_INTENT_REJECT, NULL, NULL, NULL, NULL, now);
+                said_find = 4;
             }
         } else if (!strcmp(sc, "unseen")) {
             put_object(0, 2, "bottle", -0.60f, 0.10f, 2.20f, 1, now);
