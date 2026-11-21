@@ -31,12 +31,14 @@ static void put_u32(uint8_t *p, uint32_t v)
 
 static int write_bmp(const char *path, const beacon_frame_slot_t *slot)
 {
+    uint64_t width_bytes = (uint64_t)slot->width * 4u;
     uint64_t needed = (uint64_t)slot->stride * slot->height;
-    if (slot->width == 0u || slot->height == 0u || slot->stride < slot->width * 4u ||
-        needed == 0u || needed > slot->bytes_used ||
+    if (slot->width == 0u || slot->height == 0u || width_bytes > UINT32_MAX ||
+        (uint64_t)slot->stride != width_bytes || needed == 0u ||
+        needed > slot->bytes_used || needed > sizeof(slot->pixels) ||
         needed > UINT32_MAX - DUMP_HEADER_BYTES ||
         slot->height > (uint32_t)INT32_MAX) {
-        fprintf(stderr, "dump-frame: frame metadata does not fit a BMP\n");
+        fprintf(stderr, "dump-frame: frame metadata does not fit an unpadded BMP\n");
         return -1;
     }
 
