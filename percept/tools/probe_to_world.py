@@ -195,6 +195,7 @@ def probe_to_world(
                     for obj in objects:
                         if isinstance(obj, Mapping) and obj.get("name") == name:
                             target = {key: obj[key] for key in TARGET_KEYS if key in obj}
+                            target["in_latest_boxes"] = False
                             break
                     if target is not None:
                         break

@@ -272,6 +272,21 @@ class ProbeToWorldTest(unittest.TestCase):
         self.assertIs(world["objects"][0]["in_latest_boxes"], False)
         self.assertEqual(world["objects"][0]["xyz_cam"], [0.0, 0.0, 1.0])
 
+    def test_hold_derived_target_without_last_target_is_faded(self):
+        last_objects, _last_target = make_last_bottle()
+        world = probe_to_world(
+            make_probe(),
+            t_ns=T_NS,
+            last_seen_ns=T_NS - 1_000_000_000,
+            last_d_m=0.2,
+            last_objects=last_objects,
+        )
+
+        self.assertEqual(world["mode"], "HOLD")
+        self.assertEqual(world["target"]["name"], "bottle")
+        self.assertIs(world["target"]["in_latest_boxes"], False)
+        self.assertIs(world["objects"][0]["in_latest_boxes"], False)
+
     def test_hold_does_not_alias_last_live_objects_or_target(self):
         last_objects, last_target = make_last_bottle()
         world = probe_to_world(
