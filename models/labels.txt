@@ -1,0 +1,17 @@
+keys
+keychain
+bottle
+cup
+mug
+phone
+chair
+door
+person
+backpack
+handbag
+book
+laptop
+sink
+fountain
+dispenser
+table

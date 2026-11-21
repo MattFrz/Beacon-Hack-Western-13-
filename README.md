@@ -6,6 +6,7 @@ Chest-worn Raspberry Pi 5 on QNX 8.0 that homes a wearer who is blind or has low
 - Team plan (owners, schedule, hardware): [`docs/team-plan.md`](docs/team-plan.md)
 - Accessibility research: [`docs/beacon-accessibility-research.md`](docs/beacon-accessibility-research.md)
 - Pi bring-up notes: [`docs/pi-dev-workflow.md`](docs/pi-dev-workflow.md)
+- Pi bring-up log: [`docs/pi-bringup.md`](docs/pi-bringup.md)
 
 ## Layout
 
@@ -21,7 +22,7 @@ Chest-worn Raspberry Pi 5 on QNX 8.0 that homes a wearer who is blind or has low
 | [`laptop/bridge/`](laptop/bridge/) | UDP in, WebSocket out, JSONL recording | Zain |
 | [`laptop/dashboard/`](laptop/dashboard/) | 3D dashboard (Vite + React + r3f) | Zain |
 | [`laptop/samples/`](laptop/samples/) | Telemetry JSON format and samples | Matt + Zain |
-| [`models/`](models/) | Model files (not committed) | Nathan |
+| [`models/`](models/) | Model files; only `labels.txt` is committed | Nathan |
 | [`sounds/`](sounds/) | Pre-rendered speech clips | Matt |
 
 ## Workflow
