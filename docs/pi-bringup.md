@@ -1,6 +1,6 @@
 # Loaner Pi bring-up log
 
-Status: scaffold. No device observations recorded yet.
+Status: observations started on 2026-11-21. Camera capture, audio loopback, GPIO, and scheduler measurements are still open.
 
 Follow [`nathans-revision.md`](nathans-revision.md) §21 and the commands in
 [`pi-dev-workflow.md`](pi-dev-workflow.md). Record what the device actually says,
@@ -11,19 +11,20 @@ put Wi-Fi credentials, PSKs, or `sd-stage/` contents in this file.
 
 | Item | Observed value | Where observed | Date |
 | --- | --- | --- | --- |
-| SSH alias / address | `ssh qnxpi` -> `qnxuser@10.80.55.25` | `~/.ssh/config` and workflow notes | |
-| Hostname | | `hostname` / `pidin` | |
-| RAM | | `cat /proc/meminfo` or QNX equivalent | |
-| Image / build date | | QSTI splash or package list | |
-| Active cooler fitted | | visual check | |
-| Thermal node | | `/dev/thermal` or image equivalent | |
-| `qnxuser` password changed | | interactive `passwd` on device | |
-| Default VNC password changed | | QSTI UI / device notes | |
+| SSH alias / address | `ssh qnxpi` -> `qnxuser@10.80.55.25` | `~/.ssh/config` and workflow notes | 2026-11-21 |
+| Hostname | `qnxpi` | `hostname` on device | 2026-11-21 13:51 UTC |
+| RAM | `pidin info`: free 7483 MB / 8128 MB | `pidin info` | 2026-11-21 13:51 UTC |
+| Image / build date | `QNX qnxpi 8.0.0 2026/06/05-16:21:14EDT RaspberryPi5 aarch64le` | `uname -a` | 2026-11-21 13:51 UTC |
+| CPUs | 4 x Cortex-A76 at 1500 MHz | `pidin info` | 2026-11-21 13:51 UTC |
+| Active cooler fitted | reported by team inventory; not rechecked | teammate inventory | 2026-11-21 02:30 |
+| Thermal node | `/dev/thermal` and `/dev/thermal_ext` exist | `ls -l /dev/thermal*` | 2026-11-21 13:51 UTC |
+| `qnxuser` password changed | not checked | interactive `passwd` on device | |
+| Default VNC password changed | not checked | QSTI UI / device notes | |
 
 ## 1. First boot
 
 - [ ] Let QSTI updates finish. Do not interrupt the first boot.
-- [ ] Confirm SSH key login works.
+- [x] Confirm SSH key login works.
 - [ ] Change the `qnxuser` password interactively on the device.
       `passwd` cannot be fed over a piped SSH session.
 - [ ] Change the default VNC password.
@@ -37,6 +38,10 @@ passwd
 ## 2. Packages
 
 Install from `oss.qnx.com` with the QDD package UI or the image package tool.
+On this image `pkginfo`, `pkgadd`, and `pkgremove` are absent. `apkgrel` is the
+only obvious package-named binary in `/usr/bin`. Python 3.14 and `pip` 25.1.1
+are present, but no CV/ML Python packages were found.
+
 Record the exact package name and version shown by the tool. The research
 versions below are targets, not observations.
 
@@ -75,11 +80,18 @@ probe. Save the frame under `/data/home/qnxuser/`, not in git.
 
 | Camera | Unit number | `W x H` | Frametype | Focus lock possible | Frame saved to | Date |
 | --- | --- | --- | --- | --- | --- | --- |
-| C270 USB | | | | | | |
-| Camera Module 3 CSI | | | | | | |
+| C270 USB | unit 5 configured, no USB device enumerated | not captured | not captured | unknown | no frame | 2026-11-21 13:52 UTC |
+| Camera Module 3 CSI | units 3 and 4 configured as `imx708` | 2304 x 1296 configured | `nv12` configured | unknown | no frame | 2026-11-21 13:52 UTC |
 
-Focus-lock gate: record the exact command and result. If focus cannot lock,
-write that down before trying calibration.
+`/etc/config/sensor/sensor_rpi5.conf` also defines simulator units 1 and 2,
+USB units 5 to 7, and ISP tuning for units 3 and 4. `camera_example1_callback`
+lists only `CAMERA_UNIT_1` and `CAMERA_UNIT_2`. Running
+`camera_example1_callback -u 1` returned `Failed in call to read: err = 25
+numbytes 0`. Starting `sensor` under `sudo` stayed alive in the foreground,
+but detached attempts did not leave a `sensor` process in `pidin ar`.
+
+Focus-lock gate is still open. No frame was captured, so `CAM_W`, `CAM_H`, and
+frametype are still unset.
 
 ## 4. USB audio
 
@@ -90,9 +102,10 @@ write that down before trying calibration.
 
 | Device | Role | Name / path observed | Result |
 | --- | --- | --- | --- |
-| USB headset | playback | | |
-| USB headset | capture | | |
-| 3.5 mm | playback | | not present / present |
+| USB headset | playback | none found | no USB device enumerated |
+| USB headset | capture | none found | C270 mic not attached |
+| 3.5 mm | playback | no 3.5 mm jack | absent, as expected on Pi 5 |
+| Audio control | control | `/dev/snd/controlC0` | present; no PCM device found |
 
 ## 5. GPIO and piezo
 
@@ -110,6 +123,10 @@ This is spec §21 step 7. It proves the QNX story before models are added.
 - [ ] Ticks stay inside 16 ms.
 - [ ] Capture System Profiler / `tracelogger` output.
 - [ ] Save `pidin ar` showing runmasks.
+
+Partial result: the deployed `camd` stub built on the Pi and ran under
+`sudo -n` with core 0 pinning and FIFO 50. The hogs, 16 ms deadline trace, and
+runmask dump are still open.
 
 ```sh
 ssh qnxpi 'pidin ar > /data/home/qnxuser/app/pidin-scheduler.txt'
@@ -134,5 +151,8 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | 2026-11-21 02:30 | Teammate hardware inventory | Pi 5 has active cooler; RAM size is still unconfirmed. JBL Go 3 is Bluetooth-only with no AUX, and QNX has no Bluetooth audio on this Pi, so Beacon still needs USB audio out. C270 is not on QNX's tested camera list; the §21 probe decides whether it works. Hardware workshop reopens Saturday at 12 pm. |
 | 2026-11-21 08:37 | Laptop probe setup | `uv` created `/tmp/beacon-probe-venv` with Python 3.12, numpy, OpenCV, onnxruntime, and mediapipe. `percept/tools/probe_frame.py` ran on a synthetic 640x480 image. With a constant test ONNX depth model it reported a 210x210 depth grid. No real model or Pi observation was involved. |
 
-No camera, package, audio, GPIO, or scheduler facts were recorded from the Pi.
-Those rows stay blank until the device is reachable again.
+| 2026-11-21 13:51 UTC | Pi reachable | `hostname` returned `qnxpi`; `uname -a` returned QNX 8.0.0, build 2026/06/05, RaspberryPi5 aarch64le. `pidin info` reported 8128 MB total RAM. |
+| 2026-11-21 13:52 UTC | Sensor framework probe | Config read successfully. `sensor` did not persist when detached. `camera_example1_callback -u 1` returned read error 25. No USB device was enumerated. |
+| 2026-11-21 13:52 UTC | Audio probe | Only `/dev/snd/controlC0` existed. No USB headset or PCM device was found. |
+| 2026-11-21 13:54 UTC | Skeleton deployed to Pi | Copied `include/beacon.h`, `camd/`, and `percept/` to `/data/home/qnxuser/beacon-test`. Both built with the on-device toolchain. |
+| 2026-11-21 13:54 UTC | `camd`/`percept-head` on QNX | `sudo -n ./camd --stub --once` published `frame_id=1`, 640 x 480, stride 2560, `frametype=0`, 1228800 bytes. `read-frames` saw the slot. `percept-head --once` printed the same frame and the 320 and 210 letterbox affines. |
