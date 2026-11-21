@@ -131,6 +131,7 @@ or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
 | --- | --- | --- |
 | 2026-11-21T07:22:30-05:00 | `ssh -o BatchMode=yes -o ConnectTimeout=5 qnxpi` | `connect to host 10.80.55.25 port 22: Connection timed out`. The hotspot or device was not reachable from this laptop. |
 | 2026-11-21T07:22:30-05:00 | Laptop Python import check | `cv2`, `numpy`, `onnxruntime`, `ultralytics`, `mediapipe`, `torch`, and `transformers` are not installed. `python3 -m pip --version` returned nothing. `ffmpeg` is at `/etc/profiles/per-user/nate/bin/ffmpeg`. |
+| 2026-11-21 02:30 | Teammate hardware inventory | Pi 5 has active cooler; RAM size is still unconfirmed. JBL Go 3 is Bluetooth-only with no AUX, and QNX has no Bluetooth audio on this Pi, so Beacon still needs USB audio out. C270 is not on QNX's tested camera list; the §21 probe decides whether it works. Hardware workshop reopens Saturday at 12 pm. |
 
 No camera, package, audio, GPIO, or scheduler facts were recorded from the Pi.
 Those rows stay blank until the device is reachable again.

@@ -6,8 +6,8 @@ Status: operations plan that builds on [`nathans-revision.md`](nathans-revision.
 ## Where we are
 
 - Hacking runs Fri Nov 20, 9 pm → Sun Nov 22, 9 am. Submit by 8 am Sunday.
-- We have: the loaner Pi 5 (8 GB, QNX 8.0, official active cooler fitted, HiPi case), a Logitech C270 USB webcam with built-in mic, speakers, four laptops.
-- The hardware workshop was closed Friday night. Parts come Saturday morning (request below).
+- We have: the loaner Pi 5 with the QNX SD card, a Logitech C270, a JBL Go 3, an ultrasonic sensor and an IMU (Nathan), four laptops. Full list in [Hardware](#hardware-what-we-have-and-what-is-still-needed).
+- The hardware workshop was closed Friday night and reopens at 12 pm Saturday.
 - Tonight is software on laptops. Saturday we bring the parts and the Pi together and follow the spec's build order (§13).
 
 ## Owners
@@ -64,24 +64,37 @@ First 30 minutes: Matt and Munadir freeze `include/beacon.h` from **current** sp
 
 Feature freeze Saturday midnight. Sunday 1–6 am: the §15 measurements, demo video, Devpost.
 
-## Hardware request (send on Slack, collect Saturday morning)
+## Hardware: what we have and what is still needed
 
-Matches the spec's hardware bill (§16).
+Inventory as of Sat Nov 21, 2:30 am (Zain's `hardware_inventory.md` plus Nathan's additions). Spec hardware bill: §16.
+
+### What we have
+
+| Part | Model | Role | Interface | Notes |
+| --- | --- | --- | --- | --- |
+| Single-board computer | Raspberry Pi 5, official Active Cooler, black case | Runs everything | USB-C power, 2× micro-HDMI, Gigabit Ethernet, 2× USB 3.0, 2× USB 2.0, Wi-Fi, Bluetooth | 40-pin GPIO and 2× MIPI CAM/DISP reachable with the lid off. No 3.5 mm audio jack. RAM size not yet confirmed (spec assumes 8 GB). Nathan has it. |
+| Storage | microSD with QNX 8.0 preloaded | The OS | microSD slot | Our only copy: back it up before experimenting. |
+| Webcam + mic | Logitech C270 | Video and voice in | USB 2.0 | 720p30, fixed focus, 55° diagonal FOV, mono mic (~1.5 m). Not on QNX's tested camera list: the §21 probe decides whether it works on Sensor Framework. |
+| Speaker | JBL Go 3 | Audio out (intended) | Bluetooth 5.1 only | **No AUX input and QNX does not provide Bluetooth audio on the Pi 5, so this cannot be Beacon's speaker.** Fine for laptop testing. |
+| Display cable | PiShop micro-HDMI to HDMI (CS-PID-301), 3 ft | Monitor for debugging | micro-HDMI | |
+| Ultrasonic sensor | (Nathan's roommate; model TBC) | Optional extra: tape-check depth or a straight-ahead distance | GPIO | Not in the spec. If it is an HC-SR04, its 5 V echo needs a divider (1 kΩ + 2 kΩ) before a Pi pin. |
+| IMU | (Nathan; model TBC) | WALK yaw help | I²C | The spec's optional IMU (§4). |
+
+### Still needed (ask the workshop at 12 pm if nobody has them)
 
 | Item | Why | Spec ref |
 | --- | --- | --- |
-| Pi Camera Module 3 + **Pi 5 camera cable (22-pin to 15-pin)** | The camera the spec and Sensor Framework use | §4, §16 |
-| USB headset with mic | Speech out and voice in; no 3.5 mm audio on the Pi 5 under QNX | §4, §16 |
+| **USB audio out**: a USB headset with mic (preferred), or a USB speaker, or a USB audio adapter plus wired earbuds | The JBL is Bluetooth-only, so without this Beacon is silent | §4, §16 |
 | Piezo buzzer + NPN transistor (e.g. 2N2222) + 1 kΩ resistor | The cannot-fail actuator, driven through a transistor | §5.1 |
 | Push button | Push-to-talk for `voiced` | §16 optional |
-| Female-female jumper wires, small breadboard | Piezo and button to GPIO | |
-| Optional: BNO055 or ICM-20948 | WALK yaw help | §4 |
-
-The Pi already has the official active cooler. Check the power supply is the official 27 W (5 V / 5 A) so USB devices do not drop out.
+| Female-female jumper wires, small breadboard | Piezo, button and sensors to GPIO | |
+| Pi Camera Module 3 + **Pi 5 camera cable (22-pin to 15-pin)** | Only if the C270 fails the §21 probe | §4, §16 |
+| Official 27 W (5 V / 5 A) USB-C power supply | If ours is weaker, the Pi 5 limits USB power and the camera or headset drop out | |
+| Optional: microSD card reader | Back up the QNX card | |
 
 ## If parts are late: camera and mic only
 
-We already hold a C270 with a mic. If Nathan's probe shows it on Sensor Framework, it can stand in until the Camera Module 3 arrives, and the USB speaker or C270 mic can stand in for the headset. Everything up to build step 5 can be developed that way; the piezo path waits for the buzzer and transistor. Do not write C270 `W×H` into `beacon.h`. Step 2 Saturday still probes Camera Module 3.
+If Nathan's probe shows the C270 on Sensor Framework, it stands in until a Camera Module 3 arrives, and its mic stands in for the headset mic. Audio out still needs a USB device: the JBL Go 3 is Bluetooth-only and QNX has no Bluetooth audio on the Pi 5. Everything up to build step 5 can be developed that way; the piezo path waits for the buzzer and transistor. Do not write C270 `W×H` into `beacon.h`. Step 2 Saturday still probes Camera Module 3.
 
 ## Laptop dashboard (additive, never on the wearer's path)
 
