@@ -640,6 +640,20 @@ Synonym table (fast path, before the LLM):
 | bottle | FIND | `bottle` |
 | refill, water, drink, fountain, sink | GO | `fountain`, `dispenser`, `sink`, `bottle` |
 | phone, mobile | FIND | `phone` |
+| laptop, computer | FIND | `laptop` |
+| keyboard | FIND | `keyboard` |
+| mouse | FIND | `mouse` |
+| headphones, headset, earbuds | FIND | `headphones` |
+| charger | FIND | `charger` |
+| badge, lanyard | FIND | `badge`, `lanyard` |
+| wallet | FIND | `wallet` |
+| glasses | FIND | `glasses` |
+| pizza, food | FIND | `pizza` |
+| can | FIND | `can` |
+| jacket, coat | FIND | `jacket` |
+| cable, cord | FIND | `cable` |
+| shoes | FIND | `shoes` |
+| whiteboard | FIND | `whiteboard` |
 | back, retrace, return | RETURN | (none) |
 | stop, cancel, quit | STOP | (none) |
 | again, repeat, say that | REPEAT | (none) |

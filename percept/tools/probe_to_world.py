@@ -27,7 +27,21 @@ if str(REPO_ROOT) not in sys.path:
 
 from percept.tools import probe_frame  # noqa: E402
 
-TARGET_NAMES: Tuple[str, ...] = ("keys", "keychain", "bottle")
+TARGET_NAMES: Tuple[str, ...] = (
+    "keys",
+    "keychain",
+    "bottle",
+    "laptop",
+    "keyboard",
+    "mouse",
+    "headphones",
+    "charger",
+    "badge",
+    "lanyard",
+    "wallet",
+    "glasses",
+    "phone",
+)
 POSE_EPOCH = 1
 IDENTITY_T_WORLD_FROM_CAM: Tuple[int, ...] = (
     1, 0, 0, 0,
