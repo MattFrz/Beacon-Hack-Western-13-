@@ -17,6 +17,7 @@ build/
 camd/camd
 camd/read-frames
 camd/deadline-test
+camd/layout-probe
 percept/percept-head
 
 # Laptop (Node)
