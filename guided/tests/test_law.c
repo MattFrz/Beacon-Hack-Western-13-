@@ -600,6 +600,41 @@ static void test_orient_pips(void)
     CHECK(pips == 0, "--no-orient-pips: silent between spoken cues");
 }
 
+/* Real cameras blink: the target drops out of the boxes for a few frames now
+ * and then. That must not trigger "turn ..." or back-to-back full sentences. */
+static void test_flicker(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 1);
+    uint64_t now = 500 * S, seen = now;
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    int says = 0, turns = 0;
+    uint64_t last_say = 0, min_gap = ~0ull;
+    for (int i = 0; i < 600; ++i) {             /* ~10 s at 60 Hz, 40 deg right */
+        int live = (i % 24) < 16;                 /* in view 16 frames, gone 8 (~0.13 s) */
+        if (live)
+            seen = now;
+        obj(0, 1, "keys", 0.84f, 0.1f, 1.0f, seen, live, 40 + (uint64_t)i);
+        P.pose.t_ns = now;
+        guided_step(&st, &P, &in, now, &out);
+        for (int k = 0; k < out.n_cmds; ++k)
+            if (out.cmds[k].kind == GUIDED_CMD_SAY) {
+                says++;
+                if (last_say && now - last_say < min_gap)
+                    min_gap = now - last_say;
+                last_say = now;
+                for (int c = 0; c < out.cmds[k].n_clips; ++c)
+                    if (out.cmds[k].clips[c] >= BEACON_CLIP_TURN_SLIGHT_LEFT &&
+                        out.cmds[k].clips[c] <= BEACON_CLIP_TURN_AROUND)
+                        turns++;
+            }
+        now += 16 * MS;
+    }
+    CHECK(turns == 0, "short blinks out of view never say \"turn ...\"");
+    CHECK(says <= 3 && (says < 2 || min_gap >= 2 * S), "blinking target: few cues, at least 2 s apart");
+}
+
 int main(void)
 {
     test_seq_writer_restart();
@@ -609,6 +644,7 @@ int main(void)
     test_walk_pacing();
     test_landmark();
     test_orient_pips();
+    test_flicker();
     test_reach_enter_exit();
     test_turn_from_map();
     test_lost_once_and_no_numbers();
