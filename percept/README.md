@@ -35,6 +35,8 @@ Bare `--udp` targets `127.0.0.1:5005`; use `--udp HOST:PORT` for another bridge.
 
 The probe opens the camera and creates both ORT sessions and the hand landmarker once per process, then reuses them across frames. `--ort-intra N` (laptop default 4) sets ORT intra-op threads and `--ort-parallel` enables ORT parallel mode; these are laptop-only knobs, not QNX settings. Each record's `last_seen_ns` is the frame capture time; held HOLD data keeps its original timestamp.
 
+Detection depth is the median over the central half of the valid box interior (`box_median`, at least four cells); fingertips use a 3x3 patch median. Bearings still come from `center_px`; the sampler name and `depth_scale` are recorded in `depth_grid`. This is noise rejection, not calibration — `tape_check.py` remains the only absolute-depth gate.
+
 Live readout: while the probe runs, watch stderr for one compact `seq=... mode=... name=... range_m=... d_m=... objects=...` line per record (`range_m=|xyz_cam|`, unknown values omitted); JSONL/UDP are unchanged.
 
 Mode is LIVE when this record has the target in its latest boxes, HOLD while a missing target is under 1.5 s old, and LOST otherwise (no `d_m`).

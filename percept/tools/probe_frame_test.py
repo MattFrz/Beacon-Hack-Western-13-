@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import json
 import math
+import shutil
 import sys
 import tempfile
 import types
@@ -250,7 +251,7 @@ class ProbeRuntimeTest(unittest.TestCase):
         )
 
     @contextlib.contextmanager
-    def fake_model_calls(self):
+    def fake_model_calls(self, depth_value=1.0):
         def fake_detect(_frame, _args, _labels, _affine, _notes, *_rest):
             return [
                 {
@@ -263,7 +264,7 @@ class ProbeRuntimeTest(unittest.TestCase):
             ]
 
         def fake_predict_depth(_frame, _session, affine, *_rest):
-            return np.full((affine.net_h, affine.net_w), 1.0, dtype=np.float32)
+            return np.full((affine.net_h, affine.net_w), depth_value, dtype=np.float32)
 
         with patch.object(probe_frame, "detect", side_effect=fake_detect), patch.object(
             probe_frame, "predict_depth", side_effect=fake_predict_depth
@@ -414,6 +415,196 @@ class ProbeRuntimeTest(unittest.TestCase):
             world["health"]["last_cycle_ms"], with_hands["timings_ms"]["cycle"]
         )
         self.assertIsNone(no_hands["health"]["last_hands_ms"])
+
+    def test_probe_unproject_receives_scaled_z_once(self):
+        args = self.make_args("--depth-scale", "0.5")
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+
+        def spiky_depth(_frame, _session, affine, *_rest):
+            grid = np.full((affine.net_h, affine.net_w), 4.0, dtype=np.float32)
+            grid[105, 105] = 100.0  # one bad centre cell must not set Z
+            return grid
+
+        with (
+            synthetic_probe_modules(),
+            self.fake_model_calls(),
+            patch.object(probe_frame, "predict_depth", side_effect=spiky_depth),
+            patch.object(probe_frame, "unproject", wraps=probe_frame.unproject) as spy,
+            resources,
+        ):
+            probe = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+
+        self.assertEqual(probe["detections"][0]["Z_m"], 2.0)
+        self.assertEqual(len(spy.call_args_list), 1)
+        self.assertEqual(spy.call_args_list[0].args[2], 2.0)
+
+
+class DepthSamplingTest(unittest.TestCase):
+    """Synthetic grids and affines: no camera, ONNX, or MediaPipe."""
+
+    def setUp(self):
+        self.affine = probe_frame.make_affine(640, 480, 210, 210)
+
+    def test_affine_roundtrip_no_flip(self):
+        affine = self.affine
+        rng = np.random.default_rng(7)
+        for u, v in zip(rng.uniform(0.0, 639.0, 200), rng.uniform(0.0, 479.0, 200)):
+            u_net, v_net = affine.full_to_net(float(u), float(v))
+            u_back, v_back, valid = affine.net_to_full(u_net, v_net)
+            self.assertTrue(valid)
+            self.assertLessEqual(abs(u_back - u), 1.0)
+            self.assertLessEqual(abs(v_back - v), 1.0)
+
+        u_net, v_net = affine.full_to_net(0.0, 0.0)
+        u_back, v_back, valid = affine.net_to_full(u_net, v_net)
+        self.assertTrue(valid)
+        self.assertAlmostEqual(u_back, 0.0, places=6)
+        self.assertAlmostEqual(v_back, 0.0, places=6)
+        u_net, v_net = affine.full_to_net(639.0, 479.0)
+        u_back, v_back, valid = affine.net_to_full(u_net, v_net)
+        self.assertTrue(valid)
+        self.assertLessEqual(abs(u_back - 639.0), 1.0)
+        self.assertLessEqual(abs(v_back - 479.0), 1.0)
+
+        self.assertFalse(affine.net_to_full(5, 5)[2])  # letterbox pad
+        self.assertTrue(affine.net_to_full(105, 105)[2])
+
+    def test_synthetic_gradient_orientation(self):
+        rows, cols = np.arange(self.affine.net_h), np.arange(self.affine.net_w)
+        metres = 1.0 + 0.02 * cols[None, :] + 0.01 * rows[:, None]
+        z_left = probe_frame.depth_at_box(
+            metres, self.affine, [100.0, 200.0, 140.0, 240.0], 1.0
+        )
+        z_right = probe_frame.depth_at_box(
+            metres, self.affine, [400.0, 200.0, 440.0, 240.0], 1.0
+        )
+        z_top = probe_frame.depth_at_box(
+            metres, self.affine, [200.0, 100.0, 240.0, 140.0], 1.0
+        )
+        z_bottom = probe_frame.depth_at_box(
+            metres, self.affine, [200.0, 300.0, 240.0, 340.0], 1.0
+        )
+        self.assertGreater(z_right, z_left)
+        self.assertGreater(z_bottom, z_top)
+
+    def test_box_median_beats_center_pixel(self):
+        metres = np.full((self.affine.net_h, self.affine.net_w), 8.0, dtype=np.float32)
+        rows, cols = np.arange(self.affine.net_h), np.arange(self.affine.net_w)
+        disc = (cols[None, :] - 105.0) ** 2 + (rows[:, None] - 105.0) ** 2 <= 20.0**2
+        metres[disc] = 2.0
+        metres[105, 105] = 8.0  # box centre cell on background, interior on disc
+
+        bbox = [259.0, 179.0, 381.0, 301.0]
+        self.assertAlmostEqual(
+            probe_frame.depth_at_full(metres, self.affine, 320.0, 240.0, 1.0), 8.0
+        )
+        self.assertAlmostEqual(
+            probe_frame.depth_at_box(metres, self.affine, bbox, 1.0), 2.0, places=5
+        )
+
+    def test_box_sampling_excludes_padding_and_clipped_boxes(self):
+        metres = np.full((self.affine.net_h, self.affine.net_w), 999.0, dtype=np.float32)
+        for y in range(self.affine.net_h):
+            for x in range(self.affine.net_w):
+                if self.affine.net_to_full(x, y)[2]:
+                    metres[y, x] = 2.0
+
+        straddling_pad = probe_frame.depth_at_box(
+            metres, self.affine, [100.0, -100.0, 200.0, 20.0], 1.0
+        )
+        self.assertAlmostEqual(straddling_pad, 2.0, places=5)
+
+        fully_invalid = probe_frame.depth_at_box(
+            metres, self.affine, [100.0, -400.0, 200.0, -350.0], 1.0
+        )
+        self.assertIsNone(fully_invalid)
+
+    def test_depth_scale_applied_exactly_once(self):
+        metres = np.full((self.affine.net_h, self.affine.net_w), 4.0, dtype=np.float32)
+        self.assertAlmostEqual(
+            probe_frame.depth_at_box(
+                metres, self.affine, [300.0, 220.0, 340.0, 260.0], 0.5
+            ),
+            2.0,
+        )
+        self.assertAlmostEqual(
+            probe_frame.depth_at_patch(metres, self.affine, 320.0, 240.0, 0.5), 2.0
+        )
+
+    def test_preprocessing_contract(self):
+        args = probe_frame.build_parser().parse_args([])
+        mean = probe_frame.parse_csv3(args.depth_mean, "--depth-mean")
+        std = probe_frame.parse_csv3(args.depth_std, "--depth-std")
+        pad = probe_frame.parse_csv3(args.depth_pad, "--depth-pad")
+        affine = probe_frame.make_affine(4, 4, 4, 4)
+        frame = np.full((4, 4, 3), [10, 100, 200], dtype=np.uint8)
+
+        class RecordingSession:
+            def __init__(self):
+                self.tensor = None
+
+            def get_inputs(self):
+                return [types.SimpleNamespace(name="input")]
+
+            def run(self, _names, feed):
+                self.tensor = feed["input"]
+                return [np.zeros((1, 1, 4, 4), dtype=np.float32)]
+
+        session = RecordingSession()
+        with synthetic_probe_modules():
+            fake_cv2 = sys.modules["cv2"]
+            with patch.object(
+                fake_cv2,
+                "cvtColor",
+                lambda image, code: image[..., ::-1]
+                if code == fake_cv2.COLOR_BGR2RGB
+                else image,
+            ):
+                probe_frame.predict_depth(
+                    frame, session, affine, args, mean, std, tuple(int(v) for v in pad)
+                )
+
+        tensor = session.tensor
+        self.assertEqual(tensor.shape, (1, 3, 4, 4))
+        self.assertEqual(tensor.dtype, np.float32)
+        rgb = np.array([200.0, 100.0, 10.0], dtype=np.float32) / 255.0
+        expected = (rgb - np.asarray(mean, dtype=np.float32)) / np.asarray(
+            std, dtype=np.float32
+        )
+        for channel in range(3):
+            np.testing.assert_allclose(tensor[0, channel], expected[channel], atol=1e-6)
+
+    def test_probe_json_records_sampler(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        labels = root / "labels.txt"
+        labels.write_text("keys\n", encoding="utf-8")
+        depth = root / "depth.onnx"
+        depth.touch()
+        args = probe_frame.build_parser().parse_args(
+            ["--labels", str(labels), "--depth", str(depth), "--depth-scale", "0.5"]
+        )
+        resources = probe_frame.ProbeResources(args)
+        with (
+            synthetic_probe_modules(),
+            patch.object(
+                probe_frame,
+                "predict_depth",
+                return_value=np.full((210, 210), 1.0, dtype=np.float32),
+            ),
+            resources,
+        ):
+            probe = probe_frame.probe_once(
+                args,
+                ["keys"],
+                (0.485, 0.456, 0.406),
+                (0.229, 0.224, 0.225),
+                (114, 114, 114),
+                resources,
+            )
+
+        self.assertEqual(probe["depth_grid"]["sampler"], "box_median")
+        self.assertEqual(probe["depth_grid"]["depth_scale"], 0.5)
 
 
 if __name__ == "__main__":

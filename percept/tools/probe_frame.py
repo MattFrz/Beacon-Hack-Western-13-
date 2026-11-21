@@ -39,6 +39,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LABELS = REPO_ROOT / "models" / "labels.txt"
+DEPTH_SAMPLER_BOX = "box_median"
+DEPTH_SAMPLER_PATCH = "patch_median"
 
 
 @dataclass
@@ -522,23 +524,100 @@ def predict_depth(
     return metres.astype(np.float32)
 
 
-def depth_at_full(metres: Any, affine: Affine, u: float, v: float, scale: float):
-    if metres is None:
-        return None
+def _median_depth(metres: Any, cells: Sequence[Tuple[int, int]], scale: float, min_cells: int = 1):
+    """Median of finite positive depths over net cells (y, x); scale applied once."""
     import numpy as np
 
+    values = []
+    for y, x in cells:
+        z = float(metres[y, x]) * scale
+        if math.isfinite(z) and z > 0:
+            values.append(z)
+    if len(values) < min_cells:
+        return None
+    return float(np.median(values))
+
+
+def _central_bounds(length: int, frac: float) -> Tuple[int, int]:
+    margin = int(length * (1.0 - frac) / 2.0)
+    start = min(margin, length - 1)
+    end = max(start + 1, length - margin)
+    return start, min(end, length)
+
+
+def depth_at_box(
+    metres: Any,
+    affine: Affine,
+    bbox_px: Sequence[float],
+    scale: float,
+    frac: float = 0.5,
+    min_cells: int = 4,
+):
+    """Median depth over the central frac of valid net cells inside a full-frame box.
+
+    Clipped boxes and letterbox pad are excluded before the central crop, so a
+    cell outside the captured image cannot contribute to the sample.
+    """
+    if metres is None:
+        return None
+
+    frac = min(1.0, max(0.0, float(frac)))
+    u1, v1, u2, v2 = bbox_px
+    x1, y1 = affine.full_to_net(min(u1, u2), min(v1, v2))
+    x2, y2 = affine.full_to_net(max(u1, u2), max(v1, v2))
+    x_lo = max(0, int(math.floor(x1)))
+    x_hi = min(affine.net_w - 1, int(math.floor(x2)))
+    y_lo = max(0, int(math.floor(y1)))
+    y_hi = min(affine.net_h - 1, int(math.floor(y2)))
+    if x_hi < x_lo or y_hi < y_lo:
+        return None
+
+    cells = [
+        (y, x)
+        for y in range(y_lo, y_hi + 1)
+        for x in range(x_lo, x_hi + 1)
+        if affine.net_to_full(x, y)[2]
+    ]
+    if len(cells) < min_cells:
+        return None
+
+    xs = sorted({x for _, x in cells})
+    ys = sorted({y for y, _ in cells})
+    x_start, x_end = _central_bounds(len(xs), frac)
+    y_start, y_end = _central_bounds(len(ys), frac)
+    keep_x, keep_y = set(xs[x_start:x_end]), set(ys[y_start:y_end])
+    sampled = [(y, x) for y, x in cells if x in keep_x and y in keep_y]
+    return _median_depth(metres, sampled, scale, min_cells)
+
+
+def depth_at_patch(
+    metres: Any,
+    affine: Affine,
+    u: float,
+    v: float,
+    scale: float,
+    radius: int = 1,
+):
+    """Small square median around one point; a landmark is genuinely a point."""
+    if metres is None:
+        return None
+
     u_net, v_net = affine.full_to_net(u, v)
-    x = int(round(u_net))
-    y = int(round(v_net))
-    if not (0 <= x < affine.net_w and 0 <= y < affine.net_h):
-        return None
-    _, _, in_image = affine.net_to_full(x, y)
-    if not in_image:
-        return None
-    z = float(metres[y, x]) * scale
-    if not math.isfinite(z) or z <= 0:
-        return None
-    return z
+    cx, cy = int(round(u_net)), int(round(v_net))
+    cells = [
+        (y, x)
+        for y in range(cy - radius, cy + radius + 1)
+        for x in range(cx - radius, cx + radius + 1)
+        if 0 <= x < affine.net_w
+        and 0 <= y < affine.net_h
+        and affine.net_to_full(x, y)[2]
+    ]
+    return _median_depth(metres, cells, scale)
+
+
+def depth_at_full(metres: Any, affine: Affine, u: float, v: float, scale: float):
+    """Single-cell sample; kept as a comparison against the box median."""
+    return depth_at_patch(metres, affine, u, v, scale, radius=0)
 
 
 def unproject(u: float, v: float, z: float, calibration: Calibration) -> List[float]:
@@ -561,7 +640,7 @@ def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: A
 
     u = float(landmark.x) * frame.shape[1]
     v = float(landmark.y) * frame.shape[0]
-    z = depth_at_full(depth, depth_affine, u, v, scale)
+    z = depth_at_patch(depth, depth_affine, u, v, scale)
 
     hand = {
         "frame_id": frame_id,
@@ -706,7 +785,7 @@ def probe_once(
         depth = predict_depth(frame, session, depth_affine, args, mean, std, pad_color)
         for detection in detections:
             u, v = detection["center_px"]
-            z = depth_at_full(depth, depth_affine, u, v, args.depth_scale)
+            z = depth_at_box(depth, depth_affine, detection["bbox_px"], args.depth_scale)
             detection["Z_m"] = z
             if z is not None and calibration is not None:
                 detection["xyz_cam"] = unproject(u, v, z, calibration)
@@ -733,7 +812,14 @@ def probe_once(
             "hand": {"origin_x": 0.0, "origin_y": 0.0, "scale": 1.0},
         },
         "depth_grid": (
-            {"W_d": depth.shape[1], "H_d": depth.shape[0], "scale": args.depth_scale}
+            {
+                "W_d": depth.shape[1],
+                "H_d": depth.shape[0],
+                "scale": args.depth_scale,
+                "depth_scale": args.depth_scale,
+                "sampler": DEPTH_SAMPLER_BOX,
+                "fingertip_sampler": DEPTH_SAMPLER_PATCH,
+            }
             if depth is not None
             else None
         ),
