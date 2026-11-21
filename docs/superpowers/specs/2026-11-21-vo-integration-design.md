@@ -211,6 +211,27 @@ the QNX OpenCV/ORT packages exist and `camd` publishes real frames.
 
 ## Open items (builder calls, marked at implementation)
 
+### Accuracy ruling (Nathan, 2026-11-21, after the 360-degree clip demo)
+
+Approximate world positions are a product requirement, not a shortfall: if the
+target is out of frame the wearer must turn to face it anyway, so the anchor
+only has to aim that turn (believed direction + rough distance). Once the
+target is back in frame, the camera finishes the job — the YOLOE box plus
+measured depth give the live position and the hand landmarker gives the reach
+guidance. Precision is needed in camera space (directly measured), not in
+world space. Consequences:
+
+- The on-device acceptance gate is functional, not metric: RETURN succeeds if
+  turning to the believed anchor brings the target into the FOV. VO drift is
+  absorbed by the FOV catch radius, so sub-10 cm ATE is not a Task 5/6 goal.
+- The watchdog's occasional table-plane misfires (clip 2: x6.4 corrections on
+  43/621 steps) are polish, not blockers; a mult cap or floor-visibility gate
+  stays optional tuning.
+- Median-anchored world objects (merge tool) already match this contract:
+  approximate by construction, honest about uncertainty.
+- Where precision does matter: the crumb trail heading over a long walk — but
+  the same FOV catch argument applies once familiar objects re-enter view.
+
 - Exact VO working scale (320×240 vs aspect-preserving) and frame stride N —
   tune on the recorded walk, record the choice here.
   **Measured 2026-11-21 on the 18.2 s handheld clip (1280×720, 29.75 fps):**
