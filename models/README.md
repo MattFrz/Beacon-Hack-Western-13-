@@ -41,8 +41,10 @@ python3 percept/tools/export_depth.py --out models/depth_anything_v2_metric_indo
 Verified with Transformers 5.24.0 and ONNX Runtime 1.32.0 on the laptop. The
 static input is `(1, 3, 210, 210)` and the output is metric depth `(1, 210, 210)`.
 `probe_frame.py` combined it with the raw-decoded baked YOLOE ONNX on `bus.jpg`
-and sampled 6.1 to 10.3 m at the detected person centres. Those are model outputs
-that still need a tape check before spoken metres are allowed.
+and sampled 6.1 to 10.3 m at the detected person centres (17-label bake, no
+`--fov`). After the 32-label re-export, the same image with `--fov` sampled
+6.1 to 10.4 m. Those are model outputs that still need a tape check before
+spoken metres are allowed.
 
 Hand model downloaded from:
 
@@ -72,6 +74,6 @@ Local SHA-256 values for the exported files:
 
 | File | SHA-256 |
 | --- | --- |
-| `yoloe26n_320.onnx` | `1a1f94415be20a123d0db389583bbb41bc3d7efe6ccd5f16af52bf467318dea7` |
+| `yoloe26n_320.onnx` | `5953c2a71da1f013083e6659066a27b23af3c783ec198e75120196609a65471b` |
 | `depth_anything_v2_metric_indoor_small.onnx` | `494113edc11df63ebfd420b9162bc1fc026ec7e72cee855e3d10122db671ced6` |
 | `depth_anything_v2_metric_indoor_small.onnx.data` | `11a48f4d0c5413df3172ccd261481f7aff9e376811cbd6e35e7c52c87614205e` |
