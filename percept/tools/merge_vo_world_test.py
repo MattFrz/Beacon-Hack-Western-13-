@@ -59,12 +59,12 @@ def vo_record(frame_id: int, valid: bool, tx: float):
 
 
 class MergeTests(unittest.TestCase):
-    def run_merge(self, world_records, vo_records):
+    def run_merge(self, world_records, vo_records, target=None):
         with tempfile.TemporaryDirectory() as tmp:
             world = write_jsonl(Path(tmp) / "w.jsonl", world_records)
             vo = write_jsonl(Path(tmp) / "vo.jsonl", vo_records)
             out = Path(tmp) / "merged.jsonl"
-            merge_vo_world.merge(world, vo, out, fps=FPS)
+            merge_vo_world.merge(world, vo, out, fps=FPS, target_name=target)
             return [json.loads(line) for line in
                     out.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -243,6 +243,39 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(t1["xyz_world"], [0.0, 0.0, 2.0])  # anchor median
         self.assertFalse(t1["in_latest_boxes"])
         self.assertEqual(t1["last_seen_ns"], 2 * DT_NS)
+
+    def test_named_target_is_sticky_through_retargeting(self):
+        """--target scissors: the homing marker sticks to the named item's
+        anchor even while the world pass retargets to other visible objects."""
+        def rec(fid, name, x):
+            return record_with(fid, [{
+                "id": 1, "name": name, "bbox_px": [1, 2, 3, 4], "conf": 0.9,
+                "xyz_cam": [x, 0.0, 2.0], "xyz_world": [x, 0.0, 2.0],
+                "last_seen_ns": 999_999_999, "frame_id": fid,
+                "pose_epoch": 1, "in_latest_boxes": True,
+            }])
+        scissors = rec(2, "scissors", 0.0)
+        scissors["target"] = {"id": 1, "name": "scissors",
+                               "xyz_cam": [0.0, 0.0, 2.0],
+                               "xyz_world": [0.0, 0.0, 2.0], "conf": 0.9,
+                               "last_seen_ns": 999_999_999,
+                               "frame_id": 2, "pose_epoch": 1}
+        bottle = rec(9, "bottle", 1.0)
+        bottle["target"] = {"id": 1, "name": "bottle",
+                            "xyz_cam": [1.0, 0.0, 2.0],
+                            "xyz_world": [1.0, 0.0, 2.0], "conf": 0.9,
+                            "last_seen_ns": 999_999_999,
+                            "frame_id": 9, "pose_epoch": 1}
+        merged = self.run_merge(
+            [scissors, bottle],
+            [vo_record(2, True, 0.0), vo_record(9, True, 0.5)],
+            target="scissors")
+        self.assertEqual(merged[0]["target"]["name"], "scissors")
+        # frame 9 retargets to bottle; the sticky rule keeps homing to scissors
+        t1 = merged[1]["target"]
+        self.assertEqual(t1["name"], "scissors")
+        self.assertFalse(t1["in_latest_boxes"])
+        self.assertEqual(t1["xyz_world"], [0.0, 0.0, 2.0])
 
     def test_record_without_frame_id_uses_calibrated_ordinal(self):
         blank = world_record(5)

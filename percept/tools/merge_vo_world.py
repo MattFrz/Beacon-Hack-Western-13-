@@ -200,7 +200,7 @@ def blend_pose(Ta: List[float], Tb: List[float], alpha: float) -> List[float]:
 
 
 def merge(world_path: Path, vo_path: Path, out_path: Path,
-          fps: float = 30.0) -> int:
+          fps: float = 30.0, target_name: Optional[str] = None) -> int:
     if fps <= 0:
         raise SystemExit("--fps must be positive")
     dt_ns = int(round(1e9 / fps))
@@ -349,7 +349,8 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
                 if "last_seen_ns" in target:
                     target["last_seen_ns"] = frame_ns
                 name = target.get("name")
-                if (isinstance(name, str) and p_world is not None
+                if (target_name is None and isinstance(name, str)
+                        and p_world is not None
                         and isinstance(target.get("xyz_cam"), list)):
                     cam = target["xyz_cam"]
                     match = next((a for a in anchors
@@ -364,7 +365,26 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
                                 match, best_d = a, d
                     if match is not None:
                         persistent_target = match
-            elif persistent_target is not None:
+            # Sticky named target (--target): homing sticks to the named
+            # item's anchor even while the world pass retargets to other
+            # visible objects; live camera precision while in frame.
+            if target_name is not None:
+                anchor = next((a for a in seen_anchors
+                                if a.name == target_name), None)
+                if anchor is not None:
+                    persistent_target = anchor
+                live_is_named = (isinstance(target, dict)
+                                 and target.get("name") == target_name)
+                if (persistent_target is not None
+                        and persistent_target.name == target_name
+                        and not live_is_named):
+                    held = persistent_target.emit(
+                        persistent_target in seen_anchors)
+                    if persistent_target.latest_cam is not None:
+                        held["xyz_cam"] = persistent_target.latest_cam
+                    rec["target"] = held
+            elif (not isinstance(target, dict)
+                    and persistent_target is not None):
                 held = persistent_target.emit(False)
                 if persistent_target.latest_cam is not None:
                     held["xyz_cam"] = persistent_target.latest_cam
@@ -386,8 +406,12 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--fps", type=float, default=30.0,
                         help="recording frame rate for the merged timeline")
+    parser.add_argument("--target", default=None,
+                        help="sticky named target: homing keeps this item's "
+                             "anchor (faded) even when the pass retargets")
     args = parser.parse_args()
-    n = merge(args.world, args.vo, args.out, fps=args.fps)
+    n = merge(args.world, args.vo, args.out, fps=args.fps,
+              target_name=args.target)
     print(f"merged {n} world records into {args.out}")
     return 0
 
