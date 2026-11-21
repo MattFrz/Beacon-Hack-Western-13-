@@ -31,6 +31,22 @@ jobs:
         working-directory: laptop/dashboard
         run: npm ci && npm test && npm run build
 
+  percept:
+    name: Percept probe tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # The suite is synthetic: it fakes onnxruntime, mediapipe and the camera.
+      # numpy and cv2 are the only real imports the tests make. Pin the major
+      # versions: opencv-python-headless 5.x cannot bind numpy and breaks cv2 import.
+      - name: Install test dependencies
+        run: pip install "numpy>=1.26,<3" "opencv-python-headless>=4.10,<5"
+      - name: Percept tests
+        run: make -C percept test-python PYTHON=python3
+
   native:
     name: guided, supervisor, telemd
     runs-on: ubuntu-latest
