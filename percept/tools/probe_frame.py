@@ -35,7 +35,6 @@ import statistics
 import sys
 import time
 import zlib
-from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -50,6 +49,9 @@ DEFAULT_DEPTH_WINDOW = 5
 DEFAULT_DEPTH_JUMP = 0.6
 DEFAULT_DEPTH_EVICT = 10
 DEFAULT_DEPTH_RECOVER = 3
+DEFAULT_SLOT_IOU = 0.30
+SLOT_SCORE_TOLERANCE = 1e-6
+MIN_SLOT_BOX_AREA = 1.0
 
 
 @dataclass
@@ -179,6 +181,136 @@ class _DepthState:
     candidates: List[float]
 
 
+@dataclass
+class _SlotState:
+    bbox_px: Tuple[float, float, float, float]
+    last_seen: int
+
+
+def _box_bounds(box: Sequence[float]) -> Tuple[float, float, float, float]:
+    x0, y0, x1, y1 = (float(value) for value in box)
+    return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+
+
+def _box_iou(
+    left: Sequence[float], right: Sequence[float]
+) -> Optional[float]:
+    ax0, ay0, ax1, ay1 = _box_bounds(left)
+    bx0, by0, bx1, by1 = _box_bounds(right)
+    area_a = (ax1 - ax0) * (ay1 - ay0)
+    area_b = (bx1 - bx0) * (by1 - by0)
+    if area_a < MIN_SLOT_BOX_AREA or area_b < MIN_SLOT_BOX_AREA:
+        return None  # a degenerate box has no meaningful overlap
+    overlap_x = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+    overlap_y = max(0.0, min(ay1, by1) - max(ay0, by0))
+    overlap = overlap_x * overlap_y
+    union = area_a + area_b - overlap
+    return overlap / union if union > 0.0 else None
+
+
+def _slot_match_score(
+    detection_box: Sequence[float],
+    slot_box: Sequence[float],
+    iou_threshold: float,
+) -> Optional[float]:
+    """IoU score, or a centre-distance score when a box is too small for IoU."""
+    iou = _box_iou(detection_box, slot_box)
+    if iou is not None:
+        return iou if iou >= iou_threshold else None
+    ax0, ay0, ax1, ay1 = _box_bounds(detection_box)
+    bx0, by0, bx1, by1 = _box_bounds(slot_box)
+    centre_a = ((ax0 + ax1) / 2.0, (ay0 + ay1) / 2.0)
+    centre_b = ((bx0 + bx1) / 2.0, (by0 + by1) / 2.0)
+    radius = max(ax1 - ax0, ay1 - ay0, bx1 - bx0, by1 - by0, 1.0)
+    distance = math.hypot(centre_a[0] - centre_b[0], centre_a[1] - centre_b[1])
+    return 1.0 - distance / radius if distance <= radius else None
+
+
+class SlotTracker:
+    """Greedy per-name IoU association of detections to stable instance slots.
+
+    Only slots from the current tracking window are candidates. Ambiguous
+    claims are reported on the detection instead of updating slot geometry, so
+    the depth stabiliser can leave those samples out of every involved history.
+    """
+
+    def __init__(self, iou: float = DEFAULT_SLOT_IOU, evict: int = DEFAULT_DEPTH_EVICT):
+        if not math.isfinite(iou) or not 0.0 <= iou <= 1.0:
+            raise ValueError("slot iou must be between 0 and 1")
+        if evict < 1:
+            raise ValueError("slot evict must be at least 1")
+        self.iou = float(iou)
+        self.evict = int(evict)
+        self._slots: Dict[str, Dict[int, _SlotState]] = {}
+        self._next_slot: Dict[str, int] = {}
+        self._frame = 0
+
+    def advance(self) -> None:
+        self._frame += 1
+        cutoff = self._frame - self.evict
+        for slots in self._slots.values():
+            stale = [slot for slot, state in slots.items() if state.last_seen < cutoff]
+            for slot in stale:
+                del slots[slot]
+
+    def associate(self, detections: Sequence[Dict[str, Any]]) -> None:
+        """Set ``slot`` and ``z_ambiguous`` on each detection with depth."""
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for detection in detections:
+            name = str(detection.get("name", "unknown"))
+            groups.setdefault(name, []).append(detection)
+
+        for name, group in groups.items():
+            slots = self._slots.setdefault(name, {})
+            boxes = [_box_bounds(detection["bbox_px"]) for detection in group]
+            candidates: Dict[Tuple[int, int], float] = {}
+            for index, box in enumerate(boxes):
+                for slot, state in slots.items():
+                    score = _slot_match_score(box, state.bbox_px, self.iou)
+                    if score is not None:
+                        candidates[(index, slot)] = score
+
+            ambiguous = set()
+            for index in range(len(group)):
+                scores = sorted(
+                    (
+                        score
+                        for (candidate_index, _slot), score in candidates.items()
+                        if candidate_index == index
+                    ),
+                    reverse=True,
+                )
+                if len(scores) > 1 and scores[0] - scores[1] <= SLOT_SCORE_TOLERANCE:
+                    ambiguous.add(index)
+            for slot in slots:
+                claimants = [
+                    index for (index, candidate_slot) in candidates if candidate_slot == slot
+                ]
+                if len(claimants) > 1:
+                    ambiguous.update(claimants)
+
+            ranked = sorted(
+                candidates.items(), key=lambda item: (-item[1], item[0][0], item[0][1])
+            )
+            claims: Dict[int, int] = {}
+            claimed_slots = set()
+            for (index, slot), _score in ranked:
+                if index in claims or slot in claimed_slots:
+                    continue
+                claims[index] = slot
+                claimed_slots.add(slot)
+
+            for index, detection in enumerate(group):
+                slot = claims.get(index)
+                if slot is None:
+                    slot = self._next_slot.get(name, 0)
+                    self._next_slot[name] = slot + 1
+                detection["slot"] = slot
+                detection["z_ambiguous"] = index in ambiguous
+                if not detection["z_ambiguous"]:
+                    slots[slot] = _SlotState(bbox_px=boxes[index], last_seen=self._frame)
+
+
 class DepthStabiliser:
     """Per-id rolling median with jump rejection, recovery, and eviction.
 
@@ -186,8 +318,8 @@ class DepthStabiliser:
     lose their history. A run of agreeing rejects can replace a stale median
     after recover samples, so a real fast approach is not held forever. A
     missing sample is never replaced with a stale median and does not count as
-    a sighting; untracked_sample() emits one frame's own depth for name groups
-    that cannot safely share a median.
+    a sighting; untracked_sample() emits one frame's own depth when a slot match
+    is ambiguous. Callers key update() by (name, slot) from SlotTracker.
     """
 
     def __init__(
@@ -307,6 +439,10 @@ class ProbeResources:
             jump=getattr(args, "depth_jump", DEFAULT_DEPTH_JUMP),
             evict=getattr(args, "depth_evict", DEFAULT_DEPTH_EVICT),
             recover=getattr(args, "depth_recover", DEFAULT_DEPTH_RECOVER),
+        )
+        self.slot_tracker = SlotTracker(
+            iou=getattr(args, "slot_iou", DEFAULT_SLOT_IOU),
+            evict=getattr(args, "depth_evict", DEFAULT_DEPTH_EVICT),
         )
         self.cap: Any = None
         self._options: Any = None
@@ -857,6 +993,19 @@ def _positive_float_arg(name: str):
     return parse
 
 
+def _unit_float_arg(name: str):
+    def parse(value: str) -> float:
+        try:
+            parsed = float(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"{name} must be a number") from exc
+        if not math.isfinite(parsed) or not 0.0 <= parsed <= 1.0:
+            raise argparse.ArgumentTypeError(f"{name} must be between 0 and 1")
+        return parsed
+
+    return parse
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group()
@@ -931,6 +1080,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_DEPTH_RECOVER,
         help=f"agreeing rejects before a stale median is replaced (default {DEFAULT_DEPTH_RECOVER})",
     )
+    parser.add_argument(
+        "--slot-iou",
+        type=_unit_float_arg("--slot-iou"),
+        default=DEFAULT_SLOT_IOU,
+        help=f"minimum box IoU to reuse an instance slot (default {DEFAULT_SLOT_IOU:g})",
+    )
     parser.add_argument("--hands", action="store_true", help="run MediaPipe hands")
     parser.add_argument(
         "--hand-model",
@@ -999,6 +1154,7 @@ def probe_once(
     stabiliser_settings = stabiliser.settings()
     if args.depth is not None:
         stabiliser.advance()
+        resources.slot_tracker.advance()
         notes.append(
             "depth stabiliser window={window} jump={jump:g} "
             "evict={evict} recover={recover}".format(**stabiliser_settings)
@@ -1028,18 +1184,18 @@ def probe_once(
         started_ns = time.perf_counter_ns()
         session = resources.depth_session()
         depth = predict_depth(frame, session, depth_affine, args, mean, std, pad_color)
-        id_counts = Counter(detection["id"] for detection in detections)
+        resources.slot_tracker.associate(detections)
         for detection in detections:
             u, v = detection["center_px"]
             raw_z = depth_at_box(
                 depth, depth_affine, detection["bbox_px"], args.depth_scale
             )
-            if id_counts[detection["id"]] > 1:
-                # One name-derived id covers several objects; no shared median.
+            if detection["z_ambiguous"]:
                 sample = stabiliser.untracked_sample(raw_z)
-                detection["z_ambiguous"] = True
             else:
-                sample = stabiliser.update(detection["id"], raw_z)
+                sample = stabiliser.update(
+                    (str(detection.get("name", "unknown")), detection["slot"]), raw_z
+                )
             detection["z_raw"] = sample["z_raw"]
             detection["Z_m"] = sample["Z_m"]
             detection["z_rejected"] = sample["z_rejected"]

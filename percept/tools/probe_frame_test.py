@@ -754,6 +754,58 @@ class ProbeRuntimeTest(unittest.TestCase):
             ),
         )
 
+    def patch_chair_frames(self, frames):
+        """Patch explicit per-frame (bbox, raw depth) chair detections."""
+        frame_specs = iter(
+            [[(tuple(bbox), z) for bbox, z in frame] for frame in frames]
+        )
+        state = {"depths": [], "cursor": 0}
+
+        def fake_detect(_frame, _args, _labels, _affine, _notes, *_rest):
+            specs = next(frame_specs)
+            state["depths"] = [z for _bbox, z in specs]
+            state["cursor"] = 0
+            detections = []
+            for bbox, _z in specs:
+                x0, y0, x1, y1 = bbox
+                detections.append(
+                    {
+                        "name": "chair",
+                        "conf": 0.9,
+                        "bbox_px": list(bbox),
+                        "center_px": [(x0 + x1) / 2.0, (y0 + y1) / 2.0],
+                        "center_net": [(x0 + x1) / 4.0, (y0 + y1) / 4.0],
+                    }
+                )
+            return detections
+
+        def fake_predict_depth(_frame, _session, affine, *_rest):
+            return np.full((affine.net_h, affine.net_w), 1.0, dtype=np.float32)
+
+        def fake_depth_at_box(*_args):
+            z = state["depths"][state["cursor"]]
+            state["cursor"] += 1
+            return z
+
+        return (
+            patch.object(probe_frame, "detect", side_effect=fake_detect),
+            patch.object(probe_frame, "predict_depth", side_effect=fake_predict_depth),
+            patch.object(probe_frame, "depth_at_box", side_effect=fake_depth_at_box),
+        )
+
+    def run_chair_frames(self, frames, *extra_args):
+        args = self.make_args(*extra_args)
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(synthetic_probe_modules())
+            for patcher in self.patch_chair_frames(frames):
+                stack.enter_context(patcher)
+            stack.enter_context(resources)
+            return [
+                probe_frame.probe_once(args, labels, mean, std, pad, resources)
+                for _ in frames
+            ]
+
     def test_missing_sample_omits_geometry(self):
         args = self.make_args()
         labels, mean, std, pad, resources = probe_frame.prepare(args)
@@ -779,35 +831,143 @@ class ProbeRuntimeTest(unittest.TestCase):
             world = probe_to_world_module.probe_to_world(second, t_ns=second["t_ns"])
         self.assertNotIn("xyz_cam", world["objects"][0])
 
-    def test_two_same_class_objects_do_not_share_median(self):
-        args = self.make_args()
-        labels, mean, std, pad, resources = probe_frame.prepare(args)
-        detect_patch, grid_patch, depth_patch = self.patch_same_name_frames([[2.0, 4.0]])
+    def test_two_chairs_keep_separate_medians(self):
+        pair = [(100.0, 120.0, 140.0, 160.0, 2.0),
+                (500.0, 120.0, 540.0, 160.0, 4.0)]
+        frames = [[(bbox[:4], bbox[4]) for bbox in pair] for _ in range(6)]
+        probes = self.run_chair_frames(frames)
 
-        with synthetic_probe_modules(), detect_patch, grid_patch, depth_patch, resources:
-            probe = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+        for probe in probes:
+            detections = probe["detections"]
+            self.assertEqual(len({d["slot"] for d in detections}), 2)
+            self.assertEqual([d["Z_m"] for d in detections], [2.0, 4.0])
+            self.assertFalse(any(d["z_rejected"] for d in detections))
+            self.assertFalse(any(d.get("z_ambiguous", False) for d in detections))
+            self.assertEqual([d["xyz_cam"][2] for d in detections], [2.0, 4.0])
 
-        detections = probe["detections"]
-        self.assertEqual([d["z_raw"] for d in detections], [2.0, 4.0])
-        self.assertEqual([d["Z_m"] for d in detections], [2.0, 4.0])
-        self.assertTrue(all(d.get("z_ambiguous") for d in detections))
-        self.assertEqual([d["xyz_cam"][2] for d in detections], [2.0, 4.0])
+        with patch.object(
+            probe_to_world_module.time, "monotonic_ns", return_value=probes[-1]["t_ns"]
+        ):
+            world = probe_to_world_module.probe_to_world(probes[-1], t_ns=probes[-1]["t_ns"])
+        self.assertTrue(all("slot" not in obj for obj in world["objects"]))
+
+    def test_same_class_no_longer_bypasses_smoothing(self):
+        a = (100.0, 120.0, 140.0, 160.0)
+        b = (500.0, 120.0, 540.0, 160.0)
+        frames = [
+            [(a, 2.0), (b, 4.0)],
+            [(a, 2.05), (b, 4.0)],
+            [(a, 5.0), (b, 4.0)],  # single frame spike on chair A
+            [(a, 2.05), (b, 4.0)],
+        ]
+        probes = self.run_chair_frames(frames)
+
+        self.assertEqual([d["slot"] for d in probes[0]["detections"]], [0, 1])
+        spike = probes[2]["detections"]
+        self.assertEqual([d["z_raw"] for d in spike], [5.0, 4.0])
+        self.assertLess(abs(spike[0]["Z_m"] - 2.025), 0.01)
+        self.assertTrue(spike[0]["z_rejected"])
+        self.assertEqual(spike[1]["Z_m"], 4.0)
+        self.assertFalse(spike[1]["z_rejected"])
+        self.assertFalse(any(d.get("z_ambiguous", False) for d in spike))
+        self.assertLess(abs(probes[3]["detections"][0]["Z_m"] - 2.05), 0.01)
 
     def test_same_class_group_does_not_poison_history(self):
-        args = self.make_args()
-        labels, mean, std, pad, resources = probe_frame.prepare(args)
-        detect_patch, grid_patch, depth_patch = self.patch_same_name_frames(
-            [[2.0, 4.0], [4.0]]
+        a = (100.0, 120.0, 140.0, 160.0)
+        b = (500.0, 120.0, 540.0, 160.0)
+        probes = self.run_chair_frames([[(a, 2.0), (b, 4.0)], [(b, 4.0)]])
+
+        self.assertEqual([d["slot"] for d in probes[0]["detections"]], [0, 1])
+        survivor = probes[1]["detections"][0]
+        self.assertEqual(survivor["slot"], 1)
+        self.assertEqual(survivor["Z_m"], 4.0)
+        self.assertFalse(survivor["z_rejected"])
+        self.assertFalse(survivor.get("z_ambiguous", False))
+
+    def test_iou_matching_survives_bbox_jitter(self):
+        a = (100.0, 120.0, 140.0, 160.0)
+        b = (500.0, 120.0, 540.0, 160.0)
+        jitters = [(0.0, 0.0), (3.0, -2.0), (-2.0, 2.0), (4.0, 3.0), (0.0, 0.0)]
+        frames = [
+            [
+                ((a[0] + dx, a[1] + dy, a[2] + dx, a[3] + dy), 2.0),
+                ((b[0] - dx, b[1] - dy, b[2] - dx, b[3] - dy), 4.0),
+            ]
+            for dx, dy in jitters
+        ]
+        probes = self.run_chair_frames(frames)
+
+        expected_slots = [d["slot"] for d in probes[0]["detections"]]
+        self.assertEqual(len(set(expected_slots)), 2)
+        for probe in probes:
+            self.assertEqual(
+                [d["slot"] for d in probe["detections"]], expected_slots
+            )
+            self.assertEqual([d["Z_m"] for d in probe["detections"]], [2.0, 4.0])
+            self.assertFalse(any(d.get("z_ambiguous", False) for d in probe["detections"]))
+
+    def test_new_instance_gets_new_slot(self):
+        a = (100.0, 120.0, 140.0, 160.0)
+        b = (500.0, 120.0, 540.0, 160.0)
+        c = (900.0, 120.0, 940.0, 160.0)
+        pair = [(a, 2.0), (b, 4.0)]
+        frames = [pair, pair, pair + [(c, 8.0)]]
+        probes = self.run_chair_frames(frames)
+
+        first_slots = [d["slot"] for d in probes[0]["detections"]]
+        third = probes[2]["detections"][2]
+        self.assertEqual([d["slot"] for d in probes[2]["detections"][:2]], first_slots)
+        self.assertNotIn(third["slot"], first_slots)
+        self.assertEqual(third["z_raw"], 8.0)
+        self.assertEqual(third["Z_m"], 8.0)
+        self.assertFalse(third["z_rejected"])
+        self.assertFalse(third.get("z_ambiguous", False))
+
+    def test_slot_eviction_drops_history(self):
+        box = (100.0, 120.0, 140.0, 160.0)
+        probes = self.run_chair_frames(
+            [[(box, 2.0)], [], [], [], [(box, 8.0)]], "--depth-evict", "2"
         )
 
-        with synthetic_probe_modules(), detect_patch, grid_patch, depth_patch, resources:
-            first = probe_frame.probe_once(args, labels, mean, std, pad, resources)
-            second = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+        self.assertEqual(probes[0]["detections"][0]["Z_m"], 2.0)
+        self.assertEqual(probes[1:4], [p for p in probes[1:4] if not p["detections"]])
+        fresh = probes[4]["detections"][0]
+        self.assertNotEqual(fresh["slot"], probes[0]["detections"][0]["slot"])
+        self.assertEqual(fresh["z_raw"], 8.0)
+        self.assertEqual(fresh["Z_m"], 8.0)
+        self.assertFalse(fresh["z_rejected"])
 
-        self.assertEqual([d["Z_m"] for d in first["detections"]], [2.0, 4.0])
-        self.assertEqual(second["detections"][0]["Z_m"], 4.0)
-        self.assertFalse(second["detections"][0]["z_rejected"])
-        self.assertFalse(second["detections"][0].get("z_ambiguous", False))
+    def test_ambiguous_frame_does_not_contaminate(self):
+        box = (100.0, 120.0, 140.0, 160.0)
+        overlap_a = (103.0, 123.0, 143.0, 163.0)
+        overlap_b = (105.0, 125.0, 145.0, 165.0)
+        probes = self.run_chair_frames(
+            [
+                [(box, 2.0)],
+                [(overlap_a, 4.0), (overlap_b, 6.0)],
+                [(box, 2.05)],
+            ]
+        )
+
+        ambiguous = probes[1]["detections"]
+        self.assertTrue(all(d.get("z_ambiguous", False) for d in ambiguous))
+        self.assertEqual([d["Z_m"] for d in ambiguous], [4.0, 6.0])
+        recovered = probes[2]["detections"][0]
+        self.assertLess(abs(recovered["Z_m"] - 2.025), 0.01)
+        self.assertFalse(recovered["z_rejected"])
+        self.assertFalse(recovered.get("z_ambiguous", False))
+
+    def test_equally_matching_slots_mark_detection_ambiguous(self):
+        a = (100.0, 120.0, 140.0, 160.0)
+        b = (150.0, 120.0, 190.0, 160.0)
+        merged = (110.0, 120.0, 180.0, 160.0)
+        probes = self.run_chair_frames(
+            [[(a, 2.0), (b, 4.0)], [(merged, 6.0)], [(a, 2.05)]]
+        )
+
+        self.assertTrue(probes[1]["detections"][0].get("z_ambiguous", False))
+        self.assertEqual(probes[1]["detections"][0]["Z_m"], 6.0)
+        self.assertLess(abs(probes[2]["detections"][0]["Z_m"] - 2.025), 0.01)
 
     def test_probe_unproject_receives_scaled_z_once(self):
         args = self.make_args("--depth-scale", "0.5")
@@ -832,8 +992,37 @@ class ProbeRuntimeTest(unittest.TestCase):
         self.assertEqual(spy.call_args_list[0].args[2], 2.0)
 
 
+class SlotTrackerTest(unittest.TestCase):
+    """Synthetic box association: no camera, ONNX, or frames."""
+
+    def test_degenerate_boxes_match_by_centre(self):
+        tracker = probe_frame.SlotTracker(iou=0.30)
+        first = {"name": "cup", "bbox_px": [10.0, 10.0, 10.0, 10.0]}
+        second = {"name": "cup", "bbox_px": [10.5, 10.0, 10.5, 10.0]}
+
+        tracker.associate([first])
+        tracker.associate([second])
+
+        self.assertEqual(second["slot"], first["slot"])
+        self.assertFalse(second["z_ambiguous"])
+
+    def test_unseen_slot_is_dropped_after_eviction_window(self):
+        tracker = probe_frame.SlotTracker(evict=2)
+        box = [0.0, 0.0, 40.0, 40.0]
+        first = {"name": "cup", "bbox_px": list(box)}
+        tracker.associate([first])
+        for _ in range(3):
+            tracker.advance()
+
+        later = {"name": "cup", "bbox_px": list(box)}
+        tracker.associate([later])
+
+        self.assertNotEqual(later["slot"], first["slot"])
+        self.assertFalse(later["z_ambiguous"])
+
+
 class DepthStabiliserTest(unittest.TestCase):
-    """Per-id depth smoothing; synthetic series only, no camera or models."""
+    """Per-slot-keyed depth smoothing; synthetic series only, no camera or models."""
 
     def test_single_spike_rejected(self):
         stabiliser = probe_frame.DepthStabiliser()
@@ -904,6 +1093,19 @@ class DepthStabiliserTest(unittest.TestCase):
         self.assertEqual(fresh["Z_m"], 4.0)
         self.assertFalse(fresh["z_rejected"])
 
+    def test_missing_sample_appends_no_history_and_refreshes_no_sighting(self):
+        stabiliser = probe_frame.DepthStabiliser(evict=2)
+        stabiliser.update(("chair", 0), 2.0)
+        stabiliser.advance()
+        missing = stabiliser.update(("chair", 0), None)
+
+        self.assertIsNone(missing["Z_m"])
+        self.assertIsNone(missing["z_raw"])
+        self.assertTrue(missing["z_rejected"])
+        state = stabiliser._states[("chair", 0)]
+        self.assertEqual(state.history, [2.0])
+        self.assertEqual(state.last_seen, 0)
+
     def test_depth_stabiliser_flags_and_validation(self):
         defaults = probe_frame.build_parser().parse_args([])
         self.assertEqual(
@@ -915,11 +1117,17 @@ class DepthStabiliserTest(unittest.TestCase):
             ),
             (5, 0.6, 10, 3),
         )
+        self.assertEqual(defaults.slot_iou, 0.30)
+        self.assertEqual(probe_frame.build_parser().parse_args(["--slot-iou", "0"]).slot_iou, 0.0)
+        self.assertEqual(probe_frame.build_parser().parse_args(["--slot-iou", "1"]).slot_iou, 1.0)
         for flag, value in (
             ("--depth-window", "0"),
             ("--depth-jump", "0"),
             ("--depth-evict", "0"),
             ("--depth-recover", "0"),
+            ("--slot-iou", "-0.01"),
+            ("--slot-iou", "1.01"),
+            ("--slot-iou", "nan"),
         ):
             with self.subTest(flag=flag):
                 with contextlib.redirect_stderr(io.StringIO()):
