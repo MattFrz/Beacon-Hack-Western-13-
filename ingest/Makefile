@@ -11,10 +11,10 @@ PYTHON  ?= python3
 
 ifneq (,$(findstring qcc,$(CC)))
   CFLAGS += -D_QNX_SOURCE
-  LDLIBS :=
+  LDLIBS := -lsocket
 else ifeq ($(shell uname -s),QNX)
   CFLAGS += -D_QNX_SOURCE
-  LDLIBS :=
+  LDLIBS := -lsocket
 else
   LDLIBS := -lrt
 endif
