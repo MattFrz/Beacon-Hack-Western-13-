@@ -1,0 +1,14 @@
+{
+  "name": "beacon-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node main.js",
+    "replay": "node main.js ../samples/world.sample.json",
+    "replay:dev": "node main.js ../samples/dev-reach.jsonl",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  }
+}

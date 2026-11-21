@@ -1,11 +1,16 @@
 # Telemetry format (DRAFT, needs Matt's sign-off)
 
-`telemd` sends to the laptop over UDP:
+`telemd` sends both of these to **UDP port 5005** on the laptop running `bridge`, one message per datagram, local network only (never cloud):
 
-- **World state:** one JSON object per datagram at ~10 Hz, shaped like [`world.sample.json`](world.sample.json).
-- **Video (optional, team monitoring):** a downscaled JPEG at ~5 fps on a separate UDP port, local network only. Kill `telemd` and the JPEG stops. Port numbers are not set yet. Dashboard 3D markers come from JSON even if JPEG is off.
+- **World state:** one JSON object at ~10 Hz, shaped like [`world.sample.json`](world.sample.json).
+- **Video (optional, team monitoring):** one downscaled JPEG at ~5 fps, under 60 KB so it fits in one datagram (~320 px wide is plenty). Kill `telemd` and the JPEG stops. Dashboard 3D markers come from JSON even if JPEG is off.
 
-`bridge` forwards both over WebSocket and writes one JSON object per line to a `.jsonl` file per session. Replay files use the same line format, so the dashboard can't tell live from replay.
+`bridge` tells them apart by the first bytes (a JPEG starts `FF D8`) and drops anything else. It forwards both to the dashboard over WebSocket and writes the world state, one JSON object per line, to a `.jsonl` file per session. The bridge never writes video to disk. Replay files (for example from Matt's generator) use the same line format, with `t_ns` setting the pace. Details: [`../bridge/`](../bridge/).
+
+## Files
+
+- [`world.sample.json`](world.sample.json): one world-state message, mid-reach on the keys with a bottle in view.
+- [`dev-reach.jsonl`](dev-reach.jsonl): a 9 s replay made by [`make-dev-reach.js`](make-dev-reach.js) from the sample: WALK cue, reach (ticks, then continuous tone), `slay percept` at 6 s, HOLD, LOST. A stopgap so the dashboard can be built without the Pi; Matt's generator and real recordings replace it.
 
 ## Field notes
 
