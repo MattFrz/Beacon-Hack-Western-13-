@@ -723,6 +723,35 @@ class DepthSamplingTest(unittest.TestCase):
         self.assertGreater(z_right, z_left)
         self.assertGreater(z_bottom, z_top)
 
+    def test_patch_rejects_pad_and_outside_grid_centres(self):
+        metres = np.full((self.affine.net_h, self.affine.net_w), 3.0, dtype=np.float32)
+        # Both centres have valid neighbours; only the centre cell is invalid.
+        self.assertTrue(self.affine.net_to_full(105, 27)[2])  # below the pad landmark
+        self.assertTrue(self.affine.net_to_full(209, 105)[2])  # left of the edge landmark
+        for u, v in ((320.0, -0.15), (639.0, 240.0)):
+            with self.subTest(landmark=(u, v)):
+                self.assertIsNone(
+                    probe_frame.depth_at_patch(metres, self.affine, u, v, 1.0)
+                )
+
+    def test_box_integer_edge_excludes_wholly_outside_cell(self):
+        u2, v2 = 128.0, 176.0
+        x2, y2 = self.affine.full_to_net(u2, v2)
+        self.assertEqual((x2, y2), (42.0, 84.0))
+
+        metres = np.full((self.affine.net_h, self.affine.net_w), 999.0, dtype=np.float32)
+        for y in range(82, 84):
+            for x in range(40, 42):
+                metres[y, x] = 2.0
+        # Cell (84, 42) spans net [42, 43) x [84, 85); it is wholly outside
+        # a box ending at net (42, 84) and must not contribute to the median.
+        self.assertAlmostEqual(
+            probe_frame.depth_at_box(
+                metres, self.affine, [122.0, 170.0, u2, v2], 1.0
+            ),
+            2.0,
+        )
+
     def test_box_median_beats_center_pixel(self):
         metres = np.full((self.affine.net_h, self.affine.net_w), 8.0, dtype=np.float32)
         rows, cols = np.arange(self.affine.net_h), np.arange(self.affine.net_w)

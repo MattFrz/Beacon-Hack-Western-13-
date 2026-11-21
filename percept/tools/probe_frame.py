@@ -596,9 +596,10 @@ def depth_at_box(
     x1, y1 = affine.full_to_net(min(u1, u2), min(v1, v2))
     x2, y2 = affine.full_to_net(max(u1, u2), max(v1, v2))
     x_lo = max(0, int(math.floor(x1)))
-    x_hi = min(affine.net_w - 1, int(math.floor(x2)))
+    # A cell index n covers [n, n+1), so an edge exactly at n excludes cell n.
+    x_hi = min(affine.net_w - 1, int(math.ceil(x2)) - 1)
     y_lo = max(0, int(math.floor(y1)))
-    y_hi = min(affine.net_h - 1, int(math.floor(y2)))
+    y_hi = min(affine.net_h - 1, int(math.ceil(y2)) - 1)
     if x_hi < x_lo or y_hi < y_lo:
         return None
 
@@ -634,6 +635,14 @@ def depth_at_patch(
 
     u_net, v_net = affine.full_to_net(u, v)
     cx, cy = int(round(u_net)), int(round(v_net))
+    # The landmark itself must be in the captured image; neighbours cannot
+    # substitute for a centre cell in the letterbox pad or off the grid.
+    if not (
+        0 <= cx < affine.net_w
+        and 0 <= cy < affine.net_h
+        and affine.net_to_full(cx, cy)[2]
+    ):
+        return None
     cells = [
         (y, x)
         for y in range(cy - radius, cy + radius + 1)
