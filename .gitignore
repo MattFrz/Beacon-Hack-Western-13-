@@ -2,6 +2,8 @@
 sd-stage/
 
 # Large model files (see models/README.md)
+__pycache__/
+*.py[cod]
 *.onnx
 *.onnx.data
 *.tflite
