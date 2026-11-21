@@ -3,6 +3,7 @@ sd-stage/
 
 # Large model files (see models/README.md)
 *.onnx
+*.onnx.data
 *.tflite
 *.task
 *.gguf
