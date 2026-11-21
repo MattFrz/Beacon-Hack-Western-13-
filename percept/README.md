@@ -4,7 +4,7 @@ Owner: Nathan. C++, cores 1-3 (`0xe`), `SCHED_RR` 22. YOLOE-26n, Depth Anything 
 
 Laptop stand-in: `tools/probe_frame.py`. It is Python and runs on a laptop only. It checks letterbox inverses, full-frame landmark 8, and metric depth before any QNX code is written.
 
-World JSONL: `tools/probe_to_world.py` wraps the same probe and prints one dashboard line per frame. For a single image:
+World JSONL: `tools/probe_to_world.py` wraps the same probe and prints one dashboard line per frame. Target priority is `models/labels.txt` order, with `keys`, `keychain`, `bottle` first; every baked noun can become the target. For a single image:
 
 ```sh
 python3 percept/tools/probe_to_world.py \

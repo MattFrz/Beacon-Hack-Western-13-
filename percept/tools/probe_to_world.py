@@ -27,20 +27,22 @@ if str(REPO_ROOT) not in sys.path:
 
 from percept.tools import probe_frame  # noqa: E402
 
-TARGET_NAMES: Tuple[str, ...] = (
-    "keys",
-    "keychain",
-    "bottle",
-    "laptop",
-    "keyboard",
-    "mouse",
-    "headphones",
-    "charger",
-    "badge",
-    "lanyard",
-    "wallet",
-    "glasses",
-    "phone",
+DEFAULT_LABELS = REPO_ROOT / "models" / "labels.txt"
+PRIORITY_NAMES: Tuple[str, ...] = ("keys", "keychain", "bottle")
+
+
+def load_target_names(path: Path = DEFAULT_LABELS) -> Tuple[str, ...]:
+    """Read baked labels in file order, skipping blank and # comment lines."""
+    names = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    names = [name for name in names if name and not name.startswith("#")]
+    if len(names) < 3:
+        raise ValueError(f"expected at least 3 labels, got {len(names)} in {path}")
+    return tuple(names)
+
+
+# Sunday order first; every other baked noun follows labels.txt order.
+TARGET_NAMES: Tuple[str, ...] = PRIORITY_NAMES + tuple(
+    name for name in load_target_names(DEFAULT_LABELS) if name not in PRIORITY_NAMES
 )
 POSE_EPOCH = 1
 IDENTITY_T_WORLD_FROM_CAM: Tuple[int, ...] = (
