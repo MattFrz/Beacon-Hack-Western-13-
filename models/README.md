@@ -23,3 +23,15 @@ downloads `mobileclip2_b.ts` (242 MB); that encoder is export-only. The result
 was a detect-only static ONNX, 9.3 MB, output shape `(1, 21, 2100)` for 17
 baked labels plus 4 box coordinates. `probe_frame.py` loaded it and detected
 people in `bus.jpg`.
+
+Export depth with:
+
+```sh
+python3 percept/tools/export_depth.py --out models/depth_anything_v2_metric_indoor_small.onnx
+```
+
+Verified with Transformers 5.24.0 and ONNX Runtime 1.32.0 on the laptop. The
+static input is `(1, 3, 210, 210)` and the output is metric depth `(1, 210, 210)`.
+`probe_frame.py` combined it with the baked YOLOE ONNX on `bus.jpg` and sampled
+6.1 to 10.3 m at the detected person centres. Those are model outputs that still
+need a tape check before spoken metres are allowed.
