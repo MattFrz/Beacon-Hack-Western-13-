@@ -151,6 +151,83 @@ def encode_preview(frame: Any, width: int, quality: int) -> Optional[bytes]:
     return encoded.tobytes() if ok else None
 
 
+def render_preview(
+    frame: Any,
+    detections: Sequence[dict],
+    depth: Any,
+    *,
+    width: int,
+    quality: int,
+    target_name: Optional[str] = None,
+    depth_scale: float = 0.0,
+) -> Optional[bytes]:
+    """Stacked preview JPEG: live RGB, RGB with YOLO boxes, depth heatmap.
+
+    Panel one is what the camera sees; panel two is what detection sees (boxes,
+    labels, ranges, with the homing target highlighted); panel three is the
+    metric depth map, colourised, when a depth pass ran. None if encoding fails.
+    """
+    import cv2
+
+    import numpy as np
+
+    frame_h, frame_w = frame.shape[:2]
+    panel_w = max(1, min(int(width), int(frame_w)))
+    panel_h = max(1, round(frame_h * panel_w / float(frame_w)))
+    clean = cv2.resize(frame, (panel_w, panel_h), interpolation=cv2.INTER_AREA)
+    panels = [clean]
+
+    boxed = clean.copy()
+    sx = panel_w / float(frame_w)
+    sy = panel_h / float(frame_h)
+    for det in detections:
+        box = det.get("bbox_px")
+        if not isinstance(box, (list, tuple)) or len(box) < 4:
+            continue
+        x1 = int(round(float(box[0]) * sx))
+        y1 = int(round(float(box[1]) * sy))
+        x2 = int(round(float(box[2]) * sx))
+        y2 = int(round(float(box[3]) * sy))
+        is_target = target_name is not None and det.get("name") == target_name
+        colour = (0, 255, 255) if is_target else (60, 220, 60)
+        thickness = 2 if is_target else 1
+        cv2.rectangle(boxed, (x1, y1), (x2, y2), colour, thickness)
+        label = str(det.get("name", "?"))
+        z = det.get("Z_m")
+        if isinstance(z, (int, float)) and z == z and z > 0.0:
+            label = f"{label} {float(z):.2f}m"
+        cv2.putText(boxed, label, (x1, max(8, y1 - 3)),
+                    getattr(cv2, "FONT_HERSHEY_SIMPLEX", 0), 0.35, colour,
+                    1, getattr(cv2, "LINE_AA", 16))
+    panels.append(boxed)
+
+    if depth is not None:
+        grid = np.asarray(depth, dtype=np.float32)
+        grid = np.nan_to_num(grid, nan=0.0, posinf=0.0, neginf=0.0)
+        if depth_scale:
+            grid = grid * float(depth_scale)
+        span = float(grid.max() - grid.min()) if grid.size else 0.0
+        if grid.size and span >= 0.0:
+            norm = cv2.normalize(grid, None, 0, 255,
+                                 getattr(cv2, "NORM_MINMAX", 32))
+            colour_map = cv2.applyColorMap(
+                cv2.convertScaleAbs(norm),
+                getattr(cv2, "COLORMAP_INFERNO", 2),
+            )
+            panels.append(cv2.resize(colour_map, (panel_w, panel_h),
+                                     interpolation=cv2.INTER_AREA))
+
+    separator = np.full((2, panel_w, 3), 24, dtype=np.uint8)
+    stacked = panels[0]
+    for panel in panels[1:]:
+        stacked = np.vstack([stacked, separator, panel])
+
+    ok, encoded = cv2.imencode(
+        ".jpg", stacked, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
+    )
+    return encoded.tobytes() if ok else None
+
+
 def parse_csv3(text: str, name: str) -> Tuple[float, float, float]:
     parts = [float(p.strip()) for p in text.split(",")]
     if len(parts) != 3:
@@ -1141,6 +1218,7 @@ def probe_once(
     resources: ProbeResources,
     *,
     want_jpeg: bool = False,
+    want_preview: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Capture and process one frame; None when a video file reaches EOF."""
     cycle_started_ns = time.perf_counter_ns()
@@ -1252,6 +1330,21 @@ def probe_once(
         timings_ms["jpeg"] = (time.perf_counter_ns() - started_ns) / 1e6
         if jpeg is not None:
             result["jpeg"] = jpeg
+
+    if want_preview:
+        started_ns = time.perf_counter_ns()
+        preview = render_preview(
+            frame,
+            detections,
+            depth,
+            width=getattr(args, "preview_width", DEFAULT_PREVIEW_WIDTH),
+            quality=getattr(args, "preview_quality", DEFAULT_PREVIEW_QUALITY),
+            target_name=getattr(args, "preview_target", None),
+            depth_scale=float(getattr(args, "depth_scale", 0.0)),
+        )
+        timings_ms["preview"] = (time.perf_counter_ns() - started_ns) / 1e6
+        if preview is not None:
+            result["preview"] = preview
 
     timings_ms["cycle"] = (time.perf_counter_ns() - cycle_started_ns) / 1e6
     return result

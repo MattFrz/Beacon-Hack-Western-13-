@@ -1190,6 +1190,87 @@ class PreviewEncodeTest(unittest.TestCase):
             self.assertIsNone(probe_frame.encode_preview(frame, 320, 60))
 
 
+class RenderPreviewTest(unittest.TestCase):
+    """Composite preview: clean RGB, RGB+YOLO boxes, depth heatmap, stacked.
+    Uses real cv2 (available in the probe venv) with synthetic arrays."""
+
+    WIDTH = 128
+    QUALITY = 60
+
+    def setUp(self):
+        self.frame = np.zeros((72, self.WIDTH, 3), dtype=np.uint8)
+        self.frame[:, :] = (40, 80, 120)
+        self.depth = np.full((36, 36), 1.2, dtype=np.float32)
+        self.detections = [
+            {"name": "scissors", "bbox_px": [10, 10, 50, 40], "conf": 0.8,
+             "Z_m": 0.7},
+            {"name": "bottle", "bbox_px": [60, 12, 90, 44], "conf": 0.6},
+        ]
+
+    def decode(self, jpeg):
+        import cv2
+        arr = np.frombuffer(jpeg, dtype=np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+    def test_returns_jpeg_with_three_stacked_panels(self):
+        jpeg = probe_frame.render_preview(
+            self.frame, self.detections, self.depth,
+            width=self.WIDTH, quality=self.QUALITY)
+        self.assertTrue(jpeg.startswith(b"\xff\xd8"))
+        img = self.decode(jpeg)
+        panel_h = self.WIDTH * self.frame.shape[0] // self.frame.shape[1]
+        self.assertEqual(img.shape[1], self.WIDTH)
+        self.assertEqual(img.shape[0], 3 * panel_h + 2 * 2)  # 2 px separators
+
+    def test_boxed_panel_differs_from_clean_panel(self):
+        jpeg = probe_frame.render_preview(
+            self.frame, self.detections, None,
+            width=self.WIDTH, quality=self.QUALITY)
+        img = self.decode(jpeg)
+        panel_h = self.WIDTH * self.frame.shape[0] // self.frame.shape[1]
+        clean = img[:panel_h]
+        boxed = img[panel_h + 2:2 * panel_h + 2]
+        self.assertGreater(np.abs(clean.astype(int) - boxed.astype(int)).sum(), 0)
+
+    def test_without_depth_only_rgb_panels(self):
+        jpeg = probe_frame.render_preview(
+            self.frame, self.detections, None,
+            width=self.WIDTH, quality=self.QUALITY)
+        img = self.decode(jpeg)
+        panel_h = self.WIDTH * self.frame.shape[0] // self.frame.shape[1]
+        self.assertEqual(img.shape[0], 2 * panel_h + 2)
+
+    def test_target_is_highlighted_distinctly(self):
+        plain = probe_frame.render_preview(
+            self.frame, self.detections, None, width=self.WIDTH,
+            quality=self.QUALITY)
+        highlighted = probe_frame.render_preview(
+            self.frame, self.detections, None, width=self.WIDTH,
+            quality=self.QUALITY, target_name="scissors")
+        self.assertNotEqual(plain, highlighted)
+
+    def test_returns_none_when_encoding_fails(self):
+        fake_cv2 = types.ModuleType("cv2")
+        fake_cv2.INTER_AREA = 3
+        fake_cv2.IMWRITE_JPEG_QUALITY = 2
+        fake_cv2.resize = lambda image, size, interpolation=None: np.zeros(
+            (size[1], size[0], 3), dtype=np.uint8)
+        fake_cv2.imencode = lambda *_args: (False, None)
+        fake_cv2.rectangle = lambda *a, **k: None
+        fake_cv2.putText = lambda *a, **k: None
+        fake_cv2.line = lambda *a, **k: None
+        fake_cv2.applyColorMap = lambda image, m: image
+        fake_cv2.COLORMAP_INFERNO = 1
+        fake_cv2.FONT_HERSHEY_SIMPLEX = 0
+        fake_cv2.LINE_AA = 16
+        fake_cv2.normalize = lambda image, *_a, **_k: image
+        fake_cv2.convertScaleAbs = lambda image: image
+        with patch.dict(sys.modules, {"cv2": fake_cv2}):
+            self.assertIsNone(probe_frame.render_preview(
+                self.frame, self.detections, self.depth,
+                width=self.WIDTH, quality=self.QUALITY))
+
+
 class DepthSamplingTest(unittest.TestCase):
     """Synthetic grids and affines: no camera, ONNX, or MediaPipe."""
 

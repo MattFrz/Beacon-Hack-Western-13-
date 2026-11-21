@@ -7,6 +7,7 @@ Chest-worn Raspberry Pi 5 on QNX 8.0 that homes a wearer who is blind or has low
 - Accessibility research: [`docs/beacon-accessibility-research.md`](docs/beacon-accessibility-research.md)
 - Pi bring-up notes: [`docs/pi-dev-workflow.md`](docs/pi-dev-workflow.md)
 - Pi bring-up log: [`docs/pi-bringup.md`](docs/pi-bringup.md)
+- QNX integration plan (laptop → Pi, findings + steps): [`docs/qnx-integration-plan.md`](docs/qnx-integration-plan.md)
 
 ## Layout
 
@@ -17,6 +18,7 @@ Chest-worn Raspberry Pi 5 on QNX 8.0 that homes a wearer who is blind or has low
 | [`camd/`](camd/) | Sensor Framework into the frame ring | Nathan |
 | [`guided/`](guided/) | 60 Hz synthesizer: mode, bind, laws, audio, piezo | Munadir |
 | [`percept/`](percept/) | YOLOE, depth, hands, unproject, VO | Nathan |
+| [`ingest/`](ingest/) | Probe UDP records → `/beacon_world` (seq_percept) | Nathan |
 | [`voiced/`](voiced/) | whisper.cpp, synonym table, optional llama.cpp | Munadir |
 | [`telemd/`](telemd/) | Read-only telemetry to the laptop (optional) | Matt |
 | [`laptop/bridge/`](laptop/bridge/) | UDP in, WebSocket out, JSONL recording | Zain |

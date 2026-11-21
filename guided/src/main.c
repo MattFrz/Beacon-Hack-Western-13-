@@ -35,10 +35,16 @@ static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
 static beacon_world_t *open_world(int create)
 {
+    /* BEACON_WORLD lets tests / parallel instances use their own shm name
+     * (supervisor has the same escape hatch via BEACON_SUPERVISOR_WORLD).
+     * The product path never sets it: guided attaches to /beacon_world. */
+    const char *shm_name = getenv("BEACON_WORLD");
+    if (!shm_name)
+        shm_name = BEACON_SHM_WORLD;
     int flags = O_RDWR | (create ? O_CREAT : 0);
-    int fd = shm_open(BEACON_SHM_WORLD, flags, 0666);
+    int fd = shm_open(shm_name, flags, 0666);
     if (fd == -1) {
-        fprintf(stderr, "guided: shm_open %s: %s%s\n", BEACON_SHM_WORLD, strerror(errno),
+        fprintf(stderr, "guided: shm_open %s: %s%s\n", shm_name, strerror(errno),
                 create ? "" : " (start the supervisor or fakeworld first, or pass --create)");
         return NULL;
     }
@@ -49,7 +55,7 @@ static beacon_world_t *open_world(int create)
     }
     if ((size_t)sb.st_size < sizeof(beacon_world_t)) {
         if (!create || ftruncate(fd, (off_t)sizeof(beacon_world_t)) == -1) {
-            fprintf(stderr, "guided: %s is %lld bytes, need %zu\n", BEACON_SHM_WORLD,
+            fprintf(stderr, "guided: %s is %lld bytes, need %zu\n", shm_name,
                     (long long)sb.st_size, sizeof(beacon_world_t));
             close(fd);
             return NULL;

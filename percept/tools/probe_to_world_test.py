@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from itertools import islice
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -141,6 +141,50 @@ class ProbeToWorldTest(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 probe_to_world_module.load_target_names(path)
+
+    def test_frames_dir_writes_one_preview_per_record(self):
+        """--frames-dir: one composite JPEG per emitted record, named by ordinal,
+        so the bridge pairs frame i with replay record i."""
+        tmp = Path(tempfile.mkdtemp())
+        labels = tmp / "labels.txt"
+        labels.write_text("keys\nkeychain\nbottle\n", encoding="utf-8")
+        frames = tmp / "frames"
+        asked_preview = []
+        counter = {"n": 0}
+
+        def fake_probe_once(_args, *_a, want_preview=False, **_k):
+            counter["n"] += 1
+            asked_preview.append(want_preview)
+            idx = counter["n"]
+            return {
+                "frame_id": idx, "t_ns": idx, "W": 64, "H": 48,
+                "detections": [], "hand": None, "notes": [],
+                "timings_ms": {}, "depth_grid": None,
+                "preview": b"\xff\xd8preview" if want_preview else None,
+            }
+
+        def fake_convert(probe, **_k):
+            return {"t_ns": probe["t_ns"], "mode": "LIVE", "objects": [],
+                    "target": None}
+
+        args = probe_to_world_module.build_parser().parse_args(
+            ["--image", "x.png", "--labels", str(labels),
+             "--frames-dir", str(frames), "--out", "-"])
+        with patch.object(probe_to_world_module.probe_frame, "prepare",
+                          return_value=(("keys", "keychain", "bottle"),
+                                        (0.0, 0.0, 0.0), (1.0, 1.0, 1.0),
+                                        (0, 0, 0), MagicMock())), \
+             patch.object(probe_to_world_module.probe_frame, "probe_once",
+                          side_effect=fake_probe_once), \
+             patch.object(probe_to_world_module, "probe_to_world",
+                          side_effect=fake_convert):
+            records = list(probe_to_world_module.emit_lines(args))
+
+        files = sorted(frames.glob("*.jpg"))
+        self.assertEqual(len(files), len(records))
+        self.assertEqual([f.name for f in files], ["000000.jpg"])
+        self.assertEqual(files[0].read_bytes(), b"\xff\xd8preview")
+        self.assertEqual(asked_preview, [True])
 
     def test_module_target_names_cover_repo_labels_with_priority_first(self):
         labels_path = probe_to_world_module.REPO_ROOT / "models" / "labels.txt"

@@ -318,6 +318,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="send one preview every N processed frames (default 1)",
     )
+    parser.add_argument(
+        "--frames-dir",
+        type=Path,
+        default=None,
+        help="write one composite preview JPEG per record (000000.jpg, ...) "
+        "for offline replay through the bridge --frames",
+    )
+    parser.add_argument(
+        "--preview-width",
+        type=int,
+        default=probe_frame.DEFAULT_PREVIEW_WIDTH,
+        help="composite preview panel width (default "
+        f"{probe_frame.DEFAULT_PREVIEW_WIDTH})",
+    )
+    parser.add_argument(
+        "--preview-quality",
+        type=int,
+        default=probe_frame.DEFAULT_PREVIEW_QUALITY,
+        help=f"composite JPEG quality (default {probe_frame.DEFAULT_PREVIEW_QUALITY})",
+    )
+    parser.add_argument(
+        "--preview-target",
+        default=None,
+        help="highlight this object name in the boxed panel",
+    )
     return parser
 
 
@@ -333,6 +358,10 @@ def emit_lines(
     """Yield world records; camera/sessions/landmarker live for the whole loop."""
     labels, mean, std, pad_color, resources = probe_frame.prepare(args)
     stop_after_one = args.once or args.image is not None
+    frames_dir = getattr(args, "frames_dir", None)
+    if frames_dir is not None:
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        args.preview_target = getattr(args, "preview_target", None)
     seq = 0
     frame_index = 0
     last_d_m: Optional[float] = None
@@ -344,8 +373,10 @@ def emit_lines(
         while True:
             jpeg_every = getattr(args, "jpeg_every", 1)
             want_jpeg = on_video is not None and frame_index % jpeg_every == 0
+            want_preview = frames_dir is not None
             probe = probe_frame.probe_once(
-                args, labels, mean, std, pad_color, resources, want_jpeg=want_jpeg
+                args, labels, mean, std, pad_color, resources,
+                want_jpeg=want_jpeg, want_preview=want_preview,
             )
             if probe is None:  # video EOF: end the loop, keep the last state
                 return
@@ -369,6 +400,10 @@ def emit_lines(
             elif "d_m" in world:
                 last_d_m = world["d_m"]
             yield world
+            if frames_dir is not None:
+                preview = probe.get("preview")
+                if preview is not None:
+                    (frames_dir / f"{frame_index:06d}.jpg").write_bytes(preview)
             jpeg = probe.get("jpeg")
             if want_jpeg and jpeg is not None:
                 on_video(jpeg)

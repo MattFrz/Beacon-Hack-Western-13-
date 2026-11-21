@@ -38,7 +38,7 @@ Example (`lost`):
 guided: 930 loops, 0 missed deadlines, worst lateness 208 us, p95 150 us
 ```
 
-Flags: `--metres` speaks metres (spec §11: only after the tape-measure check passes; off by default), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX).
+Flags: `--metres` speaks metres (spec §11: only after the tape-measure check passes; off by default), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX). `BEACON_WORLD=/beacon_x` overrides the shm name for tests and parallel instances (the product path never sets it; same pattern as supervisor's `BEACON_SUPERVISOR_WORLD`).
 
 ## On the Pi
 
