@@ -88,6 +88,21 @@ static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
             hand.pose_epoch == t->pose_epoch && guided.display.d_m >= 0 && isfinite(guided.display.d_m))
             snprintf(distance, sizeof(distance), "%.9g", guided.display.d_m);
     }
+    const beacon_guided_display_t *display = &guided.display;
+    char ticks[32] = "null", pan[32] = "null";
+    if (isfinite(display->tick_hz) && display->tick_hz > 0)
+        snprintf(ticks, sizeof(ticks), "%.9g", display->tick_hz);
+    if (isfinite(display->pan))
+        snprintf(pan, sizeof(pan), "%.9g", display->pan);
+
+    /* Each uint16_t clip ID needs at most five digits and a comma. */
+    enum { CLIP_CAPACITY = sizeof(display->last_clips) / sizeof(display->last_clips[0]) };
+    char clips[6 * CLIP_CAPACITY + 1] = "";
+    size_t used = 0;
+    for (size_t i = 0; i < display->n_last_clips && i < CLIP_CAPACITY; ++i)
+        used += (size_t)snprintf(clips + used, sizeof(clips) - used, "%s%u",
+                                 i ? "," : "", (unsigned)display->last_clips[i]);
+
     const char *law = guided.display.law < sizeof(laws)/sizeof(laws[0]) ? laws[guided.display.law] : "NONE";
     return snprintf(packet, cap, "{\"v\":1,\"t_ns\":%" PRIu64 ",\"seq\":{\"guided\":%u,\"percept\":%u},"
                     "\"health\":{\"last_yolo_ms\":%" PRIu32 ",\"last_depth_ms\":%" PRIu32
@@ -95,12 +110,14 @@ static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
                     ",\"worst_late_us\":%" PRIu64 "},\"procs\":{"
                     "\"guided\":{\"alive\":%s,\"hb_ns\":%" PRIu64 "},"
                     "\"percept\":{\"alive\":%s,\"hb_ns\":%" PRIu64 "}}},"
-                    "\"mode\":\"%s\",\"law\":\"%s\",\"target\":%s,\"hand\":%s,\"d_m\":%s}",
+                    "\"mode\":\"%s\",\"law\":\"%s\",\"target\":%s,\"hand\":%s,\"d_m\":%s,"
+                    "\"cue\":{\"tick_hz\":%s,\"pan\":%s,\"continuous\":%s,\"clip_ids\":[%s]}}",
                     now, gs, ps, health.last_yolo_ms, health.last_depth_ms, health.p95_vision_ns,
                     guided.stats.misses, guided.stats.worst_late_ns / UINT64_C(1000),
                     heartbeat_alive(guided.hb_guided_ns, now), guided.hb_guided_ns,
                     heartbeat_alive(health.hb_percept_ns, now), health.hb_percept_ns,
-                    modes[mode], law, target, hand_json, distance);
+                    modes[mode], law, target, hand_json, distance,
+                    ticks, pan, display->continuous ? "true" : "false", clips);
 }
 
 int main(int argc, char **argv)
