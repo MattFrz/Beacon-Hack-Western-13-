@@ -48,6 +48,15 @@ Optional chessboard calibration for a better left/right pinhole. Use a Python wi
 
 `--square-m` is the real size of one square, not a default to trust. On a laptop screen it is usually smaller than 0.025 m. Capture at the same resolution the probe will use. `calib.json` is laptop-local and gitignored. It does not make spoken metres legal without a tape check.
 
+Tape check: with a recorded world/probe JSON (or JSONL from the live probe) and a human-measured distance, run:
+
+```sh
+/tmp/beacon-probe-venv/bin/python percept/tools/tape_check.py \
+  --json /tmp/beacon-live.jsonl --tape-m 1.0 --name bottle
+```
+
+It prints one JSON result with `error_pct`; exit 0 passes, 1 exceeds the default 30% limit, 2 means missing/invalid input. Use `--kind d_m` to check a same-frame hand-to-target `d_m` instead of `|xyz_cam|`. Override the gate with `--limit`; use `--json -` for stdin. A failed check keeps spoken metres and VO off. No camera runs here.
+
 Shm reader: `src/head.cpp` builds as `percept-head`. It reads the newest `/beacon_frames` slot, prints the YOLO and depth letterbox affines, and initialises only the ABI fields of `/beacon_depth` and `/beacon_world`. No model runs yet. It writes no detections, depth, hand, or pose data.
 
 Build and check with `camd` running:
