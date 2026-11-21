@@ -149,10 +149,11 @@ class ProbeToWorldTest(unittest.TestCase):
             for line in labels_path.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.strip().startswith("#")
         )
-        priority = ("keys", "keychain", "bottle")
+        priority = ("keys", "keychain", "scissors", "bottle")
         expected = priority + tuple(name for name in baked if name not in priority)
 
-        self.assertEqual(probe_to_world_module.TARGET_NAMES[:3], priority)
+        self.assertEqual(probe_to_world_module.TARGET_NAMES, expected)
+        self.assertEqual(probe_to_world_module.TARGET_NAMES[:4], priority)
         self.assertEqual(probe_to_world_module.TARGET_NAMES, expected)
 
     def test_distance_uses_same_frame_xyz_only(self):

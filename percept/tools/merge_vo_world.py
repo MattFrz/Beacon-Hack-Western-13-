@@ -223,6 +223,7 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
     vo_i = 0  # newest VO record with frame_id <= F
     anchors: List[Anchor] = []           # persistent world-object map
     anchor_counters: Dict[str, int] = {}
+    persistent_target: Optional[Anchor] = None  # homing marker through gaps
     n_out = 0
     with out_path.open("w", encoding="utf-8") as out:
         for i, rec in enumerate(world_records):
@@ -283,15 +284,15 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
                 "T_world_from_cam": pose_T,
             }
 
-            for key in ("target", "hand"):
-                part = rec.get(key)
-                if isinstance(part, dict) and "xyz_cam" in part:
+            part = rec.get("hand")
+            if isinstance(part, dict):
+                if "xyz_cam" in part:
                     p_world = transform_point(pose_T, part["xyz_cam"])
                     if p_world is not None:
                         part["xyz_world"] = p_world
-                if isinstance(part, dict) and "t_ns" in part:
+                if "t_ns" in part:
                     part["t_ns"] = frame_ns
-                if isinstance(part, dict) and "last_seen_ns" in part:
+                if "last_seen_ns" in part:
                     part["last_seen_ns"] = frame_ns
             objects = rec.get("objects")
             live_objects: List[Dict[str, object]] = []
@@ -333,6 +334,41 @@ def merge(world_path: Path, vo_path: Path, out_path: Path,
                     seen_anchors.add(best)
             rec["objects"] = ([a.emit(a in seen_anchors) for a in anchors]
                               + live_objects)
+
+            # Target: live camera-space precision while in frame; the anchor's
+            # median position (faded) while out of frame, so the dashboard
+            # keeps a homing marker through detection gaps.
+            target = rec.get("target")
+            if isinstance(target, dict):
+                p_world = (transform_point(pose_T, target["xyz_cam"])
+                           if isinstance(target.get("xyz_cam"), list) else None)
+                if p_world is not None:
+                    target["xyz_world"] = p_world
+                if "t_ns" in target:
+                    target["t_ns"] = frame_ns
+                if "last_seen_ns" in target:
+                    target["last_seen_ns"] = frame_ns
+                name = target.get("name")
+                if (isinstance(name, str) and p_world is not None
+                        and isinstance(target.get("xyz_cam"), list)):
+                    cam = target["xyz_cam"]
+                    match = next((a for a in anchors
+                                  if a.name == name and a.latest_cam == cam), None)
+                    if match is None:
+                        best_d = ANCHOR_GATE_M
+                        for a in anchors:
+                            if a.name != name:
+                                continue
+                            d = math.dist(a.position(), p_world)
+                            if d <= best_d:
+                                match, best_d = a, d
+                    if match is not None:
+                        persistent_target = match
+            elif persistent_target is not None:
+                held = persistent_target.emit(False)
+                if persistent_target.latest_cam is not None:
+                    held["xyz_cam"] = persistent_target.latest_cam
+                rec["target"] = held
             rec["crumbs"] = [dict(c) for c in crumbs if c["frame_id"] <= F]
             for c in rec["crumbs"]:
                 c.pop("frame_id", None)

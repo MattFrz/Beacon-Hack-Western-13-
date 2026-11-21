@@ -217,6 +217,33 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(positions, [0.0, 3.0])
         self.assertFalse(any(o["in_latest_boxes"] for o in merged[1]["objects"]))
 
+    def test_target_persists_via_anchor_when_out_of_frame(self):
+        first = record_with(2, [{
+            "id": 3, "name": "scissors", "bbox_px": [1, 2, 3, 4],
+            "conf": 0.9, "xyz_cam": [0.0, 0.0, 2.0],
+            "xyz_world": [0.0, 0.0, 2.0], "last_seen_ns": 999_999_999,
+            "frame_id": 2, "pose_epoch": 1, "in_latest_boxes": True,
+        }])
+        first["target"] = {
+            "id": 3, "name": "scissors", "xyz_cam": [0.0, 0.0, 2.0],
+            "xyz_world": [0.0, 0.0, 2.0], "conf": 0.9,
+            "last_seen_ns": 999_999_999, "frame_id": 2,
+            "pose_epoch": 1, "in_latest_boxes": True,
+        }
+        merged = self.run_merge(
+            [first, record_with(5, [])],
+            [vo_record(2, True, 0.0), vo_record(5, True, 0.5)])
+        t0 = merged[0]["target"]
+        self.assertEqual(t0["name"], "scissors")
+        self.assertEqual(t0["xyz_world"], [0.0, 0.0, 2.0])  # live transform
+        self.assertTrue(t0["in_latest_boxes"])
+        t1 = merged[1]["target"]
+        self.assertIsNotNone(t1)  # faded anchor, not dropped
+        self.assertEqual(t1["name"], "scissors")
+        self.assertEqual(t1["xyz_world"], [0.0, 0.0, 2.0])  # anchor median
+        self.assertFalse(t1["in_latest_boxes"])
+        self.assertEqual(t1["last_seen_ns"], 2 * DT_NS)
+
     def test_record_without_frame_id_uses_calibrated_ordinal(self):
         blank = world_record(5)
         blank["objects"] = []  # no frame_id anywhere
