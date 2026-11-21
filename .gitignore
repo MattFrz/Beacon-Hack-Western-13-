@@ -11,6 +11,7 @@ models/*.bin
 # Build output
 build/
 *.o
+camd/camd
 
 # Laptop (Node)
 node_modules/

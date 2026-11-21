@@ -30,4 +30,5 @@ Chest-worn Raspberry Pi 5 on QNX 8.0 that homes a wearer who is blind or has low
 - `main` holds the shared base. Work on a branch per owner or feature (`zain/dashboard`, `munadir/guided`, ...) and merge back through a PR.
 - Changes to `include/beacon.h` or the telemetry format go through their owners, since every process builds against them.
 - Freeze `include/beacon.h` from **this** copy of `docs/nathans-revision.md` §6 (`intent.kind` includes `REPEAT` and `REJECT`). Do not freeze `CAM_W` / `CAM_H` from the C270.
+- The `nathan/camd` branch carries Munadir's DRAFT header so the shm ring can be compiled. Matt's sign-off is still required before treating that ABI as frozen.
 - Never commit `sd-stage/` (it holds network secrets) or large model files.

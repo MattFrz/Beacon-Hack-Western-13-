@@ -124,3 +124,13 @@ Tape-check depth at 1 m before allowing spoken metres.
 
 Do not launch Beacon from `/boot/onboot`. Start `supervisor` from a later SLM
 or `post_startup` snippet after `io-audio`, Sensor Framework, and `/usr` exist.
+
+## Attempts and environment notes
+
+| Time | Attempt | Result |
+| --- | --- | --- |
+| 2026-11-21T07:22:30-05:00 | `ssh -o BatchMode=yes -o ConnectTimeout=5 qnxpi` | `connect to host 10.80.55.25 port 22: Connection timed out`. The hotspot or device was not reachable from this laptop. |
+| 2026-11-21T07:22:30-05:00 | Laptop Python import check | `cv2`, `numpy`, `onnxruntime`, `ultralytics`, `mediapipe`, `torch`, and `transformers` are not installed. `python3 -m pip --version` returned nothing. `ffmpeg` is at `/etc/profiles/per-user/nate/bin/ffmpeg`. |
+
+No camera, package, audio, GPIO, or scheduler facts were recorded from the Pi.
+Those rows stay blank until the device is reachable again.
