@@ -2,6 +2,7 @@ import { Highlight, HighlightItem } from '@animate-ui/react/primitives/effects/h
 import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
 import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
 import { useState } from 'react';
+import { captionFromClips } from './clips.js';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import { useTelemetry } from './useTelemetry.js';
@@ -62,7 +63,7 @@ export default function App() {
 
       <main className={hasData ? '' : 'stale'}>
         <Scene world={shown} />
-        <Caption law={w.law} cue={w.cue} />
+        <Caption law={w.law} cue={w.cue} targetName={w.target?.name} />
       </main>
       <Scrubber log={log} cursor={cursor} setCursor={setCursor} />
 
@@ -121,19 +122,21 @@ export default function App() {
 }
 
 // What the wearer hears right now: the spoken sentence, or the reach ticks.
-function Caption({ law, cue }) {
-  if (cue?.caption) {
+// REACH comes first: guided keeps its last spoken clips after speech stops for the reach.
+function Caption({ law, cue, targetName }) {
+  if (law === 'REACH' && cue) {
     return (
       <p className="caption">
-        “<Rolling text={cue.caption} stagger={0.012} />”
+        {cue.continuous ? 'Continuous tone' : <>Ticks <Num value={cue.tick_hz} digits={1} unit=" Hz" /></>}, pan{' '}
+        {panWord(cue.pan)}
       </p>
     );
   }
-  if (law !== 'REACH') return null;
+  const text = cue?.caption ?? (cue?.clip_ids?.length ? captionFromClips(cue.clip_ids, targetName) : null);
+  if (!text) return null;
   return (
     <p className="caption">
-      {cue?.continuous ? 'Continuous tone' : <>Ticks <Num value={cue?.tick_hz} digits={1} unit=" Hz" /></>}, pan{' '}
-      {panWord(cue?.pan)}
+      “<Rolling text={text} stagger={0.012} />”
     </p>
   );
 }

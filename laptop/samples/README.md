@@ -21,7 +21,7 @@ Field names follow `include/beacon.h`, frozen from [`docs/nathans-revision.md`](
 | `t_ns` and every `*_ns` | `CLOCK_MONOTONIC` on the Pi | Not wall time. JSON numbers are exact up to about 104 days of uptime. |
 | `seq.*` | per-writer seqs | Always even (`telemd` skips torn reads). |
 | `mode` | recomputed by `telemd` | `LIVE` / `HOLD` / `LOST`, using the same function as `guided`. Not stored in shm. |
-| `law`, `cue`, `d_m` | recomputed by `telemd`, or published by `guided` | `law`: `STOP` / `LOST` / `REACH` / `WALK` / `RETURN` / `NONE`. `cue.caption` is display text for what the wearer hears. All three may be `null` if not available. |
+| `law`, `cue`, `d_m` | recomputed by `telemd`, or published by `guided` | `law`: `STOP` / `LOST` / `REACH` / `WALK` / `RETURN` / `NONE`. `cue.caption` is display text for what the wearer hears. Instead of `caption`, `telemd` may send `cue.clip_ids` (guided's last spoken `enum beacon_clip` ids), which the dashboard turns into text. All three may be missing or `null`. |
 | `intent.kind` | `voiced` | `NONE`, `FIND`, `GO`, `RETURN`, `STOP`, `REPEAT`, `REJECT`, `NACK_UNHEARD`, `NACK_UNSEEN`, `NACK_CANT`. REPEAT/REJECT are intents, not extra walk laws. |
 | `target`, `hand` | `guided`, `percept` | `null` when unbound or not seen. |
 | `xyz_cam` | camera frame | OpenCV: +X right, +Y down, +Z forward, metres. |
