@@ -298,7 +298,7 @@ POSIX `shm_open` names appear as `/dev/shmem/<name>`. Use `O_CREAT|O_RDWR`, `ftr
 Seqlock:
 
 ```
-writer: seq++;  /* odd  */  __sync_synchronize();
+writer: seq |= 1u;  /* stay odd if previous writer died */  __sync_synchronize();
         memcpy fields;
         __sync_synchronize();
         seq++;  /* even */

@@ -6,7 +6,7 @@ Owner: Nathan. C, core 0 (`0x1`), `SCHED_FIFO` 50. Sensor Framework into the new
 
 The shm ring, seqlock writes, core 0 pinning, and FIFO priority are implemented. The camera source is either a synthetic BGR8888 frame or a bring-up-only uncompressed 32-bit BMP file. The QNX CamAPI adapter is not wired yet. `frametype = 0` is a stub marker and `frametype = 65535` is the BMP bring-up marker; neither may be frozen as a real camera frametype.
 
-`include/beacon.h` on this branch is Munadir's draft, marked DRAFT and waiting for Matt's sign-off. Do not call the ABI frozen.
+`include/beacon.h` is the shared contract from `docs/nathans-revision.md` §6. Changes go through its owners; `CAM_W`, `CAM_H`, and frametype stay unset until a real camera probe.
 
 ## Build and check
 
