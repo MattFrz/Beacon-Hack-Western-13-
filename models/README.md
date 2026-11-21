@@ -35,3 +35,24 @@ static input is `(1, 3, 210, 210)` and the output is metric depth `(1, 210, 210)
 `probe_frame.py` combined it with the baked YOLOE ONNX on `bus.jpg` and sampled
 6.1 to 10.3 m at the detected person centres. Those are model outputs that still
 need a tape check before spoken metres are allowed.
+
+Hand model downloaded from:
+
+```sh
+curl -fsSL -o models/hand_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+```
+
+SHA-256 `fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1`.
+On this NixOS laptop, MediaPipe Tasks needed `libEGL.so.1` from `libglvnd` on
+`LD_LIBRARY_PATH`. With that set, `probe_frame.py --hands --hand-model
+models/hand_landmarker.task` found a fingertip in the MediaPipe `woman_hands.jpg`
+sample.
+
+Local SHA-256 values for the exported files:
+
+| File | SHA-256 |
+| --- | --- |
+| `yoloe26n_320.onnx` | `1a1f94415be20a123d0db389583bbb41bc3d7efe6ccd5f16af52bf467318dea7` |
+| `depth_anything_v2_metric_indoor_small.onnx` | `494113edc11df63ebfd420b9162bc1fc026ec7e72cee855e3d10122db671ced6` |
+| `depth_anything_v2_metric_indoor_small.onnx.data` | `11a48f4d0c5413df3172ccd261481f7aff9e376811cbd6e35e7c52c87614205e` |
