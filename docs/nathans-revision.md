@@ -105,7 +105,7 @@ Sunday 30 s must never imply: finding an object never seen this session; arbitra
 - Dual-camera headset as a v1 requirement.
 - QNX 8.0 adaptive partitioning (APS). **QNX 8.0 does not support APS.** Isolation is processes, priorities, runmasks, and a supervisor. Do not pitch APS.
 
-“Open-vocab” in v1 means **no retraining**: a 16–32 noun list is baked into YOLOE-26n before Saturday. It does **not** mean arbitrary new nouns at runtime. Say that to judges. The noun list is a product limit, not an implementation detail.
+“Open-vocab” in v1 means **no retraining**: a 16–64 noun list (64 baked today) is baked into YOLOE-26n before Saturday. It does **not** mean arbitrary new nouns at runtime. Say that to judges. The noun list is a product limit, not an implementation detail.
 
 ## 3. Locked decisions
 
@@ -116,7 +116,7 @@ Talked through in alignment; do not silently reopen. Review patches below are co
 | Docs vs plan | This file (`docs/nathans-revision.md`) is the product/geometry/QNX source of truth. The Nov 20 plan was removed from the repo. `docs/team-plan.md` is ops only. |
 | Physical tags | None. |
 | Mapping | Session-scoped 3D POI store is in v1 (objects seen this walk). Not a building map. |
-| Detector | YOLOE-26n **detect-only** static ONNX with ~16–32 baked prompts if Ultralytics export allows; otherwise note the extra seg-head cost. Runtime is QNX `onnxruntime` 1.24.4. Prompt-free 4,585-name checkpoint is stretch only, gated on loaner p95. |
+| Detector | YOLOE-26n **detect-only** static ONNX with 16–64 baked prompts (64 baked today) if Ultralytics export allows; otherwise note the extra seg-head cost. Runtime is QNX `onnxruntime` 1.24.4. Prompt-free 4,585-name checkpoint is stretch only, gated on loaner p95. |
 | Product slice | Homing, not narration. |
 | Walk vs reach | Walk = spoken instruction from sensors. Reach = ticks from hand-to-target distance. |
 | Sunday script | FIND-and-reach + in-view bottle WALK + `slay percept` → LOST. Ask-the-room off-camera and RETURN drop unless VO p95 exists. Do not say “RETURN is implemented” from a log. |
@@ -803,7 +803,7 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 - Tick waveform (square vs short sine bursts) and piezo vs USB mixing.
 - Camera unit number and frametype after probing the loaner — then freeze `CAM_W×CAM_H`.
 - Whether whisper tiny.en survives the hall; bump to base.en only if FIND misfires.
-- Final 16–32 noun list after walking the judging space.
+- Final 16–64 noun list after walking the judging space (64 baked today; `models/labels.txt` is authoritative).
 - Tape-measure calibration; enable ground-plane fallback if 1 m table error > 30% (WALK only).
 - Startup snippets so the stack comes up on boot.
 
@@ -812,7 +812,7 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 | Old | Now |
 |---|---|
 | AprilTag fob as “my keys” | No physical tags |
-| YOLO11n COCO + paper-labeled fountain bottle | YOLOE-26n baked 16–32 prompts; session `objects[]` is the map |
+| YOLO11n COCO + paper-labeled fountain bottle | YOLOE-26n baked 16–64 prompts (64 today); session `objects[]` is the map |
 | CLIP / vector DB as a later idea | Explicitly out of v1 |
 | Slot parser only | Table first (candidate set), then tiny llama.cpp on miss |
 | WALK used heading ticks | WALK is spoken instruction; ticks are REACH only |
