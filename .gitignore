@@ -16,6 +16,7 @@ build/
 *.o
 camd/camd
 camd/read-frames
+camd/dump-frame
 camd/deadline-test
 camd/layout-probe
 percept/percept-head

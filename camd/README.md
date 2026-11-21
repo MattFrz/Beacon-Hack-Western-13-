@@ -42,6 +42,15 @@ Check the shm ring from another shell:
 ./read-frames
 ```
 
+Write the newest stable frame back out as a 32-bit top-down BGRA BMP:
+
+```sh
+./dump-frame /tmp/roundtrip.bmp
+```
+
+This is for laptop probe round-trips. It writes the frame's own stride and
+metadata; it does not convert colour or claim a camera format.
+
 Verify frame-ID seeding across restarts, including a high id in a non-newest
 slot (Linux only, uses `/dev/shm`):
 
