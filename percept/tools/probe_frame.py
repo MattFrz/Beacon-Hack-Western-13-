@@ -166,7 +166,7 @@ def load_frame(args: argparse.Namespace) -> Tuple[Any, int]:
 
 def load_calibration(path: Optional[Path], frame_w: int, frame_h: int, notes: List[str]):
     if path is None:
-        notes.append("no --calib: xyz_cam omitted")
+        notes.append("no --calib or --fov: xyz_cam omitted")
         return None
 
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -212,7 +212,7 @@ def resolve_calibration(
             f"guessed --fov {float(fov):g}: xyz_cam from pinhole, not chessboard"
         )
         return calibration
-    notes.append("no --calib: xyz_cam omitted")
+    notes.append("no --calib or --fov: xyz_cam omitted")
     return None
 
 

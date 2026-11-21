@@ -20,14 +20,15 @@ python3 percept/tools/export_yoloe.py --out models/yoloe26n_320.onnx
 ```
 
 Verified export on 2026-11-21 with Ultralytics 8.4.216 and checkpoint
-`yoloe-26n-seg.pt` from the 8.4.0 assets. The first `set_classes()` call
-downloads `mobileclip2_b.ts` (242 MB); that encoder is export-only. The result
-was a detect-only static ONNX, 9.3 MB, output shape `(1, 21, 2100)` for the original 17
-baked labels plus 4 box coordinates across 2100 raw proposals. Re-export after
-changing `labels.txt`. The file now holds 32 single-token names (the YOLOE bake
-cap); output becomes `(1, 36, 2100)` after a fresh export. The ONNX has no
+`yoloe-26n-seg.pt` from the 8.4.0 assets (local copy
+`/tmp/beacon-model-export/yoloe-26n-seg.pt`). The first `set_classes()` call
+uses export-only `mobileclip2_b.ts`. Re-exported after expanding `labels.txt`
+to 32 single-token names: detect-only static ONNX, 9.3 MB, SHA-256
+`5953c2a71da1f013083e6659066a27b23af3c783ec198e75120196609a65471b`, output
+`(1, 36, 2100)` (4 box coords + 32 labels, 2100 raw proposals). The ONNX has no
 NMS; QNX must letterbox, decode, and NMS the raw output. `probe_frame.py` uses
-its own ONNX Runtime path for that by default and detected people in `bus.jpg`.
+its own ONNX Runtime path for that by default. After this bake, `bus.jpg` at
+`--conf 0.15` found `person` at 0.81/0.80/0.72/0.27 and `shoes` at 0.20/0.19.
 `--yolo-runtime ultralytics` remains available as a comparison path where the
 Ultralytics package is installed.
 
