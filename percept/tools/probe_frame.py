@@ -18,10 +18,11 @@ Example:
       --hands --hand-model models/hand_landmarker.task \
       --calib models/calib.json
 
-Ultralytics handles the YOLO letterbox internally and returns boxes in original
-image pixels. The script still maps the centre through the explicit 320 px
-letterbox inverse so the geometry matches docs/nathans-revision.md §7. Depth and
-hands use the same captured frame_id.
+By default, ONNX Runtime decodes the raw YOLOE output: letterbox to 320 px, run
+the static ONNX, decode centre/size boxes, NMS, then inverse-letterbox centres
+back to full-frame pixels so the geometry matches docs/nathans-revision.md §7.
+`--yolo-runtime ultralytics` keeps the packaged decode path as a comparison
+where Ultralytics is installed. Depth and hands use the same captured frame_id.
 """
 
 from __future__ import annotations
