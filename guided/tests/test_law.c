@@ -377,8 +377,35 @@ static void test_tick_curve(void)
     CHECK(mid > 80.0f && mid < 800.0f, "interval shrinks as the hand closes in");
 }
 
+static void test_seq_writer_restart(void)
+{
+    beacon_seq_t seq = 0;
+    uint32_t value = 1;
+    uint32_t snapshot = 0;
+
+    beacon_seq_write_begin(&seq);
+    value = 2;
+    CHECK(seq == 1, "a new write marks the sequence odd");
+
+    /* The first writer exits before publishing its partial update. */
+    beacon_seq_write_begin(&seq);
+    CHECK(!beacon_seq_read(&seq, &snapshot, &value, sizeof(snapshot), 1, NULL),
+          "a replacement writer keeps its partial update unreadable");
+    value = 3;
+    beacon_seq_write_end(&seq);
+    CHECK(beacon_seq_read(&seq, &snapshot, &value, sizeof(snapshot), 1, NULL) &&
+          snapshot == 3, "the completed update is readable after a restart");
+
+    beacon_seq_write_begin(&seq);
+    value = 4;
+    beacon_seq_write_end(&seq);
+    CHECK(seq == 4 && beacon_seq_read(&seq, &snapshot, &value, sizeof(snapshot), 1, NULL) &&
+          snapshot == 4, "subsequent writes still publish normally");
+}
+
 int main(void)
 {
+    test_seq_writer_restart();
     test_mode();
     test_bind_order_and_stale();
     test_walk_metres_gate();

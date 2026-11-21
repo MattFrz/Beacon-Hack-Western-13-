@@ -5,9 +5,8 @@
  * CAM_W / CAM_H / frametype only after the Camera Module 3 probe; do not
  * write C270 sizes here.
  *
- * STATUS: DRAFT by Munadir, waiting for Matt's sign-off. Field names follow
- * the spec. Additions that are NOT in spec §6 are marked "ADDITION" so they
- * are easy to review or drop.
+ * Field names follow the spec. Shared layout extensions are
+ * marked "ADDITION" so they are easy to review.
  *
  * Rules (spec §6):
  *   - Each writer owns its own seq. Odd while writing, even when stable.
@@ -88,13 +87,13 @@ static inline uint64_t beacon_now_ns(void)
 }
 
 /* ---------------------------------------------------------------- seqlock (spec §5.1)
- * writer: seq++ (odd), barrier, write fields, barrier, seq++ (even)
+ * writer: mark odd, barrier, write fields, barrier, advance to even
  * reader: copy while seq is even and unchanged; give up after `tries`. */
 typedef uint32_t beacon_seq_t;
 
 static inline void beacon_seq_write_begin(volatile beacon_seq_t *seq)
 {
-    *seq = *seq + 1u;           /* odd */
+    *seq |= 1u;                 /* stay odd if the previous writer died mid-update */
     __sync_synchronize();
 }
 
