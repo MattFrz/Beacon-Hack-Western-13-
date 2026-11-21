@@ -35,6 +35,7 @@ import statistics
 import sys
 import time
 import zlib
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -183,7 +184,10 @@ class DepthStabiliser:
 
     advance() marks one new probe frame; ids unseen for more than evict frames
     lose their history. A run of agreeing rejects can replace a stale median
-    after recover samples, so a real fast approach is not held forever.
+    after recover samples, so a real fast approach is not held forever. A
+    missing sample is never replaced with a stale median and does not count as
+    a sighting; untracked_sample() emits one frame's own depth for name groups
+    that cannot safely share a median.
     """
 
     def __init__(
@@ -230,10 +234,22 @@ class DepthStabiliser:
     def _within_jump(self, z: float, reference: float) -> bool:
         return abs(z - reference) / reference <= self.jump
 
-    def update(self, object_id: Any, z: Optional[float]) -> Dict[str, Any]:
+    @staticmethod
+    def _normalise(z: Optional[float]) -> Optional[float]:
         raw = None if z is None else float(z)
-        if raw is not None and not math.isfinite(raw):
-            raw = None
+        return raw if raw is None or math.isfinite(raw) else None
+
+    def untracked_sample(self, z: Optional[float]) -> Dict[str, Any]:
+        """Emit this frame's own depth without reading or writing history."""
+        raw = self._normalise(z)
+        return {
+            "Z_m": raw if raw is not None and raw > 0.0 else None,
+            "z_raw": raw,
+            "z_rejected": True,
+        }
+
+    def update(self, object_id: Any, z: Optional[float]) -> Dict[str, Any]:
+        raw = self._normalise(z)
         valid = raw is not None and raw > 0.0
 
         state = self._states.get(object_id)
@@ -244,15 +260,11 @@ class DepthStabiliser:
             self._states[object_id] = state
             return {"Z_m": raw, "z_raw": raw, "z_rejected": False}
 
-        state.last_seen = self._frame
         if not valid:
             state.candidates.clear()
-            return {
-                "Z_m": statistics.median(state.history),
-                "z_raw": raw,
-                "z_rejected": True,
-            }
+            return {"Z_m": None, "z_raw": raw, "z_rejected": True}
 
+        state.last_seen = self._frame
         median = statistics.median(state.history)
         if self._within_jump(raw, median):
             state.history.append(raw)
@@ -1016,12 +1028,18 @@ def probe_once(
         started_ns = time.perf_counter_ns()
         session = resources.depth_session()
         depth = predict_depth(frame, session, depth_affine, args, mean, std, pad_color)
+        id_counts = Counter(detection["id"] for detection in detections)
         for detection in detections:
             u, v = detection["center_px"]
             raw_z = depth_at_box(
                 depth, depth_affine, detection["bbox_px"], args.depth_scale
             )
-            sample = stabiliser.update(detection["id"], raw_z)
+            if id_counts[detection["id"]] > 1:
+                # One name-derived id covers several objects; no shared median.
+                sample = stabiliser.untracked_sample(raw_z)
+                detection["z_ambiguous"] = True
+            else:
+                sample = stabiliser.update(detection["id"], raw_z)
             detection["z_raw"] = sample["z_raw"]
             detection["Z_m"] = sample["Z_m"]
             detection["z_rejected"] = sample["z_rejected"]

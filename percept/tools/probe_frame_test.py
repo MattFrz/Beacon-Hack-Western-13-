@@ -724,6 +724,91 @@ class ProbeRuntimeTest(unittest.TestCase):
         self.assertTrue(second["detections"][0]["z_rejected"])
         self.assertEqual([call.args[2] for call in spy.call_args_list], [2.0, 2.0])
 
+    def patch_same_name_frames(self, frames):
+        """Patch detection and depth with per-frame same-name boxes and depths."""
+        frames = [list(depths) for depths in frames]
+        frame_depths = iter(frames)
+        flat_depths = iter([z for depths in frames for z in depths])
+
+        def fake_detect(_frame, _args, _labels, _affine, _notes, *_rest):
+            depths = next(frame_depths)
+            return [
+                {
+                    "name": "chair",
+                    "conf": 0.9,
+                    "bbox_px": [index * 50.0, 100.0, index * 50.0 + 30.0, 140.0],
+                    "center_px": [index * 50.0 + 15.0, 120.0],
+                    "center_net": [index * 25.0, 60.0],
+                }
+                for index in range(len(depths))
+            ]
+
+        def fake_predict_depth(_frame, _session, affine, *_rest):
+            return np.full((affine.net_h, affine.net_w), 1.0, dtype=np.float32)
+
+        return (
+            patch.object(probe_frame, "detect", side_effect=fake_detect),
+            patch.object(probe_frame, "predict_depth", side_effect=fake_predict_depth),
+            patch.object(
+                probe_frame, "depth_at_box", side_effect=lambda *_args: next(flat_depths)
+            ),
+        )
+
+    def test_missing_sample_omits_geometry(self):
+        args = self.make_args()
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+
+        with (
+            synthetic_probe_modules(),
+            self.fake_model_calls(),
+            patch.object(probe_frame, "depth_at_box", side_effect=[2.0, None]),
+            resources,
+        ):
+            first = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+            second = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+
+        self.assertEqual(first["detections"][0]["Z_m"], 2.0)
+        self.assertIn("xyz_cam", first["detections"][0])
+        self.assertIsNone(second["detections"][0]["Z_m"])
+        self.assertIsNone(second["detections"][0]["z_raw"])
+        self.assertTrue(second["detections"][0]["z_rejected"])
+        self.assertNotIn("xyz_cam", second["detections"][0])
+        with patch.object(
+            probe_to_world_module.time, "monotonic_ns", return_value=second["t_ns"]
+        ):
+            world = probe_to_world_module.probe_to_world(second, t_ns=second["t_ns"])
+        self.assertNotIn("xyz_cam", world["objects"][0])
+
+    def test_two_same_class_objects_do_not_share_median(self):
+        args = self.make_args()
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        detect_patch, grid_patch, depth_patch = self.patch_same_name_frames([[2.0, 4.0]])
+
+        with synthetic_probe_modules(), detect_patch, grid_patch, depth_patch, resources:
+            probe = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+
+        detections = probe["detections"]
+        self.assertEqual([d["z_raw"] for d in detections], [2.0, 4.0])
+        self.assertEqual([d["Z_m"] for d in detections], [2.0, 4.0])
+        self.assertTrue(all(d.get("z_ambiguous") for d in detections))
+        self.assertEqual([d["xyz_cam"][2] for d in detections], [2.0, 4.0])
+
+    def test_same_class_group_does_not_poison_history(self):
+        args = self.make_args()
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        detect_patch, grid_patch, depth_patch = self.patch_same_name_frames(
+            [[2.0, 4.0], [4.0]]
+        )
+
+        with synthetic_probe_modules(), detect_patch, grid_patch, depth_patch, resources:
+            first = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+            second = probe_frame.probe_once(args, labels, mean, std, pad, resources)
+
+        self.assertEqual([d["Z_m"] for d in first["detections"]], [2.0, 4.0])
+        self.assertEqual(second["detections"][0]["Z_m"], 4.0)
+        self.assertFalse(second["detections"][0]["z_rejected"])
+        self.assertFalse(second["detections"][0].get("z_ambiguous", False))
+
     def test_probe_unproject_receives_scaled_z_once(self):
         args = self.make_args("--depth-scale", "0.5")
         labels, mean, std, pad, resources = probe_frame.prepare(args)
@@ -803,6 +888,20 @@ class DepthStabiliserTest(unittest.TestCase):
         fresh = stabiliser.update("bottle", 8.0)
         self.assertEqual(fresh["Z_m"], 8.0)
         self.assertEqual(fresh["z_raw"], 8.0)
+        self.assertFalse(fresh["z_rejected"])
+
+    def test_missing_sample_does_not_block_eviction(self):
+        stabiliser = probe_frame.DepthStabiliser(evict=2)
+        for z in (2.0, 2.05, 2.0):
+            stabiliser.update("keys", z)
+        for _ in range(3):
+            missing = stabiliser.update("keys", None)
+            self.assertIsNone(missing["Z_m"])
+            self.assertTrue(missing["z_rejected"])
+            stabiliser.advance()
+
+        fresh = stabiliser.update("keys", 4.0)
+        self.assertEqual(fresh["Z_m"], 4.0)
         self.assertFalse(fresh["z_rejected"])
 
     def test_depth_stabiliser_flags_and_validation(self):
