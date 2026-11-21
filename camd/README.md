@@ -4,7 +4,7 @@ Owner: Nathan. C, core 0 (`0x1`), `SCHED_FIFO` 50. Sensor Framework into the new
 
 ## Current state
 
-The shm ring, seqlock writes, core 0 pinning, and FIFO priority are implemented. The camera source is a synthetic BGR8888 frame for the laptop and for QNX scheduler wiring. The QNX CamAPI adapter is not wired yet. `frametype = 0` is a stub marker and must not be frozen as a real camera frametype.
+The shm ring, seqlock writes, core 0 pinning, and FIFO priority are implemented. The camera source is either a synthetic BGR8888 frame or a bring-up-only uncompressed 32-bit BMP file. The QNX CamAPI adapter is not wired yet. `frametype = 0` is a stub marker and `frametype = 65535` is the BMP bring-up marker; neither may be frozen as a real camera frametype.
 
 `include/beacon.h` on this branch is Munadir's draft, marked DRAFT and waiting for Matt's sign-off. Do not call the ABI frozen.
 
@@ -23,6 +23,18 @@ With the full stub loop:
 ```sh
 ./camd --stub --hz 30 --frames 90
 ```
+
+To publish a screenshot from a C270 JPEG feed as a real-pixel frame-source test:
+
+```sh
+./camd --bmp /tmp/c270-frame.bmp --once
+./read-frames
+```
+
+This reads a top-down or bottom-up 32-bit BMP with BI_RGB or standard BGRA
+BI_BITFIELDS masks. It publishes the BMP's own width, height, stride, and a
+bring-up-only frametype marker. It is not a camera driver and does not set
+`CAM_W`, `CAM_H`, or the eventual camera frametype.
 
 Check the shm ring from another shell:
 
