@@ -33,6 +33,14 @@ export function poseSceneMatrix(pose) {
   return out;
 }
 
+// telemd does not send pose yet. Before odometry, percept's pose is identity and xyz_world = xyz_cam
+// (probe_to_world.py phase A), so a missing pose means the wearer's camera sits at the world origin.
+const PHASE_A_POSE = { valid: true, T_world_from_cam: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
+
+export function displayPose(world) {
+  return world && world.pose == null ? PHASE_A_POSE : world?.pose;
+}
+
 export function wearerState(pose, previous = null) {
   const translation = pose?.valid ? poseTranslation(pose) : null;
   return {
