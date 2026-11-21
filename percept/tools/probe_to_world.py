@@ -342,10 +342,13 @@ def emit_lines(
 
     with resources:
         while True:
-            want_jpeg = on_video is not None and frame_index % args.jpeg_every == 0
+            jpeg_every = getattr(args, "jpeg_every", 1)
+            want_jpeg = on_video is not None and frame_index % jpeg_every == 0
             probe = probe_frame.probe_once(
                 args, labels, mean, std, pad_color, resources, want_jpeg=want_jpeg
             )
+            if probe is None:  # video EOF: end the loop, keep the last state
+                return
             world = probe_to_world(
                 probe,
                 t_ns=probe.get("t_ns"),

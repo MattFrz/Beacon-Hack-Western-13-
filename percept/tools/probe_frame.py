@@ -181,13 +181,19 @@ class ProbeResources:
         if self.args.image is None:
             import cv2
 
-            cap = cv2.VideoCapture(self.args.camera)
+            from_video = self.args.video is not None
+            source = str(self.args.video) if from_video else self.args.camera
+            cap = cv2.VideoCapture(source)
             if not cap.isOpened():
                 cap.release()
+                if from_video:
+                    raise SystemExit(f"could not open video: {self.args.video}")
                 raise SystemExit(f"could not open camera {self.args.camera}")
             self.cap = cap
+            # A file needs no exposure settling; dropping warmup frames would eat content.
+            warmup = 0 if from_video else self.args.warmup
             try:
-                for _ in range(max(0, self.args.warmup)):
+                for _ in range(max(0, warmup)):
                     ok, _ignored = cap.read()
                     if not ok:
                         raise SystemExit("camera read failed during warmup")
@@ -247,8 +253,8 @@ class ProbeResources:
             )
         return self._depth_session
 
-    def read_frame(self) -> Tuple[Any, int, int]:
-        """Return (frame, frame_id, capture t_ns) for one fresh image."""
+    def read_frame(self) -> Tuple[Optional[Any], int, int]:
+        """Return (frame, frame_id, capture t_ns); frame is None at video EOF."""
         import cv2
 
         if self.args.image is not None:
@@ -262,6 +268,8 @@ class ProbeResources:
             raise RuntimeError("camera resources are not open")
         ok, frame = self.cap.read()
         if not ok or frame is None:
+            if self.args.video is not None:
+                return None, 0, 0
             raise SystemExit("camera read failed")
         t_ns = time.monotonic_ns()
         return frame, t_ns, t_ns
@@ -677,7 +685,9 @@ def find_fingertip(frame: Any, frame_id: int, args: argparse.Namespace, depth: A
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", type=Path, help="read one image instead of the camera")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--image", type=Path, help="read one image instead of the camera")
+    source.add_argument("--video", type=Path, help="read every frame of a video file, then stop at EOF")
     parser.add_argument("--camera", type=int, default=0, help="webcam index, default 0")
     parser.add_argument("--warmup", type=int, default=3, help="frames to drop before capture")
     parser.add_argument(
@@ -778,10 +788,12 @@ def probe_once(
     resources: ProbeResources,
     *,
     want_jpeg: bool = False,
-) -> Dict[str, Any]:
-    """Capture and process one frame; timings_ms reports stage durations in ms."""
+) -> Optional[Dict[str, Any]]:
+    """Capture and process one frame; None when a video file reaches EOF."""
     cycle_started_ns = time.perf_counter_ns()
     frame, frame_id, t_ns = resources.read_frame()
+    if frame is None:
+        return None
     frame_h, frame_w = frame.shape[:2]
 
     notes: List[str] = []
@@ -871,9 +883,12 @@ def main() -> int:
     args = build_parser().parse_args()
     labels, mean, std, pad_color, resources = prepare(args)
     with resources:
+        probe = probe_once(args, labels, mean, std, pad_color, resources)
+        if probe is None:
+            return 0
         print(
             json.dumps(
-                probe_once(args, labels, mean, std, pad_color, resources),
+                probe,
                 indent=2,
                 sort_keys=False,
             )

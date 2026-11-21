@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import io
 import json
 import math
 import shutil
@@ -123,6 +124,34 @@ class FakeCapture:
         self.released = True
 
 
+class FakeFileCapture:
+    """Finite video file: yields each frame once, then reports no frame."""
+
+    instances = []
+    frames = None
+
+    def __init__(self, source):
+        self.source = source
+        self.index = 0
+        self.reads = 0
+        self.released = False
+        FakeFileCapture.instances.append(self)
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        self.reads += 1
+        if self.index >= len(self.frames):
+            return False, None
+        frame = self.frames[self.index]
+        self.index += 1
+        return True, frame
+
+    def release(self):
+        self.released = True
+
+
 class FakeSessionOptions:
     def __init__(self):
         self.intra_op_num_threads = None
@@ -166,6 +195,16 @@ class FakeLandmarker:
 
     def close(self):
         self.closed = True
+
+
+@contextlib.contextmanager
+def synthetic_video_modules(frames):
+    """Install the synthetic finite-file capture over the fake cv2 module."""
+    FakeFileCapture.instances.clear()
+    FakeFileCapture.frames = frames
+    with synthetic_probe_modules():
+        sys.modules["cv2"].VideoCapture = FakeFileCapture
+        yield
 
 
 @contextlib.contextmanager
@@ -231,6 +270,7 @@ class ProbeRuntimeTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
+        self.root = root
         self.labels = root / "labels.txt"
         self.labels.write_text("keys\nkeychain\nbottle\ncup\n", encoding="utf-8")
         self.yolo = root / "yolo.onnx"
@@ -482,6 +522,80 @@ class ProbeRuntimeTest(unittest.TestCase):
         self.assertIsInstance(with_jpeg["timings_ms"]["jpeg"], float)
         self.assertGreaterEqual(with_jpeg["timings_ms"]["jpeg"], 0.0)
         self.assertEqual(encode_calls, [((480, 640, 3), 320, 60)])
+
+    def test_video_is_mutually_exclusive_with_image(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                probe_frame.build_parser().parse_args(
+                    ["--video", "clip.mp4", "--image", "still.jpg"]
+                )
+
+    def test_video_frames_have_per_frame_ids_and_end_at_eof(self):
+        video = self.root / "clip.mp4"
+        video.touch()
+        args = self.make_args("--video", str(video), "--warmup", "3")
+        labels, mean, std, pad, resources = probe_frame.prepare(args)
+        capture_times = [100, 200, 300]
+        frames = [
+            np.full((480, 640, 3), index + 1, dtype=np.uint8)
+            for index in range(len(capture_times))
+        ]
+
+        with (
+            synthetic_video_modules(frames),
+            self.fake_model_calls(),
+            patch.object(probe_frame.time, "monotonic_ns", side_effect=capture_times),
+            resources,
+        ):
+            probes = [
+                probe_frame.probe_once(args, labels, mean, std, pad, resources)
+                for _ in capture_times
+            ]
+            self.assertIsNone(
+                probe_frame.probe_once(args, labels, mean, std, pad, resources)
+            )
+            cap = FakeFileCapture.instances[0]
+            self.assertEqual(cap.reads, len(capture_times) + 1)  # no warmup reads
+            self.assertFalse(cap.released)
+
+        self.assertEqual([probe["t_ns"] for probe in probes], capture_times)
+        self.assertEqual([probe["frame_id"] for probe in probes], capture_times)
+        self.assertEqual(len(FakeFileCapture.instances), 1)
+        self.assertEqual(FakeFileCapture.instances[0].source, str(video))
+        self.assertTrue(FakeFileCapture.instances[0].released)
+
+    def test_emit_lines_ends_at_video_eof_with_ordered_records(self):
+        video = self.root / "clip.mp4"
+        video.touch()
+        args = probe_to_world_module.build_parser().parse_args(
+            [
+                "--labels", str(self.labels),
+                "--yolo", str(self.yolo),
+                "--depth", str(self.depth),
+                "--video", str(video),
+                "--out", "-",
+            ]
+        )
+        prepared = probe_frame.prepare(args)
+        capture_times = [1_000, 2_000, 3_000]
+        frames = [
+            np.full((480, 640, 3), index + 1, dtype=np.uint8)
+            for index in range(len(capture_times))
+        ]
+
+        with (
+            synthetic_video_modules(frames),
+            self.fake_model_calls(),
+            patch.object(probe_frame.time, "monotonic_ns", side_effect=capture_times),
+            patch.object(probe_frame, "prepare", return_value=prepared),
+        ):
+            worlds = list(probe_to_world_module.emit_lines(args))
+
+        self.assertEqual([world["t_ns"] for world in worlds], capture_times)
+        self.assertEqual(
+            [world["objects"][0]["frame_id"] for world in worlds], capture_times
+        )
+        self.assertEqual([world["seq"]["percept"] for world in worlds], [0, 2, 4])
 
     def test_probe_unproject_receives_scaled_z_once(self):
         args = self.make_args("--depth-scale", "0.5")

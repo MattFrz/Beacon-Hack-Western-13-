@@ -16,7 +16,7 @@ python3 percept/tools/probe_to_world.py \
   --out /tmp/beacon-live.jsonl
 ```
 
-Omit `--image` to loop a webcam until Ctrl-C, or add `--once` for one capture. `--out -` writes to stdout. `--fov` (bare flag = 66°) guesses a pinhole so `xyz_cam` exists without a chessboard. Pass `--calib models/calib.json` instead if you have one. Without either, boxes still emit but `xyz_cam`/`xyz_world` are omitted. Guessed or chessboard geometry still needs a tape check before spoken metres. Replay with `cd laptop/bridge && node main.js /tmp/beacon-live.jsonl`.
+Omit `--image` to loop a webcam until Ctrl-C, or add `--once` for one capture. `--video PATH` runs the same pipeline over a prerecorded file frame by frame and stops at EOF (mutually exclusive with `--image`); `--jpeg` works the same way on those frames. `--out -` writes to stdout. `--fov` (bare flag = 66°) guesses a pinhole so `xyz_cam` exists without a chessboard. Pass `--calib models/calib.json` instead if you have one. Without either, boxes still emit but `xyz_cam`/`xyz_world` are omitted. Guessed or chessboard geometry still needs a tape check before spoken metres. Replay with `cd laptop/bridge && node main.js /tmp/beacon-live.jsonl`.
 
 Live webcam to the dashboard: UDP, one world object per datagram, no replay file needed. Three terminals, from the repo root:
 
