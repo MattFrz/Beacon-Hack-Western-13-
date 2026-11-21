@@ -1,5 +1,11 @@
 # Beacon | Hack Western build plan
 
+> **SUPERSEDED for product and geometry** by [`docs/nathans-revision.md`](docs/nathans-revision.md).
+>
+> Do **not** build: B4 AprilTag fob, C6 WALK ticks, YOLO11n as the detector, MediaPipe on the 16 ms `guided` thread, or a Sunday L-return that is not gated on VO p95.
+>
+> This file is weekend ops history (lane names A–D, phase order). If it disagrees with the spec, the spec wins.
+
 Nov 20, 2026
 
 A chest-worn Raspberry Pi 5 running QNX 8.0 helps the wearer find an object, reach for it in 3D, and retrace a short route by sound. The wearer says “where are my keys,” turns toward the bearing, and listens for faster ticks as their hand approaches. After walking a few metres, “take me back” guides them through the breadcrumbs in reverse. **All sensing, inference, guidance and audio run on the Pi.**

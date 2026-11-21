@@ -1,2 +1,2 @@
 # Beacon-Hack-Western-13-
-Chest-worn Raspberry Pi 5 on QNX 8.0 that guides you by sound. Say “where are my keys” and stereo ticks speed up as your hand nears them; say “take me back” to retrace your route. Vision, speech and real-time audio all run on-device, with QNX keeping guidance on time under load. Built at Hack Western.
+Chest-worn Raspberry Pi 5 on QNX 8.0 that homes you to a thing by sound. Say “where are my keys,” walk on a short spoken bearing, then stereo ticks speed up as your hand reaches. Kill the detector and the ticks hold, then a lost cue — never a guessed metre. Vision, speech and guidance run on-device. Design: [`docs/nathans-revision.md`](docs/nathans-revision.md). Built at Hack Western.
