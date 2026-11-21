@@ -139,6 +139,34 @@ class TapeCheckTest(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("xyz_cam", stderr)
 
+    def test_malformed_objects_does_not_traceback(self):
+        record = {"objects": 5, "target": {"name": "bottle", "xyz_cam": [0, 0, 1.0]}}
+        code, stdout, stderr = self.run_cli(record, "--tape-m", "1.0")
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertNotIn("Traceback", stderr)
+        self.assertResult(
+            stdout, expected_result("range", "bottle", 1.0, 1.0, 0.0, True)
+        )
+
+        code, stdout, stderr = self.run_cli({"objects": 5}, "--tape-m", "1.0")
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertNotIn("Traceback", stderr)
+        self.assertIn("xyz_cam", stderr)
+
+    def test_unmatched_name_falls_through_to_target(self):
+        record = {
+            "target": {"name": "keys", "xyz_cam": [0.0, 0.0, 1.0]},
+            "objects": [{"name": "bottle", "xyz_cam": [0.0, 0.0, 2.0]}],
+        }
+        code, stdout, stderr = self.run_cli(
+            record, "--tape-m", "1.0", "--name", "wallet"
+        )
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertResult(stdout, expected_result("range", "keys", 1.0, 1.0, 0.0, True))
+
     def test_default_limit_applies_at_other_tape_distances(self):
         code, stdout, stderr = self.run_cli(
             range_record([0.0, 0.0, 2.7]), "--tape-m", "2.0"

@@ -76,7 +76,12 @@ def load_record(source: str) -> Mapping[str, Any]:
 def _range_prediction(
     record: Mapping[str, Any], name: Optional[str]
 ) -> Tuple[float, Optional[str]]:
-    objects = [obj for obj in (record.get("objects") or []) if isinstance(obj, Mapping)]
+    raw = record.get("objects")
+    objects = (
+        [obj for obj in raw if isinstance(obj, Mapping)]
+        if isinstance(raw, (list, tuple))
+        else []
+    )
 
     if name is not None:
         matches = [obj for obj in objects if obj.get("name") == name]
