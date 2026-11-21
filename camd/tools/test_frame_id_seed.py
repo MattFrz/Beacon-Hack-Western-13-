@@ -72,7 +72,7 @@ def run(cmd: list[Path]) -> str:
 
 def verify_layout() -> None:
     if not LAYOUT_PROBE.exists():
-        raise SystemExit("build layout-probe first: make -C camd")
+        raise SystemExit("build layout-probe first: make -C camd test-frame-id-seed")
     values = {}
     for line in run([LAYOUT_PROBE]).splitlines():
         key, _, value = line.partition("=")
@@ -126,7 +126,7 @@ def published_frame_id() -> int:
 
 def main() -> None:
     if not CAMD.exists() or not READ_FRAMES.exists():
-        raise SystemExit("build camd first: make -C camd")
+        raise SystemExit("build camd first: make -C camd test-frame-id-seed")
     if HIGH_ID_SLOT == NEWEST_SLOT:
         raise SystemExit("test setup error: high-id slot must not be newest")
 
