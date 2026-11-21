@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -47,6 +49,31 @@ class GuessCalibrationTest(unittest.TestCase):
         self.assertIsNotNone(cal)
         self.assertAlmostEqual(cal.cx, 320.0)
         self.assertTrue(any("guessed" in note and "66" in note for note in notes))
+
+    def test_resolve_prefers_calib_over_fov(self):
+        guessed = probe_frame.guess_calibration(640, 480, 66.0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "calib.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "fx": guessed.fx + 50.0,
+                        "fy": guessed.fy + 50.0,
+                        "cx": 321.0,
+                        "cy": 241.0,
+                        "W": 640,
+                        "H": 480,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(calib=path, fov=66.0)
+            notes = []
+            cal = probe_frame.resolve_calibration(args, 640, 480, notes)
+        self.assertIsNotNone(cal)
+        self.assertAlmostEqual(cal.fx, guessed.fx + 50.0)
+        self.assertAlmostEqual(cal.cx, 321.0)
+        self.assertFalse(any("guessed" in note for note in notes))
 
     def test_bare_fov_defaults_to_66(self):
         parsed = probe_frame.build_parser().parse_args(["--fov"])

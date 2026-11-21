@@ -3,9 +3,9 @@
 
 This is a thin wrapper around probe_frame.py: detection, depth, and hand work
 stays there. Phase A has no VO, so xyz_world is xyz_cam, the camera pose is
-identity, and crumbs stay empty. Without --calib, probe frames have no xyz_cam
-and this tool emits boxes only, as expected. Each record can also go out as one
-UDP datagram to the laptop bridge.
+identity, and crumbs stay empty. Without --calib or --fov, probe frames have no
+xyz_cam and this tool emits boxes only, as expected. Each record can also go
+out as one UDP datagram to the laptop bridge.
 """
 
 from __future__ import annotations

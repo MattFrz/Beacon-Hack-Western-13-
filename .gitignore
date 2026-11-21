@@ -9,6 +9,8 @@ __pycache__/
 *.tflite
 *.task
 *.gguf
+*.pt
+*.part
 models/*.bin
 
 # Laptop/C270 intrinsics: local calibration only, never commit
