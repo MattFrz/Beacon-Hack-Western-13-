@@ -17,4 +17,4 @@ clean:
 	rm -f percept-head
 
 test-python:
-	cd .. && $(PYTHON) -m unittest percept.tools.probe_frame_test percept.tools.probe_to_world_test percept.tools.tape_check_test percept.tools.calibrate_camera_test percept.tools.vo_core_test percept.tools.vo_probe_test
+	cd .. && $(PYTHON) -m unittest percept.tools.probe_frame_test percept.tools.probe_to_world_test percept.tools.tape_check_test percept.tools.calibrate_camera_test percept.tools.vo_core_test percept.tools.vo_probe_test percept.tools.merge_vo_world_test
