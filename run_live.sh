@@ -5,6 +5,7 @@
 #
 # target     what to find first (default bottle; must be in models/labels_hand.txt)
 # laptop-ip  where the dashboard bridge runs (default: the machine you ssh'd in from)
+# MODEL=watch  use the bake with a "watch" class (wristwatch = hand)
 # AUDIO=jbl  speak on the JBL (start projects/qnx-bluetooth/run-radio.sh first,
 #            press a then f); default: no audio, log only
 #
@@ -23,5 +24,8 @@ LAPTOP=${2:-${SSH_CLIENT%% *}}
 [ -n "$LAPTOP" ] || { echo "usage: sh run_live.sh [target] laptop-ip"; exit 2; }
 export REPO="$HERE" PERCEPT="$HERE" BEACON_CMD="$HERE/voiced/build/beacon_cmd"
 [ "$AUDIO" = jbl ] && export GUIDED_AUDIO=fifo:/data/home/qnxuser/projects/qnx-bluetooth/audio.pcm
-echo "live demo: target ${1:-bottle}, dashboard at $LAPTOP, audio ${GUIDED_AUDIO:-none}"
+# MODEL=watch: the 8-word bake that adds "watch" (a wristwatch also marks the hand).
+# models/yoloe26n_320_watch.onnx is built by percept/tools/export_yoloe.py --labels models/labels_watch.txt
+[ "$MODEL" = watch ] && export YOLO="$HERE/models/yoloe26n_320_watch.onnx" LABELS="$HERE/models/labels_watch.txt"
+echo "live demo: target ${1:-bottle}, dashboard at $LAPTOP, audio ${GUIDED_AUDIO:-none}, model ${YOLO:-default}"
 exec sh "$HERE/ingest/tools/device_live_demo.sh" "${1:-bottle}" "$LAPTOP" "${DURATION:-1800}"

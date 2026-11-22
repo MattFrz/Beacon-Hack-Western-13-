@@ -471,6 +471,9 @@ def gate_by_depth(
     return gated, dropped
 
 
+# Classes that mark the wearer's hand. "watch" (a wristwatch on the reaching arm) is
+# only present in a bake that includes it; a real "hand" box wins when both are seen.
+HAND_CLASSES = ("hand", "watch")
 HAND_MIN_Z_M = 0.2  # the wearer's own hand, seen from a chest camera, is within arm's reach
 HAND_MAX_Z_M = 0.8
 
@@ -537,12 +540,13 @@ def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str,
     hand_objs = [
         obj
         for obj in objects
-        if isinstance(obj, dict) and str(obj.get("name", "")).lower() == "hand"
+        if isinstance(obj, dict) and str(obj.get("name", "")).lower() in HAND_CLASSES
     ]
     if not hand_objs:
         return world, None
 
-    best = max(hand_objs, key=lambda obj: float(obj.get("conf") or 0.0))
+    best = max(hand_objs, key=lambda obj: (str(obj.get("name", "")).lower() == "hand",
+                                           float(obj.get("conf") or 0.0)))
     hand: Dict[str, Any] = {
         "t_ns": world.get("t_ns"),
         "frame_id": best.get("frame_id"),
@@ -558,11 +562,11 @@ def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str,
 
     lifted = dict(world)
     lifted["objects"] = [
-        obj for obj in objects if not isinstance(obj, dict) or str(obj.get("name", "")).lower() != "hand"
+        obj for obj in objects if not isinstance(obj, dict) or str(obj.get("name", "")).lower() not in HAND_CLASSES
     ]
     lifted["hand"] = hand
     target = lifted.get("target")
-    if isinstance(target, dict) and str(target.get("name", "")).lower() == "hand":
+    if isinstance(target, dict) and str(target.get("name", "")).lower() in HAND_CLASSES:
         lifted["target"] = None
         lifted.pop("d_m", None)
     return lifted, hand
@@ -673,7 +677,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if object_conf > args.conf:
                     world["objects"] = [
                         o for o in (world.get("objects") or [])
-                        if not isinstance(o, dict) or str(o.get("name", "")).lower() == "hand"
+                        if not isinstance(o, dict) or str(o.get("name", "")).lower() in HAND_CLASSES
                         or float(o.get("conf") or 0.0) >= object_conf
                     ]
 
