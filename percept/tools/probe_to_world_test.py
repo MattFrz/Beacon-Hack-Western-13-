@@ -91,30 +91,30 @@ class ProbeToWorldTest(unittest.TestCase):
 
     def test_target_uses_first_in_view_label_in_priority_order(self):
         keys = make_detection("keys", [0.1, 0.2, 0.5])
-        keychain = make_detection("keychain", [0.0, 0.1, 0.6])
+        mouse = make_detection("mouse", [0.0, 0.1, 0.6])
         bottle = make_detection("bottle", [-0.4, -0.2, 1.3])
 
-        first = probe_to_world(make_probe([bottle, keychain, keys]), t_ns=T_NS)
+        first = probe_to_world(make_probe([bottle, mouse, keys]), t_ns=T_NS)
         self.assertEqual(first["target"]["name"], "keys")
 
-        second = probe_to_world(make_probe([bottle, keychain]), t_ns=T_NS)
-        self.assertEqual(second["target"]["name"], "keychain")
+        second = probe_to_world(make_probe([bottle, mouse]), t_ns=T_NS)
+        self.assertEqual(second["target"]["name"], "bottle")
 
-        third = probe_to_world(make_probe([bottle]), t_ns=T_NS)
-        self.assertEqual(third["target"]["name"], "bottle")
+        third = probe_to_world(make_probe([mouse]), t_ns=T_NS)
+        self.assertEqual(third["target"]["name"], "mouse")
 
-    def test_cup_is_target_when_only_baked_name_in_view(self):
+    def test_box_is_target_when_only_baked_name_in_view(self):
         world = probe_to_world(
-            make_probe([make_detection("cup", [0.1, 0.2, 0.7])]), t_ns=T_NS
+            make_probe([make_detection("box", [0.1, 0.2, 0.7])]), t_ns=T_NS
         )
 
-        self.assertEqual(world["target"]["name"], "cup")
+        self.assertEqual(world["target"]["name"], "box")
 
-    def test_bottle_beats_cup_when_both_are_in_view(self):
-        cup = make_detection("cup", [0.1, 0.2, 0.7])
+    def test_bottle_beats_box_when_both_are_in_view(self):
+        box = make_detection("box", [0.1, 0.2, 0.7])
         bottle = make_detection("bottle", [-0.2, 0.1, 1.1])
 
-        world = probe_to_world(make_probe([cup, bottle]), t_ns=T_NS)
+        world = probe_to_world(make_probe([box, bottle]), t_ns=T_NS)
         self.assertEqual(world["target"]["name"], "bottle")
 
     def test_load_target_names_skips_comments_and_blanks_keeping_file_order(self):
@@ -193,11 +193,11 @@ class ProbeToWorldTest(unittest.TestCase):
             for line in labels_path.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.strip().startswith("#")
         )
-        priority = ("keys", "keychain", "scissors", "bottle")
+        priority = ("keys", "phone", "bottle", "can", "box", "mouse")
         expected = priority + tuple(name for name in baked if name not in priority)
 
         self.assertEqual(probe_to_world_module.TARGET_NAMES, expected)
-        self.assertEqual(probe_to_world_module.TARGET_NAMES[:4], priority)
+        self.assertEqual(probe_to_world_module.TARGET_NAMES[:6], priority)
         self.assertEqual(probe_to_world_module.TARGET_NAMES, expected)
 
     def test_distance_uses_same_frame_xyz_only(self):

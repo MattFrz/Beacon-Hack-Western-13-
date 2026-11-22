@@ -22,14 +22,21 @@ python3 percept/tools/export_yoloe.py --out models/yoloe26n_320.onnx
 Verified export on 2026-11-21 with Ultralytics 8.4.216 and checkpoint
 `yoloe-26n-seg.pt` from the 8.4.0 assets (local copy
 `/tmp/beacon-model-export/yoloe-26n-seg.pt`). The first `set_classes()` call
-uses export-only `mobileclip2_b.ts`. Re-exported 2026-11-21 19:20 UTC after
-expanding `labels.txt` to 64 single-token names: detect-only static ONNX, 9.3
-MB, SHA-256
-`f1cef138ab5d59a42b916079374fae27fd1fe426abb84d7c9598ca379a56523b`, output
-`(1, 68, 2100)` (4 box coords + 64 labels, 2100 raw proposals). The ONNX has no
+uses export-only `mobileclip2_b.ts`. Re-exported 2026-11-21 20:10 UTC for the
+six-noun demo vocabulary (`bottle`, `can`, `keys`, `phone`, `box`, `mouse`):
+detect-only static ONNX, 9.3 MB, SHA-256
+`e03f2ee620c931bdbb91a7fbc6e6f2b4e4304bf5f81f3f6a09f8e6e5558033e6`, output
+`(1, 10, 2100)` (4 box coords + 6 labels, 2100 raw proposals). The earlier
+64-label bake is `f1cef138ab5d59a42b916079374fae27fd1fe426abb84d7c9598ca379a56523b`,
+`(1, 68, 2100)`, backed up at `/tmp/yoloe26n_320-64cls.onnx.bak`. `box` was not
+in that 64-name list, so the demo vocabulary is a fresh bake rather than a
+relabel. Trimming cost no accuracy: the six-label bake reproduces the
+64-label confidences on the same frame (see below). The ONNX has no
 NMS; QNX must letterbox, decode, and NMS the raw output. `probe_frame.py` uses
-its own ONNX Runtime path for that by default. After this bake, a frame at 2 s
-from `/home/nate/Downloads/20261121_135348.mp4` at `--conf 0.15` found `person`
+its own ONNX Runtime path for that by default. With the six-label bake, a frame at 2 s
+from `/home/nate/Downloads/20261121_135348.mp4` at `--conf 0.10` found `mouse`
+at 0.653 and 0.28 and `bottle` at 0.399, matching the 64-label bake's 0.65 and
+0.40 for the same classes. The 64-label run also found `person`
 at 0.68/0.37/0.36, `mouse` at 0.65/0.28, `chair` at 0.48/0.32, `tv` at 0.48,
 `laptop` at 0.42, `bottle` at 0.40, `handbag` at 0.27, `wallet` at 0.18, and
 `remote` at 0.16. `--yolo-runtime ultralytics` remains available as a

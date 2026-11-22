@@ -29,7 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 from percept.tools import probe_frame  # noqa: E402
 
 DEFAULT_LABELS = REPO_ROOT / "models" / "labels.txt"
-PRIORITY_NAMES: Tuple[str, ...] = ("keys", "keychain", "scissors", "bottle")
+PRIORITY_NAMES: Tuple[str, ...] = ("keys", "phone", "bottle", "can", "box", "mouse")
 
 
 def load_target_names(path: Path = DEFAULT_LABELS) -> Tuple[str, ...]:

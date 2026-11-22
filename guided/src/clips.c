@@ -44,7 +44,7 @@ static const char *const k_stem[BEACON_CLIP_COUNT] = {
     [BEACON_CLIP_TURN_AROUND] = "turn_around",
 };
 
-static const char *const k_names[] = { "keys", "keychain", "cup", "mug", "bottle", "phone" };
+static const char *const k_names[] = { "bottle", "can", "keys", "phone", "box", "mouse" };
 static const char *const k_dirs[] = { "ahead", "sleft", "left", "sright", "right" };
 
 static uint32_t rd32(const unsigned char *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }

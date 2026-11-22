@@ -105,7 +105,7 @@ Sunday 30 s must never imply: finding an object never seen this session; arbitra
 - Dual-camera headset as a v1 requirement.
 - QNX 8.0 adaptive partitioning (APS). **QNX 8.0 does not support APS.** Isolation is processes, priorities, runmasks, and a supervisor. Do not pitch APS.
 
-“Open-vocab” in v1 means **no retraining**: a 16–64 noun list (64 baked today) is baked into YOLOE-26n before Saturday. It does **not** mean arbitrary new nouns at runtime. Say that to judges. The noun list is a product limit, not an implementation detail.
+“Open-vocab” in v1 means **no retraining**: a baked noun list (6 today: `bottle`, `can`, `keys`, `phone`, `box`, `mouse`) is baked into YOLOE-26n before Saturday, up to 64 prompts. It does **not** mean arbitrary new nouns at runtime. Say that to judges. The noun list is a product limit, not an implementation detail.
 
 ## 3. Locked decisions
 
@@ -116,7 +116,7 @@ Talked through in alignment; do not silently reopen. Review patches below are co
 | Docs vs plan | This file (`docs/nathans-revision.md`) is the product/geometry/QNX source of truth. The Nov 20 plan was removed from the repo. `docs/team-plan.md` is ops only. |
 | Physical tags | None. |
 | Mapping | Session-scoped 3D POI store is in v1 (objects seen this walk). Not a building map. |
-| Detector | YOLOE-26n **detect-only** static ONNX with 16–64 baked prompts (64 baked today) if Ultralytics export allows; otherwise note the extra seg-head cost. Runtime is QNX `onnxruntime` 1.24.4. Prompt-free 4,585-name checkpoint is stretch only, gated on loaner p95. |
+| Detector | YOLOE-26n **detect-only** static ONNX with baked prompts (6 today, 64 max) if Ultralytics export allows; otherwise note the extra seg-head cost. Runtime is QNX `onnxruntime` 1.24.4. Prompt-free 4,585-name checkpoint is stretch only, gated on loaner p95. |
 | Product slice | Homing, not narration. |
 | Walk vs reach | Walk = spoken instruction from sensors. Reach = ticks from hand-to-target distance. |
 | Sunday script | FIND-and-reach + in-view bottle WALK + `slay percept` → LOST. Ask-the-room off-camera and RETURN drop unless VO p95 exists. Do not say “RETURN is implemented” from a log. |
@@ -608,7 +608,7 @@ Not a vector DB. Not CLIP. Not a live text encoder on the Pi.
 
 Before Saturday, on a laptop:
 
-1. Choose 16–64 nouns for the judging space. Locked starter list (edit only if the venue changes): `keys`, `keychain`, `bottle`, `cup`, `mug`, `phone`, `chair`, `door`, `person`, `backpack`, `handbag`, `book`, `laptop`, `sink`, `fountain`, `dispenser`, `table`, `keyboard`, `mouse`, `headphones`, `charger`, `badge`, `lanyard`, `wallet`, `glasses`, `monitor`, `pizza`, `can`, `jacket`, `cable`, `shoes`, `whiteboard`, `bowl`, `plate`, `fork`, `knife`, `spoon`, `scissors`, `pen`, `pencil`, `notebook`, `paper`, `remote`, `tv`, `lamp`, `window`, `wall`, `floor`, `stairs`, `elevator`, `sign`, `shelf`, `cabinet`, `drawer`, `refrigerator`, `microwave`, `kettle`, `oven`, `soap`, `towel`, `toothbrush`, `plant`, `umbrella`, `coat`. Runtime names are `models/labels.txt`.
+1. Choose the nouns for the judging space (up to 64; 6 baked today). Locked demo list (edit only if the venue changes): `bottle`, `can`, `keys`, `phone`, `box`, `mouse`. Runtime names are `models/labels.txt`.
 
    Some names are **generic scene nouns**, not capabilities. `wall`, `floor`, `stairs`, `elevator`, `sign`, `window`, `door` exist so a wearer can ask for one by name and get a homing target. They are **not** safety features: a box labelled `stairs` is a named flat target, never a step, drop-off, or obstacle warning. That matches the pitch line above — Beacon does not detect stairs, traffic, or obstacles — and no demo script may imply otherwise. Wider vocabularies also trade confidence per class; demo objects (`keys`, `keychain`, `bottle`) are validated by their own run, not by these labels detecting at all.
 2. Bake those prompts into YOLOE-26n. Save prompt embeddings. Export **static ONNX** at 320 px, **detect-only** if the exporter allows. The MobileCLIP encoder never ships.
@@ -805,7 +805,7 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 - Tick waveform (square vs short sine bursts) and piezo vs USB mixing.
 - Camera unit number and frametype after probing the loaner — then freeze `CAM_W×CAM_H`.
 - Whether whisper tiny.en survives the hall; bump to base.en only if FIND misfires.
-- Final 16–64 noun list after walking the judging space (64 baked today; `models/labels.txt` is authoritative).
+- Final noun list after walking the judging space (6 baked today; `models/labels.txt` is authoritative).
 - Tape-measure calibration; enable ground-plane fallback if 1 m table error > 30% (WALK only).
 - Startup snippets so the stack comes up on boot.
 
@@ -814,7 +814,7 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 | Old | Now |
 |---|---|
 | AprilTag fob as “my keys” | No physical tags |
-| YOLO11n COCO + paper-labeled fountain bottle | YOLOE-26n baked 16–64 prompts (64 today); session `objects[]` is the map |
+| YOLO11n COCO + paper-labeled fountain bottle | YOLOE-26n baked 6 prompts (bottle, can, keys, phone, box, mouse); session `objects[]` is the map |
 | CLIP / vector DB as a later idea | Explicitly out of v1 |
 | Slot parser only | Table first (candidate set), then tiny llama.cpp on miss |
 | WALK used heading ticks | WALK is spoken instruction; ticks are REACH only |
