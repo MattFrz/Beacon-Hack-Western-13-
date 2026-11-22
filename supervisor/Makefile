@@ -2,7 +2,7 @@ CC ?= cc
 CPPFLAGS += -I../include -D_POSIX_C_SOURCE=200809L
 CFLAGS += -std=c11 -Wall -Wextra
 
-.PHONY: all test
+.PHONY: all test test-beacon
 all: build/supervisor build/dummy
 
 build:
@@ -16,3 +16,6 @@ build/dummy: dummy.c ../include/beacon.h | build
 
 test: all
 	python3 test_restart.py
+
+test-beacon: all
+	python3 test_beacon.py

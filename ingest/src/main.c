@@ -285,8 +285,24 @@ static void write_intent(beacon_world_t *w, const beacon_intent_t *intent, uint6
 static void apply_sched(void)
 {
 #ifdef __QNX__
-    if (ThreadCtl(_NTO_TCTL_RUNMASK, (void *)(uintptr_t)BEACON_RUNMASK_CORES13) == -1)
-        fprintf(stderr, "ingest: runmask 0xe failed: %s\n", strerror(errno));
+    /* This image rejects multi-bit runmasks (0xe returns EINVAL) and accepts a
+     * single CPU or every CPU. Prefer cores 1-3, then settle for one core off
+     * core 0 rather than running anywhere. The kernel readback is the evidence
+     * for the placement claim, because `pidin -F %i` renders empty here. */
+    static const unsigned candidates[] = { BEACON_RUNMASK_CORES13, 0x2u, 0x4u, 0x8u };
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(*candidates); ++i) {
+        /* In: the mask we want. Out: the mask the kernel had before.
+         * _NTO_TCTL_RUNMASK takes the value; GET_AND_SET takes a pointer. */
+        unsigned prev = candidates[i];
+        if (ThreadCtl(_NTO_TCTL_RUNMASK_GET_AND_SET, &prev) == -1) {
+            fprintf(stderr, "ingest: runmask 0x%x rejected: %s\n",
+                    candidates[i], strerror(errno));
+            continue;
+        }
+        fprintf(stderr, "ingest: runmask 0x%x applied (kernel said it was 0x%x)\n",
+                candidates[i], prev);
+        break;
+    }
 #endif
     struct sched_param sp;
     memset(&sp, 0, sizeof(sp));
@@ -391,9 +407,8 @@ int main(int argc, char **argv)
     static char arena[INGEST_ARENA_BYTES];
     uint64_t records = 0, dropped = 0;
 
-    fprintf(stderr, "ingest: world %s, %s, prio RR %d runmask 0x%x\n",
-            world_name, use_stdin ? "stdin" : "udp",
-            BEACON_PRIO_PERCEPT, BEACON_RUNMASK_CORES13);
+    fprintf(stderr, "ingest: world %s, %s, prio RR %d\n",
+            world_name, use_stdin ? "stdin" : "udp", BEACON_PRIO_PERCEPT);
 
     while (!g_stop) {
         struct pollfd pfd = { .fd = fd, .events = POLLIN };
