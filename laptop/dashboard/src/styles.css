@@ -248,6 +248,12 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 .hl-LIVE { background: var(--live); }
 .hl-HOLD { background: var(--hold); }
 .hl-LOST { background: var(--lost); }
+/* Live | Replay: the same sliding highlight as the mode switch, but these are buttons */
+.sources { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: var(--r); background: rgb(0 0 0 / 0.25); }
+.src-hl { border-radius: var(--r-sm); background: var(--raise); }
+.src { position: relative; padding: 4px 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font: 600 12px var(--font-text); cursor: pointer; transition: color 0.15s; }
+.src:hover:not(:disabled), .src[aria-pressed='true'] { color: var(--ink); }
+.src:disabled { opacity: 0.4; cursor: default; }
 .readout { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; }
 .readout > span { color: var(--muted); }
 .readout b { font: 500 13px var(--font-mono); }
@@ -260,6 +266,12 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 .status[data-kind='paused'] .dot { background: var(--hold); }
 .status[data-kind='offline'],
 .status[data-kind='nodata'] { color: var(--muted); }
+.status[data-kind='replay'] .dot { border: 2px solid var(--muted); background: transparent; } /* hollow: not live */
+
+/* Data source: the Pi's dot is green while its packets are fresh */
+.with-dot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.with-dot .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nodata); }
+.with-dot .dot[data-on='true'] { background: var(--live); }
 
 /* ---------- caption and replay scrubber along the bottom of the 3D view */
 .stage-foot {
@@ -314,6 +326,11 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 .waiting { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; gap: 12px; padding: 24px; text-align: center; pointer-events: none; }
 .waiting-title { font-size: 28px; font-weight: 500; letter-spacing: -0.02em; }
 .waiting p { max-width: 460px; margin: 0; color: var(--muted); }
+.waiting .btn { justify-self: center; pointer-events: auto; }
+.addrs { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; pointer-events: auto; }
+.addrs li { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.addrs span { color: var(--muted); font-size: 12px; }
+.addrs code { user-select: all; }
 .label { padding: 2px 6px; border: 1px solid var(--line); border-radius: var(--r-sm); background: rgb(24 25 27 / 0.82); color: var(--ink); font: 500 11px var(--font-mono); white-space: nowrap; pointer-events: none; }
 .label:empty { display: none; }
 .tip-pos { z-index: 50; }

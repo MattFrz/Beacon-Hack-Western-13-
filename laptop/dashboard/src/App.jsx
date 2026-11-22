@@ -36,6 +36,11 @@ const PANELS_KEY = 'beacon.panels';
 const MOTION_KEY = 'beacon.motion';
 const TAB_KEY = 'beacon.tab';
 const TABS = ['guidance', 'system'];
+const PI_FRESH_MS = 2000; // the Pi counts as connected while its last packet is younger than this
+const SOURCES = [
+  ['live', 'Live', 'Show data from the Pi'],
+  ['replay', 'Replay', 'Play the recording'],
+];
 const BOTH = { left: true, right: true };
 // The viewer's animation choice -> the reduced-motion setting Motion and animate-ui read.
 const MOTION_SETTING = { system: 'user', on: 'never', off: 'always' };
@@ -132,8 +137,10 @@ function usePanels(narrow) {
 }
 
 export default function App() {
-  const { log, world, frameUrl, connected, stale } = useTelemetry();
+  const { log, world, frameUrl, connected, stale, bridge, setSource } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
+  useEffect(() => setCursor(null), [bridge?.source]); // a new source starts a new history
+  const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
   const narrow = useMedia(NARROW);
   const systemReduce = useMedia(REDUCE);
   const [motionChoice, setMotionChoice] = useMotionChoice();
@@ -204,6 +211,7 @@ export default function App() {
               <Guidance w={w} />
             </TabPanel>
             <TabPanel id="system" className="sb-body">
+              <DataSource bridge={bridge} piFresh={piFresh} />
               <System w={w} health={health} log={log} setCursor={setCursor} />
               <Display animationsOn={animationsOn} systemReduce={systemReduce} motionChoice={motionChoice} setMotionChoice={setMotionChoice} />
             </TabPanel>
@@ -238,7 +246,8 @@ export default function App() {
                 {w.intent?.candidates?.length > 0 && <em>{w.intent.candidates.join(', ')}</em>}
               </div>
               <div className="topbar-end">
-                <Status connected={connected} paused={paused} hasData={hasData} />
+                <SourceSwitch bridge={bridge} setSource={setSource} />
+                <Status connected={connected} paused={paused} hasData={hasData} bridge={bridge} piFresh={piFresh} />
                 <Tip label={focused ? 'Bring the panels back' : 'Focus the 3D view'} keys="Ctrl B">
                   <Button className="icon-btn" aria-label={focused ? 'Show the panels' : 'Focus the 3D view'} aria-pressed={focused} onClick={toggleFocus}>
                     {focused ? <Collapse /> : <Expand />}
@@ -249,6 +258,7 @@ export default function App() {
           </div>
 
           {!connected && log.items.length === 0 && <Waiting />}
+          {connected && bridge?.source === 'live' && !hasData && !paused && <WaitingForPi bridge={bridge} setSource={setSource} />}
 
           <div className="stage-foot">
             <Caption law={w.law} cue={w.cue} targetName={w.target?.name} />
@@ -286,36 +296,137 @@ function MotionScope({ setting, children }) {
   );
 }
 
-function Waiting() {
+function WaitingTitle({ text }) {
   const reduce = useShouldReduceMotion();
+  return reduce ? (
+    <span className="waiting-title">{text}</span>
+  ) : (
+    <ShimmeringText className="waiting-title" text={text} duration={1.6} color="#9c9ea3" shimmeringColor="#eff0f1" />
+  );
+}
+
+function Waiting() {
   return (
     <div className="waiting" role="status">
-      {reduce ? (
-        <span className="waiting-title">Waiting for telemetry</span>
-      ) : (
-        <ShimmeringText className="waiting-title" text="Waiting for telemetry" duration={1.6} color="#9c9ea3" shimmeringColor="#eff0f1" />
-      )}
+      <WaitingTitle text="Waiting for the bridge" />
       <p>
-        Start the bridge in <code>laptop/bridge</code>: <code>npm run replay:sim</code> to replay a recording, or <code>npm start</code>{' '}
-        for the Pi.
+        Start it in <code>laptop/bridge</code> with <code>npm start</code>. It listens for the Pi and can also play the
+        recording.
       </p>
     </div>
   );
 }
 
-function Status({ connected, paused, hasData }) {
-  const [kind, text] = paused
+// Live is selected but nothing is arriving: say what the bridge last heard and how to point the Pi at this laptop.
+function WaitingForPi({ bridge, setSource }) {
+  const { pi, listen } = bridge;
+  return (
+    <div className="waiting" role="status">
+      <WaitingTitle text="Waiting for the Pi" />
+      <p>
+        {pi
+          ? `The last packet came from ${pi.address} ${agoText(pi.age_ms / 1000)}.`
+          : `Nothing has arrived on UDP ${listen.port} yet.`}{' '}
+        On the Pi, send <code>telemd</code> to this laptop:
+      </p>
+      {listen.addresses.length > 0 ? (
+        <ul className="addrs">
+          {listen.addresses.map((a) => (
+            <li key={a.address}>
+              <code>telemd/build/telemd {a.address}</code>
+              <span>{a.adapter}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>This laptop has no network address yet. Join the Pi's Wi-Fi first.</p>
+      )}
+      {bridge.replay && (
+        <Button className="btn" onClick={() => setSource('replay')}>
+          Play the recording instead
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// Live or Replay: asks the bridge to switch; one animate-ui Highlight slides to the source it confirms.
+function SourceSwitch({ bridge, setSource }) {
+  const current = bridge?.source ?? null;
+  return (
+    <div role="group" aria-label="Data source">
+      <Highlight mode="parent" controlledItems value={current} click={false} className="src-hl" containerClassName="sources">
+        {SOURCES.map(([key, label, tip]) => (
+          <HighlightItem key={key} value={key}>
+            <Tip label={key === 'replay' && bridge?.replay ? `${tip}: ${bridge.replay}` : tip}>
+              <button
+                type="button"
+                className="src"
+                aria-pressed={current === key}
+                disabled={!bridge || (key === 'replay' && !bridge.replay)}
+                onClick={() => setSource(key)}
+              >
+                {label}
+              </button>
+            </Tip>
+          </HighlightItem>
+        ))}
+      </Highlight>
+    </div>
+  );
+}
+
+function Status({ connected, paused, hasData, bridge, piFresh }) {
+  const pi = bridge?.pi;
+  const piName = pi?.adapter === 'this laptop' ? 'Simulator on this laptop' : pi?.adapter ? `Pi via ${pi.adapter}` : `Pi at ${pi?.address}`;
+  const [kind, text, detail] = paused
     ? ['paused', 'Paused']
     : !connected
       ? ['offline', 'Bridge offline']
-      : hasData
-        ? ['live', 'Live feed']
-        : ['nodata', 'No data'];
+      : bridge?.source === 'replay'
+        ? ['replay', 'Recording', `Playing ${bridge.replay}`]
+        : bridge?.source === 'live'
+          ? piFresh
+            ? ['live', piName, `Raspberry Pi at ${pi.address}${pi.adapter ? `, via ${pi.adapter}` : ''}`]
+            : ['nodata', 'Waiting for the Pi']
+          : hasData
+            ? ['live', 'Live feed']
+            : ['nodata', 'No data'];
   return (
-    <span className="status" data-kind={kind} role="status">
+    <span className="status" data-kind={kind} role="status" title={detail}>
       <span className="dot" aria-hidden="true" />
       {text}
     </span>
+  );
+}
+
+// System tab: where the data comes from, and how the Pi reaches this laptop.
+function DataSource({ bridge, piFresh }) {
+  if (!bridge) return null;
+  const { pi, listen } = bridge;
+  return (
+    <Section title="Data source" aside={bridge.source === 'live' ? (piFresh ? 'Pi connected' : 'waiting') : 'replay'}>
+      <dl className="kv">
+        <dt>Showing</dt>
+        <dd>{bridge.source === 'live' ? 'live from the Pi' : bridge.replay}</dd>
+        <dt>Pi</dt>
+        <dd className="with-dot">
+          <span className="dot" data-on={piFresh} aria-hidden="true" />
+          {pi ? pi.address : 'not heard yet'}
+        </dd>
+        <dt>Network</dt>
+        <dd>{pi?.adapter ?? '–'}</dd>
+        <dt>Last packet</dt>
+        <dd>{pi ? agoText(pi.age_ms / 1000) : '–'}</dd>
+        <dt>Listening on</dt>
+        <dd>UDP {listen.port}</dd>
+      </dl>
+      {listen.addresses.length > 0 && (
+        <p className="muted setting-note">
+          This laptop: {listen.addresses.map((a) => `${a.address} (${a.adapter})`).join(', ')}
+        </p>
+      )}
+    </Section>
   );
 }
 
@@ -483,8 +594,7 @@ function Camera({ url, paused }) {
   if (!url) {
     return (
       <p className="muted camera-note">
-        No camera frames yet. <code>telemd-preview</code> sends them from the Pi, and <code>npm run replay:vid360</code> includes
-        them.
+        No camera frames yet. <code>telemd-preview</code> on the Pi sends them, and the Replay recording has them.
       </p>
     );
   }

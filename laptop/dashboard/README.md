@@ -11,7 +11,9 @@ cd laptop/bridge && npm install && npm run replay:dev   # loops ../samples/dev-r
 cd laptop/dashboard && npm install && npm run dev       # open http://localhost:5173
 ```
 
-`npm run replay:vid360` in `laptop/bridge` plays the richest replay: Nathan's 21 s look-around from a real clip, with remembered objects, real odometry pose, crumbs, and camera frames (detection boxes over the image, depth map below). `npm run replay:sim` plays Matt's simulator run with a `slay percept` and restart. `npm run replay` shows the single static sample, and `npm start` takes live telemetry from the Pi. The dashboard reconnects on its own when the bridge restarts. It shows "No data" when no world state has arrived for 1 s, so a frozen screen never looks live.
+With `npm start` the bridge listens for the Pi and also loads the vid360 recording: the **Live | Replay** switch in the top bar flips between them, and the dashboard starts a fresh history on each switch so the two never share a timeline. In Live, the status pill names the sender ("Pi via Wi-Fi", or "Simulator on this laptop" for a local `telemd`); while nothing arrives, the view shows the `telemd` command with this laptop's addresses. The System tab's Data source section has the details: the Pi's address, the network adapter, the last packet's age, and the UDP port.
+
+`npm run replay:vid360` in `laptop/bridge` starts on the richest replay: Nathan's 21 s look-around from a real clip, with remembered objects, real odometry pose, crumbs, and camera frames (detection boxes over the image, depth map below). `npm run replay:sim` plays Matt's simulator run with a `slay percept` and restart. `npm run replay` shows the single static sample, and `npm start` takes live telemetry from the Pi. The dashboard reconnects on its own when the bridge restarts. It shows "No data" when no world state has arrived for 1 s, so a frozen screen never looks live.
 
 ## Layout
 
