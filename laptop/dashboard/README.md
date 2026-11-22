@@ -18,11 +18,12 @@ cd laptop/dashboard && npm install && npm run dev       # open http://localhost:
 | File | What |
 | --- | --- |
 | `src/useTelemetry.js` | WebSocket to the bridge (`ws://127.0.0.1:8765`): latest world state, latest JPEG, staleness |
-| `src/Scene.jsx` | World-frame dot map. Objects use `xyz_world`; the wearer uses `pose.T_world_from_cam`. `xyz_cam` is not drawn. Camera FOV is a display guess, not telemetry. |
+| `src/Scene.jsx` | World-frame dot map. Objects use `xyz_world`; the wearer uses `pose.T_world_from_cam`, or sits at the origin when telemetry has no `pose` (today's `telemd`; before odometry the world frame is the camera frame). `xyz_cam` is not drawn. Camera FOV is a display guess, not telemetry. |
 | `src/worldScene.js` | Pure coordinate helpers: OpenCV world to three.js, pose translation/matrix, object/hand/crumb extraction. |
 | `src/App.jsx` | Header (animate-ui `Highlight` slides to the current mode, `RollingText` for law, intent and spoken captions), side panels (`SlidingNumber` for live values) |
 | `src/Scrubber.jsx` | Replay scrubber (animate-ui `Slider` and `Button`) over the last 10 min of world states |
 | `src/clips.js` | Caption text for guided's clip ids, in `enum beacon_clip` order. `npm test` fails if the enum in `include/beacon.h` changes. |
+| `src/events.js`, `src/Events.jsx` | Events panel: process kills and restarts (with downtime) and LIVE / HOLD / LOST changes, from the history. Click one to scrub there. |
 
 The 3D view draws the bound `target` even when `objects[]` is missing, as in `telemd`'s target-only messages.
 

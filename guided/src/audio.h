@@ -5,8 +5,9 @@
  *   - speech: a 32-slot single-producer/single-consumer ring. If it is full
  *     the new clip is dropped (speech is the first thing to drop).
  *   - ticks / tone: a newest-wins slot. A tick is never queued behind speech.
- * The audio thread runs at a lower priority (BEACON_PRIO_AUDIO) and does the
- * blocking writes. On a laptop it prints what the wearer would hear.
+ * The audio thread runs at a lower priority (BEACON_PRIO_AUDIO), mixes speech
+ * clips, ticks and the reach tone in 10 ms blocks, and does the blocking
+ * writes (audio_out.c). It also prints what the wearer hears.
  */
 #ifndef GUIDED_AUDIO_H
 #define GUIDED_AUDIO_H
@@ -15,7 +16,8 @@
 
 typedef struct {
     int         verbose;     /* print every tick, not a summary */
-    const char *sounds_dir;  /* WAV folder (QNX playback, later) */
+    const char *sounds_dir;  /* folder with the pre-rendered WAV clips */
+    const char *out;         /* "none", "qnx", or a .wav path (see audio_out.h) */
     uint64_t    t0_ns;       /* for printed timestamps */
 } audio_cfg_t;
 
