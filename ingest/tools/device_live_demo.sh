@@ -106,7 +106,7 @@ timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --labels "$LABELS" \
     --yolo "$YOLO" \
     --depth "$PERCEPT/models/depth_anything_v2_metric_indoor_small.onnx" \
-    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --hand-conf "$HAND_CONF" --ort-intra 3 \
+    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --yolo-hand-conf "$HAND_CONF" --ort-intra 3 \
     --h-chest 1.4 \
     --vo-max-disp 200 --vo-fb-err 3.0 --vo-min-tracks 40 \
     --vo-max-corners 180 --vo-win 21 --vo-levels 3 \

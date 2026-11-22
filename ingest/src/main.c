@@ -204,6 +204,11 @@ static void map_health(beacon_percept_block_t *blk, const jval *root, uint64_t n
     const jval *h = jobj_get(root, "health");
     blk->health.last_yolo_ms = (uint32_t)juint(jobj_get(h, "last_yolo_ms"), 0);
     blk->health.last_depth_ms = (uint32_t)juint(jobj_get(h, "last_depth_ms"), 0);
+    /* ADDITION: percept's measured p95 capture->publish latency sets guided's
+     * LIVE window (spec: max(1 s, 2 x p95)); a record without it keeps the last. */
+    uint64_t p95 = juint(jobj_get(h, "p95_vision_ns"), 0);
+    if (p95)
+        blk->health.p95_vision_ns = p95;
     blk->health.hb_percept_ns = now;
 }
 

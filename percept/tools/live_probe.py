@@ -35,6 +35,7 @@ import threading
 import sys
 import time
 from pathlib import Path
+from collections import deque
 from typing import Any, Dict, List, Optional, Sequence
 
 # QNX's packaged onnxruntime ships the C library but not the pybind extension,
@@ -383,7 +384,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="LK pyramid levels (default 4; reaches ~150 px steps)",
     )
     parser.add_argument(
-        "--hand-conf", type=float, default=0.05, metavar="C",
+        "--yolo-hand-conf", type=float, default=0.05, metavar="C",
         help="detector threshold for the `hand` class only (default 0.05; weak hands are "
              "common on-device); every other class keeps --conf",
     )
@@ -602,10 +603,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # The detector runs at the lower of the two thresholds; non-hand rows are
     # filtered back to --conf after each frame (see object_conf below).
     object_conf = float(args.conf)
-    args.conf = min(object_conf, float(getattr(args, "hand_conf", object_conf)))
+    args.conf = min(object_conf, float(getattr(args, "yolo_hand_conf", object_conf)))
     last_mtime = 0
     last_d_m: Optional[float] = None
     last_seen_ns: Optional[int] = None
+    vision_ns: deque = deque(maxlen=60)  # age of vision at refresh, newest 60 records
+    prev_frame_ns = 0
     last_objects: Optional[List[Dict[str, Any]]] = None
     last_target: Optional[Dict[str, Any]] = None
 
@@ -765,6 +768,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                     last_d_m = None
                 elif "d_m" in world:
                     last_d_m = world["d_m"]
+
+                # p95_vision_ns (spec: LIVE lasts max(1 s, 2 x p95)). Without it guided
+                # assumes 1 s and the ~1 s on-device cycle drops the target to LOST
+                # between records. Measured as how old the previous record's frame is
+                # when this one replaces it (latency + cycle), i.e. the oldest vision
+                # guided normally holds; capture->publish alone (~0.9 s) is too short
+                # here because the cycle (~1.1 s) is longer than the latency.
+                now_ns = time.monotonic_ns()
+                if prev_frame_ns:
+                    vision_ns.append(now_ns - prev_frame_ns)
+                prev_frame_ns = int(world.get("t_ns") or 0)
+                ranked = sorted(v for v in vision_ns if 0 < v < 10_000_000_000)
+                if ranked:
+                    world.setdefault("health", {})["p95_vision_ns"] = ranked[int(0.95 * (len(ranked) - 1))]
 
                 if seen % publish_every == 0:
                     line = json.dumps(world, separators=(",", ":"))

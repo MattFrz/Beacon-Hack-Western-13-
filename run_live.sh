@@ -13,7 +13,7 @@
 # Stop everything: sh run_live.sh stop
 HERE=$(cd "$(dirname "$0")" && pwd)
 if [ "$1" = stop ]; then
-    for p in $(pidin ar 2>/dev/null | grep -E "ingest/build/ingest|beacon_cmd --|guided/build/guided|live_probe|live_preview|beacon_grab|telemd/build/telemd" | awk '{print $1}'); do
+    for p in $(pidin ar 2>/dev/null | grep -E "^ *[0-9]+ ([^ ]*/)?(ingest/build/ingest|voiced/build/beacon_cmd|[.]/guided/build/guided|timeout [0-9]+ python3|python3 -s [^ ]*live_(probe|preview)[.]py|[.]/beacon_grab|[^ ]*telemd/build/telemd)" | awk '{print $1}'); do
         slay -f "$p" >/dev/null 2>&1 || true
     done
     echo "stopped"
