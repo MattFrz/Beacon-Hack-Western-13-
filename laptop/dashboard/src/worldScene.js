@@ -117,3 +117,28 @@ export function targetObjectId(world, objects = worldObjects(world)) {
 export function crumbsToScene(world) {
   return (world?.crumbs ?? []).map(worldPoint).filter(Boolean);
 }
+
+// The wearer's walked path, kept by the dashboard from the pose telemd sends (nothing writes
+// crumbs live). A point every TRAIL_STEP_M of movement; a jump bigger than TRAIL_JUMP_M between
+// two packets is a tracking glitch, not a step, so it is skipped. A new pose_epoch means the
+// tracker re-based its world origin: the old points no longer line up, so the drawn trail
+// restarts, while the walked distance keeps adding up.
+export const TRAIL_STEP_M = 0.05;
+export const TRAIL_JUMP_M = 1.5;
+const TRAIL_MAX = 3000;
+
+export function extendTrail(trail, pose) {
+  const prev = trail ?? { points: [], epoch: null, walked_m: 0 };
+  const t = pose?.valid ? poseTranslation(pose) : null;
+  if (!t) return prev;
+  const point = toScene(t);
+  const epoch = isNum(pose.pose_epoch) ? pose.pose_epoch : null;
+  if (epoch !== prev.epoch) return { points: [point], epoch, walked_m: prev.walked_m };
+  const last = prev.points[prev.points.length - 1];
+  if (!last) return { ...prev, points: [point] };
+  const step = Math.hypot(point[0] - last[0], point[1] - last[1], point[2] - last[2]);
+  if (step < TRAIL_STEP_M || step > TRAIL_JUMP_M) return prev;
+  const points = prev.points.length >= TRAIL_MAX ? prev.points.slice(1) : prev.points.slice();
+  points.push(point);
+  return { points, epoch, walked_m: prev.walked_m + step };
+}

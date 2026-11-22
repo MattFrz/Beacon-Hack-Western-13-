@@ -5,6 +5,7 @@ import { Matrix4 } from 'three';
 import {
   crumbsToScene,
   displayPose,
+  extendTrail,
   poseSceneMatrix,
   targetObjectId,
   wearerState,
@@ -24,6 +25,7 @@ const COLORS = {
   hand: '#ff5fa2',
   wearer: '#f2f5f8',
   crumb: '#7b8794',
+  trail: '#5ac8fa',
   LIVE: '#34c759',
   HOLD: '#ffb020',
 };
@@ -41,7 +43,7 @@ export default function Scene({ world, latest, hand, handOpacity, paused }) {
 
   // The map only grows: objects and the camera's last pose survive dropped frames, LOST and pose loss.
   // Only remounting the Scene (the Reset map button, or switching source) clears it.
-  const memory = useRef({ world: undefined, objects: [], matrix: null, wearer: null });
+  const memory = useRef({ world: undefined, objects: [], matrix: null, wearer: null, trail: null });
   const m = memory.current;
   if (latest !== m.world) {
     const rewind = latest?.t_ns < m.world?.t_ns;
@@ -49,6 +51,7 @@ export default function Scene({ world, latest, hand, handOpacity, paused }) {
     m.objects = rememberObjects(rewind ? [] : m.objects, worldObjects(latest));
     m.wearer = wearerState(pose, rewind ? null : m.wearer).position;
     m.matrix = poseSceneMatrix(pose) ?? (rewind ? null : m.matrix);
+    m.trail = extendTrail(rewind ? null : m.trail, pose);
     m.world = latest;
   }
   const pose = displayPose(world);
@@ -71,6 +74,10 @@ export default function Scene({ world, latest, hand, handOpacity, paused }) {
       <ambientLight intensity={0.7} />
       <directionalLight position={[2, 4, 3]} intensity={1.5} />
       <gridHelper args={[10, 40, '#3d3f44', '#26282b']} />
+
+      {m.trail?.points.length >= 2 && (
+        <Line points={m.trail.points} color={COLORS.trail} lineWidth={2} transparent opacity={0.8} />
+      )}
 
       {crumbs.map((p, i) => (
         <mesh key={`crumb-${i}`} position={p}>
@@ -115,7 +122,9 @@ export default function Scene({ world, latest, hand, handOpacity, paused }) {
 
       {wearer.position && (
         <>
-          <Marker position={wearer.position} color={COLORS.wearer} size={0.045} label={wearer.valid ? 'wearer' : 'pose lost'} labelBelow />
+          <Marker position={wearer.position} color={COLORS.wearer} size={0.045} label={wearer.valid
+            ? (m.trail?.walked_m >= 0.1 ? `wearer · ${m.trail.walked_m.toFixed(1)} m walked` : 'wearer')
+            : 'pose lost'} labelBelow />
           {poseMatrix ? (
             <group matrixAutoUpdate={false} matrix={new Matrix4().fromArray(poseMatrix)}>
               <Frustum />

@@ -181,3 +181,20 @@ test('nearby duplicate rows keep the newest position regardless of packet order'
     assert.equal(result[0].live, true);
   }
 });
+
+test('the wearer trail grows with real steps and skips jitter and glitches', async () => {
+  const { extendTrail } = await import('./worldScene.js');
+  const at = (x, z, epoch = 1) => ({ valid: true, pose_epoch: epoch, T_world_from_cam: [1, 0, 0, x, 0, 1, 0, 0, 0, 0, 1, z, 0, 0, 0, 1] });
+  let trail = extendTrail(null, at(0, 0));
+  trail = extendTrail(trail, at(0, 0.01));      // jitter: ignored
+  trail = extendTrail(trail, at(0, 0.5));       // a step
+  trail = extendTrail(trail, at(0, 3.0));       // 2.5 m in one packet: glitch, ignored
+  trail = extendTrail(trail, at(0.3, 0.9));     // a step
+  assert.equal(trail.points.length, 3);
+  assert.ok(Math.abs(trail.walked_m - 1.0) < 1e-9);
+  trail = extendTrail(trail, { valid: false });  // pose lost: unchanged
+  assert.equal(trail.points.length, 3);
+  trail = extendTrail(trail, at(5, 5, 2));       // tracker re-based: new trail, distance kept
+  assert.equal(trail.points.length, 1);
+  assert.ok(Math.abs(trail.walked_m - 1.0) < 1e-9);
+});
