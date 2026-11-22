@@ -49,12 +49,12 @@ CLIPS = {
     "did_not_catch": "I did not catch that.",
     "cannot_help": "I cannot help with that.",
     "cannot_retrace": "I cannot retrace without a path.",
-    "name_keys": "Keys.",
-    "name_keychain": "Keychain.",
-    "name_cup": "Cup.",
-    "name_mug": "Mug.",
     "name_bottle": "Bottle.",
+    "name_can": "Can.",
+    "name_keys": "Keys.",
     "name_phone": "Phone.",
+    "name_box": "Box.",
+    "name_mouse": "Mouse.",
 }
 
 # Whole phrases, so a walk cue is 3 joins ("Keys." + "About two meters." +
@@ -84,9 +84,9 @@ _DIRS = {
     "sright": "slightly to your right",
     "right": "to your right",
 }
-_INTROS = {  # label -> sentence start
-    "keys": "Your keys are", "keychain": "Your keychain is", "cup": "Your cup is",
-    "mug": "Your mug is", "bottle": "The bottle is", "phone": "Your phone is",
+_INTROS = {  # label -> sentence start (the six demo nouns)
+    "bottle": "The bottle is", "can": "The can is", "keys": "Your keys are",
+    "phone": "Your phone is", "box": "The box is", "mouse": "The mouse is",
 }
 for _label, _start in _INTROS.items():
     for _d, _words in _DIRS.items():
@@ -108,8 +108,8 @@ CLIPS.update({
     "turn_around": "Turn around.",
 })
 # A landmark after the full sentence when another object sits right next to the target.
-_THE = {"keys": "your keys", "keychain": "your keychain", "cup": "the cup", "mug": "the mug",
-        "bottle": "the bottle", "phone": "your phone"}
+_THE = {"bottle": "the bottle", "can": "the can", "keys": "your keys",
+        "phone": "your phone", "box": "the box", "mouse": "the mouse"}
 for _label, _words in _THE.items():
     CLIPS[f"next_to_{_label}"] = f"It's next to {_words}."
 

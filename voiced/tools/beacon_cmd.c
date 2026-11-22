@@ -22,16 +22,16 @@
 static beacon_world_t *g_w;
 
 static const char *const k_skip[] = { "find", "where", "is", "are", "my", "the", "a", "an", "go",
-                                      "to", "me", "please", "can", "you", "i", "need", "want",
+                                      "to", "me", "please", "you", "i", "need", "want",
                                       "refill", "get", "for", "some", NULL };
+/* `can` used to be a stopword ("can you find..."). It is a demo noun now, so it
+ * must reach the intent; the modal reading loses, which is the right trade for
+ * "find the can" and only ever costs an extra candidate on "can you find X". */
 static const struct { const char *word; const char *labels[4]; } k_syn[] = {
-    { "water", { "fountain", "dispenser", "sink", "bottle" } },
-    { "keys", { "keys", "keychain" } },
-    { "key", { "keys", "keychain" } },
-    { "cup", { "cup", "mug" } },
-    { "coffee", { "mug", "cup" } },
-    { "drink", { "bottle", "cup", "can" } },
-    { "glasses", { "glasses" } },
+    { "water", { "bottle", "can" } },
+    { "key", { "keys" } },
+    { "bottle", { "bottle" } },
+    { "cans", { "can" } },
 };
 
 static int is_skip(const char *w)
