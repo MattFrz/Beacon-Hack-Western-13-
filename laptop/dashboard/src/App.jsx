@@ -23,6 +23,7 @@ const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 // 0 means "not measured yet" for vision timings (no real YOLO run takes 0 ms), so show "–", not "0 ms".
 const measured = (v) => (isNum(v) && v > 0 ? v : null);
 const msAgo = (now, then) => (isNum(now) && isNum(then) ? (now - then) / 1e6 : null);
+const plain = (v, unit = '') => (isNum(v) ? `${Math.round(v)}${unit}` : '–');
 const panWord = (p) => (!isNum(p) ? '–' : p < -0.1 ? 'left' : p > 0.1 ? 'right' : 'centre');
 const SHOWN_OBJECTS = 8;
 // Seconds since a sighting, as words: a remembered object can be minutes old.
@@ -441,7 +442,8 @@ function System({ w, health, log, setCursor }) {
         <dl className="stats">
           <div>
             <dt>YOLO / depth</dt>
-            <dd><Num value={measured(health.last_yolo_ms)} /> / <Num value={measured(health.last_depth_ms)} unit=" ms" /></dd>
+            {/* plain text: these change with every frame, so rolling digits would never settle */}
+            <dd>{plain(measured(health.last_yolo_ms))} / {plain(measured(health.last_depth_ms), ' ms')}</dd>
           </div>
           <div>
             <dt>Vision p95</dt>
