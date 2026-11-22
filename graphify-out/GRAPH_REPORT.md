@@ -1,17 +1,17 @@
 # Graph Report - beacon  (2026-11-21)
 
 ## Corpus Check
-- 95 files · ~90,702 words
+- 95 files · ~90,720 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 13 file(s) not represented in the graph (top: (none) 10, .jsonl 2, .css 1)
 
 ## Summary
-- 1412 nodes · 3038 edges · 82 communities (65 shown, 17 thin omitted)
+- 1412 nodes · 3037 edges · 80 communities (64 shown, 16 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 279 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `60ebc2bf`
+- Built from commit: `c151f269`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -31,7 +31,7 @@
 - Beacon Accessibility Research
 - guided/src/main.c
 - telemd.c
-- App.jsx
+- dashboard/package.json
 - Model Files Directory (not committed)
 - percept (perception process)
 - beacon_intent_kind
@@ -43,10 +43,10 @@
 - DepthStabiliser
 - TapeCheckTest
 - guided (60 Hz guidance synthesizer)
-- bt_speaker.py
+- Beacon (chest-worn item-homing wearable)
 - beacon.h
 - main
-- guided synthesizer (FIFO 58, core 0)
+- Scene.jsx
 - Logitech C270 Stand-In Camera and Mic
 - deadline_test.c
 - Deterministic Synonym Query Remap
@@ -54,14 +54,14 @@
 - SlotTracker
 - camd/src/main.c
 - resolve_calibration
-- encode_preview
+- Model Files Directory (not committed)
 - tape_check.py
 - Saturday Build Order (spec section 13, steps 1-6)
 - DepthSamplingTest
 - beacon_cmd.c
 - percept vision process (RR 22, cores 1-3)
 - Merge verdict: BLOCK
-- Clip caption table (enum beacon_clip order)
+- telemd (read-only telemetry sender)
 - .patch_chair_frames
 - argparse
 - FakeLandmarker
@@ -79,7 +79,7 @@
 - FakeInferenceSession
 - bt_audio_service.sh
 - run-radio-auto.sh
-- telemd (read-only telemetry sender)
+- /beacon_world Shared Memory
 - make_clips.ps1
 - pi_live.sh
 - test_frame_id_seed.py
@@ -87,14 +87,13 @@
 - Hardware Request (USB audio, piezo, Camera Module 3)
 - /boot/onboot Boot Hook
 - Laptop-first World-dot Pipeline (probe_frame -> probe_to_world -> bridge -> dashboard)
-- beacon_pulse
+- App.jsx
 - Parsimonious, Query-Driven Instructions
-- beacon_law
-- percept (YOLOE, depth, hands, unproject, VO)
-- Honest LOST Cue (no invented metres)
-- beacon.h Shared Contract (shm layouts, seqs, intent.kind, pulse codes)
+- bt_speaker.py
+- telemd.c
+- scripts
+- beacon_cmd (typed commands to intent block)
 - Inclusive Language and Non-Cure Framing
-- Mode banner (LIVE / HOLD / LOST)
 - FakeInferenceSession
 
 ## God Nodes (most connected - your core abstractions)
@@ -141,11 +140,11 @@
 - **Spoken-metre Gating (no metres until tape check passes)** — percept_readme_tape_check, percept_readme_depth_scale, percept_readme_fov_pinhole_guess, percept_readme_calibrate_camera, readme_lost_cue_principle [INFERRED 0.85]
 - **Telemetry Flow from Pi or Probe to Dashboard** — readme_telemd, percept_readme_probe_to_world, laptop_samples_readme_udp_port_5005, readme_laptop_bridge, laptop_dashboard_readme_dashboard [INFERRED 0.85]
 
-## Communities (82 total, 17 thin omitted)
+## Communities (80 total, 16 thin omitted)
 
 ### Community 0 - "probe_to_world"
-Cohesion: 0.05
-Nodes (27): Frames, FrameSlot, main(), plant_non_newest_high_id(), published_frame_id(), run(), verify_layout(), main() (+19 more)
+Cohesion: 0.07
+Nodes (20): Frames, FrameSlot, main(), plant_non_newest_high_id(), published_frame_id(), run(), verify_layout(), main() (+12 more)
 
 ### Community 1 - "App.jsx"
 Cohesion: 0.10
@@ -156,8 +155,8 @@ Cohesion: 0.03
 Nodes (60): beacon_clip, BEACON_CLIP_A_LITTLE, BEACON_CLIP_ABOUT, BEACON_CLIP_AHEAD, BEACON_CLIP_CANNOT_HELP, BEACON_CLIP_CANNOT_RETRACE, BEACON_CLIP_COUNT, BEACON_CLIP_DID_NOT_CATCH (+52 more)
 
 ### Community 3 - "Beacon: Nathan's revision (spec)"
-Cohesion: 0.13
-Nodes (16): Beacon: Nathan's revision (spec), Beacon accessibility research (docs/beacon-accessibility-research.md), Beacon (chest-worn named-object homing device), Henomaly (process split + ORT on Pi 5 QNX), Neighbour design notes (hackwestern13 beacon-design.md), Open-vocab Pi model brief (docs/beacon-open-vocab-pi-models.md), procmgr_ability priority ability and root drop, QNX AI workshop (MediaPipe hands on Pi) (+8 more)
+Cohesion: 0.15
+Nodes (13): Beacon: Nathan's revision (spec), Beacon accessibility research (docs/beacon-accessibility-research.md), Beacon (chest-worn named-object homing device), Henomaly (process split + ORT on Pi 5 QNX), Neighbour design notes (hackwestern13 beacon-design.md), Open-vocab Pi model brief (docs/beacon-open-vocab-pi-models.md), procmgr_ability priority ability and root drop, QNX AI workshop (MediaPipe hands on Pi) (+5 more)
 
 ### Community 5 - "probe_once"
 Cohesion: 0.13
@@ -192,16 +191,16 @@ Cohesion: 0.20
 Nodes (9): Beacon Accessibility Research, Visualization for the Blind: Parachute-Design Criticism (ACM Interactions), CHI 2025: BLV Object-Recognition Technologies in India, Multi-Purpose Camera Apps (Seeing AI, Lookout, Be My Eyes, Envision), Find My Things (Morrison et al., ASSETS 2023), Floor-Level Dropped Items Scope Gap, Kientz et al., Where's My Stuff? (ASSETS 2006), Tactile-First Problem-Solving Hierarchy (+1 more)
 
 ### Community 13 - "guided/src/main.c"
-Cohesion: 0.13
-Nodes (13): main(), put_u16(), put_u32(), write_bmp(), beacon_frame_slot_t, beacon_live_max_ns(), main(), open_world() (+5 more)
+Cohesion: 0.15
+Nodes (5): main(), put_u16(), put_u32(), write_bmp(), beacon_frame_slot_t
 
 ### Community 14 - "telemd.c"
-Cohesion: 0.14
-Nodes (22): Build on QNX (make; test_law 56 passed), Hear it on the JBL (Bluetooth PCM FIFO), Testing guided on the Pi (fakeworld test plan), Run without sound (fakeworld lost, 0 missed deadlines), --audio outputs (none, out.wav, fifo:PATH, qnx), guided Audio Thread (speech ring + newest-wins tick/tone slot), beacon.h ADDITIONs (objects[].used, hand.valid, hand.pose_epoch, intent.utterance_id, target.bound, display/stats blocks), beacon_mode() LIVE/HOLD/LOST Tracking Mode (+14 more)
+Cohesion: 0.16
+Nodes (20): Build on QNX (make; test_law 56 passed), Hear it on the JBL (Bluetooth PCM FIFO), Testing guided on the Pi (fakeworld test plan), Run without sound (fakeworld lost, 0 missed deadlines), --audio outputs (none, out.wav, fifo:PATH, qnx), guided Audio Thread (speech ring + newest-wins tick/tone slot), beacon.h ADDITIONs (objects[].used, hand.valid, hand.pose_epoch, intent.utterance_id, target.bound, display/stats blocks), beacon_mode() LIVE/HOLD/LOST Tracking Mode (+12 more)
 
-### Community 15 - "App.jsx"
-Cohesion: 0.06
-Nodes (67): Beacon dashboard index.html, dependencies, @animate-ui/react@^2.4.6, @base-ui/react@^1.9.0, motion@^14.14.0, react@^19.3.1, react-dom@^19.3.1, @react-three/drei@^10.7.9 (+59 more)
+### Community 15 - "dashboard/package.json"
+Cohesion: 0.11
+Nodes (25): dependencies, @animate-ui/react@^2.4.6, @base-ui/react@^1.9.0, motion@^14.14.0, react@^19.3.1, react-dom@^19.3.1, @react-three/drei@^10.7.9, @react-three/fiber@^9.8.2 (+17 more)
 
 ### Community 16 - "Model Files Directory (not committed)"
 Cohesion: 0.19
@@ -212,8 +211,8 @@ Cohesion: 0.11
 Nodes (8): build_parser(), main(), _output(), parse_udp_target(), UdpEmitTest, fake_emit_lines(), fake_probe_once(), fake_probe_once()
 
 ### Community 18 - "beacon_intent_kind"
-Cohesion: 0.18
-Nodes (11): beacon_intent_kind, BEACON_INTENT_FIND, BEACON_INTENT_GO, BEACON_INTENT_NACK_CANT, BEACON_INTENT_NACK_UNHEARD, BEACON_INTENT_NACK_UNSEEN, BEACON_INTENT_NONE, BEACON_INTENT_REJECT (+3 more)
+Cohesion: 0.07
+Nodes (26): beacon_intent_kind, BEACON_INTENT_FIND, BEACON_INTENT_GO, BEACON_INTENT_NACK_CANT, BEACON_INTENT_NACK_UNHEARD, BEACON_INTENT_NACK_UNSEEN, BEACON_INTENT_NONE, BEACON_INTENT_REJECT (+18 more)
 
 ### Community 19 - "guided synthesizer (FIFO 58, core 0)"
 Cohesion: 0.17
@@ -224,8 +223,8 @@ Cohesion: 0.19
 Nodes (19): /beacon_depth depth slot (shm), /beacon_world WorldState (shm), crumbs[512] breadcrumb trail, Depth Anything V2 Metric Indoor Small INT8, hand (percept-owned fingertip slot), MediaPipe hands (palm + landmark lite), objects[32] session POI store, OpenCV 4.12 (features2d + calib3d) (+11 more)
 
 ### Community 21 - "telemd (read-only telemetry sender)"
-Cohesion: 0.13
-Nodes (22): main(), audio_publish_stats(), audio_submit(), test_seq_writer_restart(), beacon_crumb_t, beacon_depth_t, beacon_guided_block_t, beacon_guided_display_t (+14 more)
+Cohesion: 0.14
+Nodes (11): beacon_crumb_t, beacon_depth_t, beacon_guided_block_t, beacon_guided_display_t, beacon_guided_stats_t, beacon_hand_t, beacon_letterbox_t, beacon_object_t (+3 more)
 
 ### Community 22 - "Logitech C270 Stand-In Camera and Mic"
 Cohesion: 0.13
@@ -247,25 +246,25 @@ Nodes (14): Beacon spec adversarial review, First empirical gates (busy-loop, ta
 Cohesion: 0.30
 Nodes (3): expected_result(), range_record(), TapeCheckTest
 
-### Community 27 - "bt_speaker.py"
-Cohesion: 0.24
-Nodes (11): Even seq.* Values (telemd skips torn reads), CLOCK_MONOTONIC t_ns Timestamps, Per-session JSONL World-state Recording, Telemetry Format (DRAFT), UDP Port 5005 Telemetry Transport, Optional Video JPEG (~5 fps, <60 KB per datagram), World-state JSON Message (~10 Hz), --jpeg Raw UDP Preview Datagram (+3 more)
+### Community 27 - "Beacon (chest-worn item-homing wearable)"
+Cohesion: 0.12
+Nodes (23): BMP Bring-up Frame Source (frametype 65535), QNX CamAPI Adapter (not wired yet), camd (camera daemon), Synthetic Stub Frame Source (frametype 0), xyz_cam OpenCV Camera Frame (+X right, +Y down, +Z forward), Even seq.* Values (telemd skips torn reads), CLOCK_MONOTONIC t_ns Timestamps, Per-session JSONL World-state Recording (+15 more)
 
 ### Community 28 - "beacon.h"
-Cohesion: 0.15
-Nodes (14): dev-reach.jsonl sample (walk, reach, slay percept -> HOLD -> LOST), Optional live JPEG video frames, Live status line every 5 s (world, video, dropped, dashboards), Bridge replay mode (paced by t_ns), Session recording to recordings/<UTC>.jsonl, telemd (Pi telemetry sender), UDP ingest on port 5005, WebSocket out ws://127.0.0.1:8765 (+6 more)
+Cohesion: 0.12
+Nodes (17): dev-reach.jsonl sample (walk, reach, slay percept -> HOLD -> LOST), Optional live JPEG video frames, Live status line every 5 s (world, video, dropped, dashboards), Bridge replay mode (paced by t_ns), Session recording to recordings/<UTC>.jsonl, telemd (Pi telemetry sender), UDP ingest on port 5005, WebSocket out ws://127.0.0.1:8765 (+9 more)
 
 ### Community 29 - "main"
-Cohesion: 0.16
-Nodes (12): audio_dropped_speech(), audio_stop(), main(), open_world(), sleep_until(), platform_heartbeat(), platform_piezo_init(), platform_piezo_set() (+4 more)
+Cohesion: 0.13
+Nodes (15): hog(), main(), pin_cpu(), set_fifo(), sleep_until_ns(), audio_dropped_speech(), audio_start(), audio_stop() (+7 more)
 
-### Community 30 - "guided synthesizer (FIFO 58, core 0)"
-Cohesion: 0.31
-Nodes (5): hog(), main(), pin_cpu(), set_fifo(), sleep_until_ns()
+### Community 30 - "Scene.jsx"
+Cohesion: 0.25
+Nodes (20): COLORS, Frustum(), isNum(), Marker(), norm(), Scene(), crumbsToScene(), displayPose() (+12 more)
 
 ### Community 31 - "Logitech C270 Stand-In Camera and Mic"
-Cohesion: 0.13
-Nodes (22): audio_main(), audio_start(), law_name(), mode_name(), audio_out_close(), audio_out_open(), audio_out_paced(), audio_out_write() (+14 more)
+Cohesion: 0.15
+Nodes (21): audio_main(), law_name(), mode_name(), audio_out_close(), audio_out_open(), audio_out_paced(), audio_out_write(), fifo_try_open() (+13 more)
 
 ### Community 32 - "deadline_test.c"
 Cohesion: 0.20
@@ -288,12 +287,12 @@ Cohesion: 0.25
 Nodes (12): fill_stub_frame(), load_bmp(), main(), open_frames(), pin_core0(), publish_frame(), read_le32(), seed_next_frame_id() (+4 more)
 
 ### Community 37 - "resolve_calibration"
-Cohesion: 0.22
-Nodes (10): /beacon_frames Newest-wins Three-slot Ring, BMP Bring-up Frame Source (frametype 65535), camd (camera daemon), dump-frame BMP Round-trip Writer, Frame-ID Seeding Test (make test-frame-id-seed), read-frames Ring Checker, Synthetic Stub Frame Source (frametype 0), /beacon_depth Shared Memory (+2 more)
+Cohesion: 0.33
+Nodes (6): /beacon_frames Newest-wins Three-slot Ring, dump-frame BMP Round-trip Writer, Frame-ID Seeding Test (make test-frame-id-seed), read-frames Ring Checker, /beacon_depth Shared Memory, percept-head Shm Reader (src/head.cpp)
 
-### Community 38 - "encode_preview"
-Cohesion: 0.20
-Nodes (10): QNX CamAPI Adapter (not wired yet), intent.kind Values (FIND, GO, RETURN, STOP, REPEAT, REJECT, NACK_*), Baked YOLOE Label Vocabulary (64 nouns), Optional llama.cpp GGUF, Model Files Directory (not committed), whisper.cpp ggml-tiny.en.bin, Beacon (chest-worn item-homing wearable), nathans-revision.md Design (source of truth) (+2 more)
+### Community 38 - "Model Files Directory (not committed)"
+Cohesion: 0.14
+Nodes (15): crumbs Breadcrumb Positions, intent.kind Values (FIND, GO, RETURN, STOP, REPEAT, REJECT, NACK_*), pose.T_world_from_cam (4x4 row-major, from percept VO), xyz_world Session Frame (valid only with matching pose_epoch), Baked YOLOE Label Vocabulary (64 nouns), export_yoloe.py Detector Export, Optional llama.cpp GGUF, MediaPipe Hand Models (+7 more)
 
 ### Community 39 - "tape_check.py"
 Cohesion: 0.26
@@ -311,17 +310,17 @@ Nodes (6): Calibration, guess_calibration(), load_calibration(), resolve_calibra
 Cohesion: 0.15
 Nodes (3): make_affine(), parse_csv3(), DepthSamplingTest
 
-### Community 45 - "Clip caption table (enum beacon_clip order)"
-Cohesion: 0.33
-Nodes (6): deadline-test (over_period vs over_1ms), Clip caption table (enum beacon_clip order), law / cue / d_m Fields (STOP, LOST, REACH, WALK, RETURN, NONE), sim-reach-lost.jsonl Simulator Demo Replay, guided (60 Hz synthesizer: mode, bind, laws, audio, piezo), cue Object (tick rate, stereo pan, clip_ids)
+### Community 45 - "telemd (read-only telemetry sender)"
+Cohesion: 0.17
+Nodes (10): deadline-test (over_period vs over_1ms), run_scenario.sh script, Clip caption table (enum beacon_clip order), law / cue / d_m Fields (STOP, LOST, REACH, WALK, RETURN, NONE), sim-reach-lost.jsonl Simulator Demo Replay, guided (60 Hz synthesizer: mode, bind, laws, audio, piezo), cue Object (tick rate, stereo pan, clip_ids), telemd-preview JPEG Sender (libjpeg) (+2 more)
 
 ### Community 46 - ".patch_chair_frames"
-Cohesion: 0.35
-Nodes (9): drop_crumb(), lerp(), main(), publish_percept(), put_hand(), put_object(), say_intent(), set_pose_yaw() (+1 more)
+Cohesion: 0.22
+Nodes (16): audio_publish_stats(), audio_submit(), test_seq_writer_restart(), drop_crumb(), lerp(), main(), publish_percept(), put_hand() (+8 more)
 
 ### Community 47 - "argparse"
-Cohesion: 0.42
-Nodes (8): apply(), find_key(), get_num(), get_str(), get_vec3(), main(), row_for(), skip_value()
+Cohesion: 0.38
+Nodes (9): apply(), find_key(), get_num(), get_str(), get_vec3(), main(), publish(), row_for() (+1 more)
 
 ### Community 48 - "FakeLandmarker"
 Cohesion: 0.43
@@ -329,7 +328,7 @@ Nodes (6): add(), handle(), is_skip(), kind_name(), main(), send_intent()
 
 ### Community 49 - "Merge verdict: BLOCK"
 Cohesion: 0.22
-Nodes (8): pose.T_world_from_cam (4x4 row-major, from percept VO), xyz_world Session Frame (valid only with matching pose_epoch), Depth Anything V2 Metric Indoor Small ONNX, export_depth.py Depth Export, Per-instance Depth Slot Median Stabiliser, Box IoU Slot Association (--slot-iou 0.30), tape_check.py Absolute-depth Gate, Visual Odometry (VO)
+Nodes (6): dev-reach.jsonl (made by make-dev-reach.js), Depth Anything V2 Metric Indoor Small ONNX, export_depth.py Depth Export, Per-instance Depth Slot Median Stabiliser, Box IoU Slot Association (--slot-iou 0.30), tape_check.py Absolute-depth Gate
 
 ### Community 50 - "fakeworld.c"
 Cohesion: 0.24
@@ -351,76 +350,72 @@ Nodes (6): _box_bounds(), _box_iou(), _slot_match_score(), _SlotState, SlotTrack
 Cohesion: 0.70
 Nodes (3): AGENTS.md: Beacon notes for coding agents, Committed graph artifacts (GRAPH_REPORT.md, graph.json, graph.html), CLAUDE.md (imports AGENTS.md)
 
-### Community 63 - "telemd (read-only telemetry sender)"
-Cohesion: 0.18
-Nodes (11): /beacon_world Shared Memory, Seqlock Shared-memory Reads (seq_percept / seq_voiced / seq_guided), run_scenario.sh script, Dummy Worker Heartbeat Test, Heartbeat Fault Detection and Restart with Backoff, Piezo Fault Path, supervisor (spawn, runmasks, heartbeats, restarts), telemd (read-only telemetry sender) (+3 more)
+### Community 63 - "/beacon_world Shared Memory"
+Cohesion: 0.29
+Nodes (8): /beacon_world Shared Memory, fakeworld (scripted percept/voiced stand-in), Dummy Worker Heartbeat Test, Heartbeat Fault Detection and Restart with Backoff, Piezo Fault Path, supervisor (spawn, runmasks, heartbeats, restarts), tools/fake_probe.py (probe-shaped JSON sender), world_in (laptop-camera fallback bridge to /beacon_world)
 
 ### Community 68 - "qnxpi Target (QNX 8.0 Raspberry Pi 5)"
-Cohesion: 0.20
-Nodes (8): qnxpi Device (QNX 8.0, Raspberry Pi 5, 4x Cortex-A76, 8 GB), Before-Demo Checklist, Default qnxuser Password Risk, Read-Only IFS Image (qnx_sdp.ifs), QNX Process Idioms (pidin, slay), QNXE-195 ssh-rsa Host Key Negotiation, qnxpi Target (QNX 8.0 Raspberry Pi 5), slog2info / slogger2 Logging
+Cohesion: 0.14
+Nodes (12): qnxpi Device (QNX 8.0, Raspberry Pi 5, 4x Cortex-A76, 8 GB), Pi Development Workflow (QNX 8.0 on Raspberry Pi 5), Before-Demo Checklist, CRLF Line Endings Break onboot, Default qnxuser Password Risk, Read-Only IFS Image (qnx_sdp.ifs), QNX Process Idioms (pidin, slay), QNXE-195 ssh-rsa Host Key Negotiation (+4 more)
 
 ### Community 69 - "Hardware Request (USB audio, piezo, Camera Module 3)"
 Cohesion: 0.22
 Nodes (7): Aural and Haptic Feedback for Visually Impaired People on a Track (ICHI), Less is More (VIA-Agent) PVI Study, 12-person BLV hand-steering study, USB headset audio (off-thread playback), No PCM Playback Device on QNX Image (io-snd control only, no 3.5 mm), Camera Module 3 CSI (imx708, units 3-4, 2304x1296 nv12), Hardware Request (USB audio, piezo, Camera Module 3)
 
 ### Community 70 - "/boot/onboot Boot Hook"
-Cohesion: 0.29
-Nodes (5): CRLF Line Endings Break onboot, Network Diagnostics Ladder, QNXE-1894 Wi-Fi Settings Copy Bug, QNXE-2016 Shared Default Wi-Fi MAC, Serial Console (UART on 40-pin header)
+Cohesion: 0.40
+Nodes (4): Network Diagnostics Ladder, QNXE-1894 Wi-Fi Settings Copy Bug, QNXE-2016 Shared Default Wi-Fi MAC, Serial Console (UART on 40-pin header)
 
 ### Community 71 - "Laptop-first World-dot Pipeline (probe_frame -> probe_to_world -> bridge -> dashboard)"
 Cohesion: 0.29
 Nodes (4): World-frame 3D Dots Plan, percept/tools/probe_to_world.py World JSONL Wrapper, Range 1 Tabletop Proof (no odometry), world.sample.json
 
-### Community 72 - "beacon_pulse"
-Cohesion: 0.25
-Nodes (8): beacon_pulse, BEACON_PULSE_AUDIO_UNDERRUN, BEACON_PULSE_HB_CAMD, BEACON_PULSE_HB_GUIDED, BEACON_PULSE_HB_PERCEPT, BEACON_PULSE_HB_VOICED, BEACON_PULSE_INTENT_EDGE, BEACON_PULSE_SUP_TICK
+### Community 72 - "App.jsx"
+Cohesion: 0.19
+Nodes (16): dashboard README, animate-ui primitives (Highlight, RollingText, SlidingNumber, Slider, Button), App(), Caption(), isNum(), measured(), MODES, msAgo() (+8 more)
 
 ### Community 73 - "Parsimonious, Query-Driven Instructions"
-Cohesion: 0.29
-Nodes (4): HoldLight (BLV climbers), UI Preferences for a Camera-Based Wayfinding Aid (JVIB), NavCog / NavCog3 (CMU), NavGraph Parsimonious Instructions
+Cohesion: 0.18
+Nodes (8): AI Proposes, High-Priority Thread Disposes, Misfitting With AI: How Blind People Verify and Contest AI Errors (ASSETS 2024), HoldLight (BLV climbers), UI Preferences for a Camera-Based Wayfinding Aid (JVIB), NavCog / NavCog3 (CMU), NavGraph Parsimonious Instructions, Sighted by Default: Calibrated Honesty (CHI 2026), This is My Fault, Really? BLV Perception of LVLM Hallucination (UIST 2025)
 
-### Community 74 - "beacon_law"
-Cohesion: 0.29
-Nodes (7): beacon_law, BEACON_LAW_LOST, BEACON_LAW_NONE, BEACON_LAW_REACH, BEACON_LAW_RETURN, BEACON_LAW_STOP, BEACON_LAW_WALK
+### Community 74 - "bt_speaker.py"
+Cohesion: 0.15
+Nodes (7): main(), _mono_samples(), pcm_chunks(), play_wav(), counted(), _resample(), send_pcm()
 
-### Community 75 - "percept (YOLOE, depth, hands, unproject, VO)"
-Cohesion: 0.33
-Nodes (6): crumbs Breadcrumb Positions, export_yoloe.py Detector Export, MediaPipe Hand Models, yoloe26n_320.onnx (baked prompts, detect-only), percept (YOLOE, depth, hands, unproject, VO), probe_frame.py Laptop Stand-in
+### Community 75 - "telemd.c"
+Cohesion: 0.17
+Nodes (14): main(), open_world(), beacon_live_max_ns(), beacon_seq_read(), beacon_world_t, read_newest(), main(), open_world() (+6 more)
 
-### Community 77 - "Honest LOST Cue (no invented metres)"
-Cohesion: 0.47
-Nodes (4): AI Proposes, High-Priority Thread Disposes, Misfitting With AI: How Blind People Verify and Contest AI Errors (ASSETS 2024), Sighted by Default: Calibrated Honesty (CHI 2026), This is My Fault, Really? BLV Perception of LVLM Hallucination (UIST 2025)
+### Community 76 - "scripts"
+Cohesion: 0.50
+Nodes (4): scripts, build, dev, test
 
-### Community 78 - "beacon.h Shared Contract (shm layouts, seqs, intent.kind, pulse codes)"
-Cohesion: 0.33
-Nodes (5): xyz_cam OpenCV Camera Frame (+X right, +Y down, +Z forward), calib.json Camera Intrinsics (laptop-local, gitignored), calibrate_camera.py Chessboard Calibration, --fov Pinhole Guess (66 deg), beacon.h Shared Contract (shm layouts, seqs, intent.kind, pulse codes)
+### Community 77 - "beacon_cmd (typed commands to intent block)"
+Cohesion: 1.00
+Nodes (3): beacon_cmd (typed commands to intent block), Synonym Table (with REPEAT / REJECT, llama.cpp on miss), voiced (speech to intent)
 
 ### Community 79 - "Inclusive Language and Non-Cure Framing"
 Cohesion: 0.40
 Nodes (5): CNIB Inclusive Language Guidelines, Designing for Independence for People with Visual Impairments (CSCW 2021), Hoffman-Andrews et al., Cure Rhetoric Criticized by Blind Participants, Inclusive Language and Non-Cure Framing, Independence as Control, Not Avoiding Help
 
-### Community 80 - "Mode banner (LIVE / HOLD / LOST)"
-Cohesion: 0.40
-Nodes (3): Events panel (process kills, restarts, mode changes), Mode banner (LIVE / HOLD / LOST), dev-reach.jsonl (made by make-dev-reach.js)
-
 ## Knowledge Gaps
 - **162 isolated node(s):** `BEACON_MODE_HOLD`, `BEACON_MODE_LIVE`, `BEACON_MODE_LOST`, `BEACON_MODE_NONE`, `full_h` (+157 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 416 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **17 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **16 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Clip caption table (enum beacon_clip order)` connect `Clip caption table (enum beacon_clip order)` to `telemd (read-only telemetry sender)`, `App.jsx`?**
-  _High betweenness centrality (0.413) - this node is a cross-community bridge._
+- **Why does `Clip caption table (enum beacon_clip order)` connect `telemd (read-only telemetry sender)` to `App.jsx`, `telemd (read-only telemetry sender)`?**
+  _High betweenness centrality (0.426) - this node is a cross-community bridge._
 - **Are the 16 inferred relationships involving `guided_step()` (e.g. with `beacon_live_max_ns()` and `beacon_mode`) actually correct?**
   _`guided_step()` has 16 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `BEACON_MODE_HOLD`, `BEACON_MODE_LIVE`, `BEACON_MODE_LOST` to the rest of the system?**
   _162 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `probe_to_world` be split into smaller, more focused modules?**
-  _Cohesion score 0.0505175983436853 - nodes in this community are weakly interconnected._
-- **Why does `Beacon: Nathan's revision (spec)` connect `Beacon: Nathan's revision (spec)` to `deadline_test.c`, `/boot/onboot Boot Hook`, `Saturday Build Order (spec section 13, steps 1-6)`, `Beacon Accessibility Research`, `Honest LOST Cue (no invented metres)`, `Merge verdict: BLOCK`, `App.jsx`, `telemd.c`, `Beacon (chest-worn item-homing wearable)`, `TapeCheckTest`, `telemd (read-only telemetry sender)`?**
-  _High betweenness centrality (0.194) - this node is a cross-community bridge._
+  _Cohesion score 0.07294117647058823 - nodes in this community are weakly interconnected._
+- **Why does `Beacon: Nathan's revision (spec)` connect `Beacon: Nathan's revision (spec)` to `deadline_test.c`, `qnxpi Target (QNX 8.0 Raspberry Pi 5)`, `/boot/onboot Boot Hook`, `Saturday Build Order (spec section 13, steps 1-6)`, `Parsimonious, Query-Driven Instructions`, `App.jsx`, `Beacon Accessibility Research`, `Merge verdict: BLOCK`, `telemd.c`, `telemd (read-only telemetry sender)`, `Beacon (chest-worn item-homing wearable)`, `TapeCheckTest`, `/beacon_world Shared Memory`?**
+  _High betweenness centrality (0.201) - this node is a cross-community bridge._
 - **Are the 3 inferred relationships involving `probe_once()` (e.g. with `.depth_session()` and `.read_frame()`) actually correct?**
   _`probe_once()` has 3 INFERRED edges - model-reasoned connections that need verification._
 - **Should `App.jsx` be split into smaller, more focused modules?**

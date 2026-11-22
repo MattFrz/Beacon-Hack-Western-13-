@@ -7,14 +7,24 @@ BUILD   := build
 CFLAGS  ?= -O2 -g
 CFLAGS  += -std=c11 -Wall -Wextra -I../include -Isrc -D_POSIX_C_SOURCE=200809L
 
+# --audio qnx needs io-audio's headers (sys/asoundlib.h). A Pi image without
+# them still builds; the JBL path (--audio fifo:...) does not need them.
+ASOUND_H := $(wildcard /usr/include/sys/asoundlib.h $(QNX_TARGET)/usr/include/sys/asoundlib.h)
+ifneq (,$(ASOUND_H))
+  QNX_AUDIO := -lasound
+else
+  QNX_AUDIO :=
+  QNX_NOAUDIO := -DBEACON_NO_IOAUDIO
+endif
+
 ifneq (,$(findstring qcc,$(CC)))
-  CFLAGS += -D_QNX_SOURCE
+  CFLAGS += -D_QNX_SOURCE $(QNX_NOAUDIO)
   LDLIBS := -lm
-  GUIDED_LIBS := -lasound
+  GUIDED_LIBS := $(QNX_AUDIO)
 else ifeq ($(shell uname -s),QNX)
-  CFLAGS += -D_QNX_SOURCE
+  CFLAGS += -D_QNX_SOURCE $(QNX_NOAUDIO)
   LDLIBS := -lm
-  GUIDED_LIBS := -lasound
+  GUIDED_LIBS := $(QNX_AUDIO)
 else
   LDLIBS := -lpthread -lm -lrt
 endif
