@@ -151,3 +151,19 @@ test('targetObjectId finds the bound object by id, else by name at the same spot
   assert.equal(targetObjectId(elsewhere), null);
   assert.equal(targetObjectId({ objects: [bottle] }), null);
 });
+
+test('rememberObjects keeps an object after it drops out of view', async () => {
+  const { rememberObjects } = await import('./worldScene.js');
+  const bottle = { id: 7, name: 'bottle', position: [1, 0, -2], label: 'bottle', faded: false };
+  let memory = rememberObjects([], [bottle]);
+  memory = rememberObjects(memory, []); // one frame without it, or LOST
+  assert.equal(memory.length, 1);
+  assert.deepEqual(memory[0].position, [1, 0, -2]);
+  assert.equal(memory[0].faded, true);
+  memory = rememberObjects(memory, [{ ...bottle, position: [1.05, 0, -2] }]); // seen again nearby: same object
+  assert.equal(memory.length, 1);
+  assert.equal(memory[0].live, true);
+  memory = rememberObjects(memory, [{ ...bottle, position: [3, 0, -2] }]); // a second bottle elsewhere
+  assert.equal(memory.length, 2);
+  assert.deepEqual(memory[0].position, [1.05, 0, -2]);
+});

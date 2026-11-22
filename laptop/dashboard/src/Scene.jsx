@@ -9,6 +9,7 @@ import {
   targetObjectId,
   wearerState,
   worldHand,
+  rememberObjects,
   worldObjects,
   worldTarget,
 } from './worldScene.js';
@@ -38,15 +39,21 @@ export default function Scene({ world }) {
   const target = worldTarget(world);
   const crumbs = crumbsToScene(world);
 
-  const seenIds = useRef(new Set());
-  const lastWearerPosition = useRef(null);
-  for (const o of objects) seenIds.current.add(o.id);
-
+  // The map only grows: objects and the camera's last pose survive dropped frames, LOST and pose loss.
+  // Only remounting the Scene (the Reset map button, or switching source) clears it.
+  const memory = useRef({ world: undefined, objects: [], matrix: null, wearer: null, targetName: null });
+  const m = memory.current;
   const pose = displayPose(world);
-  const nextWearer = wearerState(pose, lastWearerPosition.current);
-  if (nextWearer.position) lastWearerPosition.current = nextWearer.position;
-  const wearer = { ...nextWearer, position: lastWearerPosition.current };
-  const poseMatrix = poseSceneMatrix(pose);
+  if (world !== m.world) {
+    m.world = world;
+    m.objects = rememberObjects(m.objects, objects);
+    const nextWearer = wearerState(pose, m.wearer);
+    if (nextWearer.position) m.wearer = nextWearer.position;
+    m.matrix = poseSceneMatrix(pose) ?? m.matrix;
+    if (world?.target?.name) m.targetName = world.target.name;
+  }
+  const wearer = { ...wearerState(pose, m.wearer), position: m.wearer };
+  const poseMatrix = m.matrix;
 
   // telemd can send a bound target without objects[]; draw it on its own unless an object row already shows it.
   const targetId = targetObjectId(world, objects);
@@ -69,19 +76,15 @@ export default function Scene({ world }) {
         </mesh>
       ))}
 
-      {[...seenIds.current].map((id) => {
-        const o = objects.find((x) => x.id === id);
-        return (
-          <Marker
-            key={id}
-            visible={Boolean(o)}
-            position={o?.position}
-            color={id === targetId ? COLORS.target : COLORS.object}
-            faded={o?.faded}
-            label={o?.label}
-          />
-        );
-      })}
+      {m.objects.map((o) => (
+        <Marker
+          key={o.key}
+          position={o.position}
+          color={(o.live ? o.sourceId === targetId : o.name === m.targetName) ? COLORS.target : COLORS.object}
+          faded={o.faded}
+          label={o.label}
+        />
+      ))}
 
       {hand && <Marker position={hand} color={COLORS.hand} size={0.025} label="hand" labelBelow />}
 

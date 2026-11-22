@@ -333,6 +333,19 @@ def build_parser() -> argparse.ArgumentParser:
         "tape-calibrated, so this gates on the model's own metres -- see docs/pi-bringup.md.",
     )
     parser.add_argument(
+        "--vo",
+        action="store_true",
+        help="track the camera with visual odometry so the dashboard's 3D scene follows it; "
+        "needs --fov or --calib. Without it the pose stays identity.",
+    )
+    parser.add_argument(
+        "--h-chest",
+        type=float,
+        default=0.0,
+        help="measured camera height above the floor in metres, for VO's scale watchdog; "
+        "0 (default) leaves the scale uncorrected, so distances travelled are approximate",
+    )
+    parser.add_argument(
         "--publish-every",
         type=int,
         default=1,
@@ -537,6 +550,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     publish_every = max(1, int(getattr(args, "publish_every", 1)))
 
     labels, mean, std, pad_color, resources = probe_frame.prepare(args)
+    live_vo = LiveVo(args.depth_scale, args.h_chest) if args.vo else None
     deadline = time.monotonic() + args.max_seconds if args.max_seconds > 0 else None
 
     seq = 0
@@ -546,6 +560,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     dropped_video = 0
     dropped_far = 0
     hands_seen = 0
+    warned_vo = False
     max_depth = float(getattr(args, "max_depth", 3.0) or 0.0)
     last_mtime = 0
     last_d_m: Optional[float] = None
@@ -589,10 +604,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # labels and ranges on top, the colourised metric depth map with the
                 # same boxes underneath. That is what the monitor should see; the raw
                 # camera JPEG would show pixels with nothing drawn on them.
-                probe = probe_frame.probe_once(
-                    args, labels, mean, std, pad_color, resources,
-                    want_jpeg=False, want_preview=True,
-                )
+                try:
+                    probe = probe_frame.probe_once(
+                        args, labels, mean, std, pad_color, resources,
+                        want_jpeg=False, want_preview=True, want_vo=live_vo is not None,
+                    )
+                except SystemExit as exc:
+                    # On Windows (udp_grab.py) the file can vanish for an instant while
+                    # the next frame is swapped in; skip that read instead of stopping.
+                    if "could not read image" not in str(exc):
+                        raise
+                    continue
                 if probe is None:
                     continue
                 seen += 1

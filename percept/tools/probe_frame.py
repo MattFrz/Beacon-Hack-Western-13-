@@ -1269,6 +1269,7 @@ def probe_once(
     *,
     want_jpeg: bool = False,
     want_preview: bool = False,
+    want_vo: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Capture and process one frame; None when a video file reaches EOF."""
     cycle_started_ns = time.perf_counter_ns()
@@ -1369,6 +1370,15 @@ def probe_once(
         "notes": notes,
         "timings_ms": timings_ms,
     }
+    if want_vo:
+        # Keep the in-memory frame/depth pair available to the live VO consumer;
+        # these arrays are intentionally excluded from the JSON probe output.
+        result["_vo_input"] = {
+            "frame": frame,
+            "depth": depth,
+            "depth_affine": depth_affine,
+            "calibration": calibration,
+        }
 
     if want_jpeg:
         started_ns = time.perf_counter_ns()

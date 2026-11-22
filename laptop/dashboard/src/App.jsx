@@ -137,8 +137,9 @@ function usePanels(narrow) {
 }
 
 export default function App() {
-  const { log, world, frames, connected, stale, bridge, setSource } = useTelemetry();
+  const { log, world, connected, stale, bridge, setSource } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
+  const [mapEpoch, setMapEpoch] = useState(0); // bumped by Reset map: the 3D scene remounts with an empty map
   useEffect(() => setCursor(null), [bridge?.source, bridge?.replay]);
   const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
   const narrow = useMedia(NARROW);
@@ -219,7 +220,7 @@ export default function App() {
         </Sidebar>
 
         <main className="stage" data-stale={!hasData}>
-          <Scene key={bridge?.source === 'replay' ? bridge.replay : 'live'} world={hasData ? shown : null} />
+          <Scene key={`${bridge?.source === 'replay' ? bridge.replay : 'live'}-${mapEpoch}`} world={hasData ? shown : null} />
 
           <div className="stage-top">
             <div className="topbar">
@@ -239,6 +240,9 @@ export default function App() {
               </div>
               <div className="topbar-end">
                 <SourceSwitch bridge={bridge} setSource={setSource} />
+                <Tip label="Forget remembered objects and the camera path">
+                  <Button className="btn" onClick={() => setMapEpoch((n) => n + 1)}>Reset map</Button>
+                </Tip>
                 <Status connected={connected} paused={paused} hasData={hasData} bridge={bridge} piFresh={piFresh} />
                 <Tip label={focused ? 'Bring the panels back' : 'Focus the 3D view'} keys="Ctrl B">
                   <Button className="icon-btn" aria-label={focused ? 'Show the panels' : 'Focus the 3D view'} aria-pressed={focused} onClick={toggleFocus}>
@@ -278,7 +282,7 @@ export default function App() {
             <kbd>]</kbd>
           </header>
           <div className="sb-body">
-            <Camera frames={frames} world={w} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
+            <Camera world={w} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
           </div>
         </Sidebar>
       </div>
@@ -587,12 +591,37 @@ function System({ w, health, log, setCursor }) {
 
 // The 24 fps camera with the newest detection boxes drawn on top (boxes update at the detector's
 // rate, ~1-2 Hz), and the depth map from the slower inference preview below it. A recording without a
-// raw stream falls back to the composite preview, which has its own boxes baked in.
-function Camera({ frames, world, paused, recording }) {
+// raw stream falls back to the composite preview, which has its own boxes baked in. Frames arrive as
+// window events so a 24 fps stream does not re-render the whole dashboard.
+function Camera({ world, paused, recording }) {
+  const [frames, setFrames] = useState({});
+  useEffect(() => {
+    const staleTimers = {};
+    const onFrame = ({ detail: { channel, frame } }) => {
+      setFrames((current) => ({ ...current, [channel]: frame }));
+      clearTimeout(staleTimers[channel]);
+      staleTimers[channel] = setTimeout(() => {
+        setFrames((current) => current[channel]?.at === frame.at ? { ...current, [channel]: null } : current);
+      }, channel === 'raw' ? 2000 : 3500);
+    };
+    const onClear = () => {
+      for (const timer of Object.values(staleTimers)) clearTimeout(timer);
+      setFrames({});
+    };
+    window.addEventListener('beacon:frame', onFrame);
+    window.addEventListener('beacon:frames-clear', onClear);
+    return () => {
+      window.removeEventListener('beacon:frame', onFrame);
+      window.removeEventListener('beacon:frames-clear', onClear);
+      for (const timer of Object.values(staleTimers)) clearTimeout(timer);
+    };
+  }, []);
+  const rawUrl = frames.raw?.url;
+  const compositeUrl = frames.composite?.url;
   if (recording && !recording.video) return <p className="muted camera-note">This hand simulation contains 3D telemetry only.</p>;
   // video is not kept in history, so a paused view never shows a live frame next to a past scene
   if (paused) return <p className="muted camera-note">The camera hides while the view is paused: video is not kept in history.</p>;
-  if (!frames.raw && !frames.composite) {
+  if (!rawUrl && !compositeUrl) {
     return (
       <p className="muted camera-note">
         {recording ? 'Waiting for the recorded frame.' : 'Waiting for camera frames from the Pi.'}
@@ -603,20 +632,20 @@ function Camera({ frames, world, paused, recording }) {
   return (
     <div className="camera-stack">
       <section className="camera-view">
-        <h3>{frames.raw ? 'Camera · up to 24 fps · detections' : 'Object detection'}</h3>
-        {frames.raw ? (
-          <LiveWithBoxes url={frames.raw} world={world} />
-        ) : frames.composite ? (
+        <h3>{rawUrl ? 'Camera · up to 24 fps · detections' : 'Object detection'}</h3>
+        {rawUrl ? (
+          <LiveWithBoxes url={rawUrl} world={world} />
+        ) : compositeUrl ? (
           <div className="camera-crop camera-crop-top">
-            <img className="camera-crop-image" src={frames.composite} alt="Camera feed with detection boxes and labels" />
+            <img className="camera-crop-image" src={compositeUrl} alt="Camera feed with detection boxes and labels" />
           </div>
         ) : waiting}
       </section>
       <section className="camera-view">
         <h3>Depth map</h3>
-        {frames.composite ? (
+        {compositeUrl ? (
           <div className="camera-crop camera-crop-bottom">
-            <img className="camera-crop-image" src={frames.composite} alt="Colorized depth map from the camera" />
+            <img className="camera-crop-image" src={compositeUrl} alt="Colorized depth map from the camera" />
           </div>
         ) : waiting}
       </section>
