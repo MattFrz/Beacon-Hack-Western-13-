@@ -220,7 +220,7 @@ This is the part judges score. Geometry in later sections can drop (RETURN, off-
 
 Bit `0x1` = CPU 0, `0xe` = CPUs 1+2+3. Confirm with `pidin ar` on the loaner; Pi 5 is 4-way SMP.
 
-`camd` stays on core 0 so Sensor Framework callbacks are not scheduled behind ORT. It does **not** convert colour and it does **not** run a net. If core 0 is too busy, drop `camd` to `0x2` (CPU 1) **only after** a Profiler trace shows the 16 ms thread missing because of camera ISR/callback time — never to make room for a model.
+`camd` stays on core 0 so Sensor Framework callbacks are not scheduled behind ORT. It does **not** convert colour and it does **not** run a net. If core 0 is too busy, drop `camd` to `0x2` (CPU 1) **only after** a Profiler trace shows the 16 ms thread missing because of camera ISR/callback time - never to make room for a model.
 
 #### Abilities and uid
 
@@ -420,11 +420,11 @@ Hard gate (build step 3): with cores 1–3 hogged, if synthesizer p95 misses 16 
 
 Three POSIX shm regions. **Each writer has its own seq** (odd while writing, even when stable; readers skip if odd / mismatch). One global seq over a multi-writer blob is not a contract.
 
-### Frame ring (`/beacon_frames`) — writer: `camd`
+### Frame ring (`/beacon_frames`) - writer: `camd`
 
 Three slots. Each: `seq`, `frame_id`, `t_ns`, `width`, `height`, `stride`, `frametype`, `pixels[]`. Prefer NV12 or BGR8888 depending on what Sensor Framework emits. Convert in the consumer’s ROI, not in `camd`, and not of the full frame on core 0.
 
-### Depth slot (`/beacon_depth`) — writer: `percept`
+### Depth slot (`/beacon_depth`) - writer: `percept`
 
 Required. REACH cannot unproject a fingertip without it.
 
@@ -437,7 +437,7 @@ yolo_affine               // letterbox of CAM_W×CAM_H → 320×320
 hand_crop                 // MediaPipe crop origin + scale in full-frame pixels
 ```
 
-### World state (`/beacon_world`) — three seqs, three writers
+### World state (`/beacon_world`) - three seqs, three writers
 
 ```
 seq_percept               // covers the percept-owned fields below
@@ -536,13 +536,13 @@ p_cam_h   = inverse(T_world_from_cam) * [Xw, Yw, Zw, 1]^T
 
 Three ranges. Only the third needs odometry.
 
-### Range 1 — same camera frame (tabletop reach, no VO)
+### Range 1 - same camera frame (tabletop reach, no VO)
 
 YOLOE gives a box. Depth gives metres at those pixels. Unproject object and fingertip through the **same** depth map, the **same** `frame_id`, and the **same** intrinsics.
 
 ```
 if hand.frame_id != target.frame_id:
-    # not the same camera frame — do not subtract
+    # not the same camera frame - do not subtract
     if pose.valid and hand.pose_epoch == target.pose_epoch:
         p_target_cam = T_cam_from_world · target.xyz_world
         d = |hand.xyz_cam − p_target_cam|   # hand must also be this frame
@@ -556,7 +556,7 @@ No world frame required when `frame_id`s match. VO can be garbage. This is why R
 
 Chest rotation between a 3 Hz object update and a later hand update makes camera-frame subtraction wrong. That is why the `frame_id` check exists.
 
-### Range 2 — object still in view (walk while looking, still no VO)
+### Range 2 - object still in view (walk while looking, still no VO)
 
 Target centroid is already `p_cam` from the latest LIVE bundle. Spoken walk cue:
 
@@ -566,7 +566,7 @@ Target centroid is already `p_cam` from the latest LIVE bundle. Spoken walk cue:
 
 “Bottle. About four metres, a little left.” Repeat every ~3 s from a **LIVE** measurement. If the box is gone (HOLD/LOST), do not keep saying four metres.
 
-### Range 3 — object left the view, or RETURN (needs world)
+### Range 3 - object left the view, or RETURN (needs world)
 
 When we last saw the object we stored `p_world` and `pose_epoch`. Current pose is `T_world_from_cam`.
 
@@ -610,7 +610,7 @@ Before Saturday, on a laptop:
 
 1. Choose the nouns for the judging space (up to 64; 6 baked today). Locked demo list (edit only if the venue changes): `bottle`, `can`, `keys`, `phone`, `box`, `mouse`. Runtime names are `models/labels.txt`.
 
-   Some names are **generic scene nouns**, not capabilities. `wall`, `floor`, `stairs`, `elevator`, `sign`, `window`, `door` exist so a wearer can ask for one by name and get a homing target. They are **not** safety features: a box labelled `stairs` is a named flat target, never a step, drop-off, or obstacle warning. That matches the pitch line above — Beacon does not detect stairs, traffic, or obstacles — and no demo script may imply otherwise. Wider vocabularies also trade confidence per class; demo objects (`keys`, `keychain`, `bottle`) are validated by their own run, not by these labels detecting at all.
+   Some names are **generic scene nouns**, not capabilities. `wall`, `floor`, `stairs`, `elevator`, `sign`, `window`, `door` exist so a wearer can ask for one by name and get a homing target. They are **not** safety features: a box labelled `stairs` is a named flat target, never a step, drop-off, or obstacle warning. That matches the pitch line above (Beacon does not detect stairs, traffic, or obstacles), and no demo script may imply otherwise. Wider vocabularies also trade confidence per class; demo objects (`keys`, `keychain`, `bottle`) are validated by their own run, not by these labels detecting at all.
 2. Bake those prompts into YOLOE-26n. Save prompt embeddings. Export **static ONNX** at 320 px, **detect-only** if the exporter allows. The MobileCLIP encoder never ships.
 3. Ship the ONNX file plus a `labels.txt` that is the only runtime vocabulary.
 
@@ -803,7 +803,7 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 
 - Exact C structs and pulse codes. Shm names (`/beacon_frames`, `/beacon_depth`, `/beacon_world`) are suggestions; the writer/seq split is not.
 - Tick waveform (square vs short sine bursts) and piezo vs USB mixing.
-- Camera unit number and frametype after probing the loaner — then freeze `CAM_W×CAM_H`.
+- Camera unit number and frametype after probing the loaner - then freeze `CAM_W×CAM_H`.
 - Whether whisper tiny.en survives the hall; bump to base.en only if FIND misfires.
 - Final noun list after walking the judging space (6 baked today; `models/labels.txt` is authoritative).
 - Tape-measure calibration; enable ground-plane fallback if 1 m table error > 30% (WALK only).
@@ -839,7 +839,7 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 - Accessibility research (this revision): `docs/beacon-accessibility-research.md`
 - Open-vocab model brief: `docs/beacon-open-vocab-pi-models.md`
 - Spec review (BLOCK, 2026-11-21): `docs/beacon-spec-review.md`
-- QNX 8.0 APS: not supported — https://www.qnx.com/developers/docs/8.0/com.qnx.doc.ide.userguide/topic/APS_view.html
+- QNX 8.0 APS: not supported - https://www.qnx.com/developers/docs/8.0/com.qnx.doc.ide.userguide/topic/APS_view.html
 - QNX AI Camera App (Sensor Framework + TFLite): https://gitlab.com/qnx/projects/ai-camera-app
 - QNX hand-track workshop: https://github.com/qnx/QNX-AI-workshop
 - Henomaly process split + ORT on this Pi: https://devpost.com/software/holy-crap

@@ -4,7 +4,7 @@
 
 ## Before opening a PR into `main`: refresh the graph
 
-The `graphify graph updated` CI check fails any PR into `main` that changes code or docs without also changing `graphify-out/graph.json`.
+The `graphify graph updated` CI check fails any PR into `main` that changes code or docs without also changing `graphify-out/graph.json`. When a PR only fixes typos, punctuation or formatting, a person can add the `graph-not-needed` label instead, and the check skips.
 
 1. Merge the latest `main` into your branch, so the graph covers what will land. If `graphify-out/` conflicts, take main's copy (`git checkout origin/main -- graphify-out/`) and refresh in step 2.
 2. Refresh the graph from the repo root:
