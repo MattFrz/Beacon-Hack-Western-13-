@@ -139,6 +139,7 @@ function usePanels(narrow) {
 export default function App() {
   const { log, world, connected, stale, bridge, setSource } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
+  const [mapEpoch, setMapEpoch] = useState(0); // bumped by Reset map: the 3D scene remounts with an empty map
   useEffect(() => setCursor(null), [bridge?.source, bridge?.replay]);
   const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
   const narrow = useMedia(NARROW);
@@ -219,7 +220,7 @@ export default function App() {
         </Sidebar>
 
         <main className="stage" data-stale={!hasData}>
-          <Scene key={bridge?.source === 'replay' ? bridge.replay : 'live'} world={hasData ? shown : null} />
+          <Scene key={`${bridge?.source === 'replay' ? bridge.replay : 'live'}-${mapEpoch}`} world={hasData ? shown : null} />
 
           <div className="stage-top">
             <div className="topbar">
@@ -239,6 +240,9 @@ export default function App() {
               </div>
               <div className="topbar-end">
                 <SourceSwitch bridge={bridge} setSource={setSource} />
+                <Tip label="Forget remembered objects and the camera path">
+                  <Button className="btn" onClick={() => setMapEpoch((n) => n + 1)}>Reset map</Button>
+                </Tip>
                 <Status connected={connected} paused={paused} hasData={hasData} bridge={bridge} piFresh={piFresh} />
                 <Tip label={focused ? 'Bring the panels back' : 'Focus the 3D view'} keys="Ctrl B">
                   <Button className="icon-btn" aria-label={focused ? 'Show the panels' : 'Focus the 3D view'} aria-pressed={focused} onClick={toggleFocus}>
