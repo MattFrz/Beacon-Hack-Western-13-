@@ -6,6 +6,7 @@
 # target     what to find first (default bottle; must be in models/labels_hand.txt)
 # laptop-ip  where the dashboard bridge runs (default: the machine you ssh'd in from)
 # MODEL=hand  use the old 7-word bake (default: the "watch" bake, wristwatch = hand)
+# RECORD=1   save every raw camera frame under ~/recordings/<time>/ (needs a live_probe with --record-video)
 # AUDIO=jbl  speak on the JBL (start projects/qnx-bluetooth/run-radio.sh first,
 #            press a then f); default: no audio, log only
 #
@@ -24,6 +25,8 @@ LAPTOP=${2:-${SSH_CLIENT%% *}}
 [ -n "$LAPTOP" ] || { echo "usage: sh run_live.sh [target] laptop-ip"; exit 2; }
 export REPO="$HERE" PERCEPT="$HERE" BEACON_CMD="$HERE/voiced/build/beacon_cmd"
 [ "$AUDIO" = jbl ] && export GUIDED_AUDIO=fifo:/data/home/qnxuser/projects/qnx-bluetooth/audio.pcm
+# RECORD=1: save the raw camera frames of this run under ~/recordings/<time>/ (for the video)
+[ "$RECORD" = 1 ] && export RECORD_DIR=/data/home/qnxuser/recordings
 # Default bake: the 8 words with "watch" (a wristwatch also marks the hand). On the same
 # 151 recorded reach frames it found the hand in 37 vs 1 for the 7-word bake, same speed.
 # Built by percept/tools/export_yoloe.py --labels models/labels_watch.txt. MODEL=hand = old bake.
