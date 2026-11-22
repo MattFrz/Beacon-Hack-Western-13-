@@ -17,13 +17,16 @@
 # which is the specified behaviour (§9), not a fault.
 #
 # Usage: sh ingest/tools/device_slay_beat.sh [/path/to/clip.avi] [label]
+#   CONF default 0.05 (measured floor for the Nov 22 clips; box 0.14, bottle 0.06).
+#   The label must be in models/labels.txt; the six-noun bake has no "cup".
 set -e
 
 REPO=${REPO:-/data/home/qnxuser/Beacon-Hack-Western-13-}
 PERCEPT=${PERCEPT:-/data/home/qnxuser/beacon-test}
 AIROOT=${AIROOT:-/data/home/qnxuser/airoot}
 CLIP=${1:-/tmp/long.avi}
-TARGET=${2:-cup}
+TARGET=${2:-bottle}
+CONF=${CONF:-0.05}
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -50,7 +53,7 @@ timeout 45 python3 -s percept/tools/device_probe.py --tool probe_to_world.py -- 
     --udp 127.0.0.1:5006 --video "$CLIP" --labels models/labels.txt \
     --yolo models/yoloe26n_320.onnx \
     --depth models/depth_anything_v2_metric_indoor_small.onnx \
-    --depth-scale 1.0 --fov 60 --conf 0.15 --ort-intra 3 > /tmp/beat-probe.log 2>&1 &
+    --depth-scale 1.0 --fov 60 --conf "$CONF" --ort-intra 3 > /tmp/beat-probe.log 2>&1 &
 
 sleep 12
 echo "== A. hand the wire to an intent-bearing ingest (perception is warm) =="
