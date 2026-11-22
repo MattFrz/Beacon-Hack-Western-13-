@@ -5,12 +5,12 @@ import Tip from './Tip.jsx';
 
 // Timeline over the world-state history. cursor is null while following live, else the index being viewed.
 // Dragging to the end, stepping past it, or pressing Go live returns to live.
-export default function Scrubber({ log, cursor, setCursor }) {
+export default function Scrubber({ log, cursor, setCursor, replay }) {
   const { first, items } = log;
   if (items.length < 2) return <div className="scrubber is-empty">History builds here as telemetry arrives</div>;
 
   const newest = first + items.length - 1;
-  const index = cursor == null ? newest : Math.max(cursor, first);
+  const index = cursor == null ? newest : Math.min(newest, Math.max(cursor, first));
   const go = (i) => setCursor(i >= newest ? null : Math.max(i, first));
   const viewed = items[index - first];
   const back = (viewed.at - items.at(-1).at) / 1000;
@@ -38,7 +38,7 @@ export default function Scrubber({ log, cursor, setCursor }) {
       </Slider.Root>
       <span className="scrub-label">
         {cursor == null ? (
-          'Following live'
+          replay ? 'Playing recording' : 'Following live'
         ) : (
           <>
             {back.toFixed(1)} s{piTime && <em>{piTime}</em>}
@@ -46,7 +46,7 @@ export default function Scrubber({ log, cursor, setCursor }) {
         )}
       </span>
       <Button className="btn" data-variant="primary" onClick={() => setCursor(null)} disabled={cursor == null}>
-        Go live
+        {replay ? 'Resume replay' : 'Go live'}
       </Button>
     </div>
   );

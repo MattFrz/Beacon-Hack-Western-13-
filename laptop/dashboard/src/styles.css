@@ -226,6 +226,8 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
   pointer-events: none;
 }
 .stage-top > * { pointer-events: auto; }
+.recording-picker { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: var(--glass); border: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.recording-picker select { font: inherit; color: var(--ink); background: var(--raise); border: 1px solid var(--line); padding: 4px; }
 .topbar {
   align-self: stretch;
   display: flex;

@@ -64,8 +64,14 @@ export function gapMs(a, b) {
 // replayFile. Both fan out on wsPort. UDP is always open, so live sessions are recorded (when recordDir is
 // set) whichever source dashboards are watching. A dashboard switches by sending {"source": "live"} or
 // {"source": "replay"}; nothing else it sends is acted on.
-export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, framesDir, source }) {
-  const replay = replayFile && loadReplay(replayFile);
+export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, framesDir, source, recordings = [] }) {
+  const entries = recordings.map((entry) => ({ ...entry, records: loadReplay(entry.file) }));
+  let replay = entries.find(entry => entry.file === replayFile) ?? entries[0];
+  if (replayFile && !entries.some(entry => entry.file === replayFile)) {
+    const id = path.basename(replayFile).replace(/\.jsonl?$/, '');
+    replay = { id, label: id, framesDir, records: loadReplay(replayFile) };
+    entries.push(replay);
+  }
   let current = source ?? (replay ? 'replay' : 'live');
 
   const wss = new WebSocketServer({
@@ -90,19 +96,20 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
   let i = 0;
   let timer;
   const frameFor = (index) => {
-    if (!framesDir) return null;
+    if (!replay.framesDir) return null;
     try {
-      return fs.readFileSync(path.join(framesDir, `${String(index).padStart(6, '0')}.jpg`));
+      return fs.readFileSync(path.join(replay.framesDir, `${String(index).padStart(6, '0')}.jpg`));
     } catch {
       return null;
     }
   };
   const tick = () => {
-    const next = (i + 1) % replay.length;
+    const records = replay.records;
+    const next = (i + 1) % records.length;
     const frame = frameFor(i);
     if (frame) send(frame);
-    send(JSON.stringify(replay[i]));
-    timer = setTimeout(tick, gapMs(replay[i], replay[next]));
+    send(JSON.stringify(records[i]));
+    timer = setTimeout(tick, gapMs(records[i], records[next]));
     i = next;
   };
 
@@ -116,17 +123,18 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
   const stats = { world: 0, video: 0, dropped: 0 };
   const udp = dgram.createSocket('udp4');
   udp.on('message', (buf, rinfo) => {
+    const jpeg = buf[0] === 0xff && buf[1] === 0xd8;
+    const msg = jpeg ? null : parseWorld(buf);
+    if (!jpeg && (!msg || !Number.isFinite(msg.t_ns))) {
+      stats.dropped++;
+      return;
+    }
     const fresh = !pi || pi.address !== rinfo.address;
     pi = { address: rinfo.address, adapter: fresh ? adapterFor(rinfo.address) : pi.adapter, at: Date.now() };
     if (fresh) sendStatus();
-    if (buf[0] === 0xff && buf[1] === 0xd8) { // JPEG start-of-image marker
+    if (jpeg) {
       stats.video++;
       if (current === 'live') send(buf);
-      return;
-    }
-    const msg = parseWorld(buf);
-    if (!msg) {
-      stats.dropped++;
       return;
     }
     const line = JSON.stringify(msg); // one line even if telemd pretty-prints
@@ -142,7 +150,8 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
     JSON.stringify({
       bridge: {
         source: current,
-        replay: replay ? path.basename(replayFile).replace(/\.jsonl?$/, '') : null,
+        replay: replay?.id ?? null,
+        recordings: entries.map(({ id, label, framesDir }) => ({ id, label, video: Boolean(framesDir) })),
         pi: pi && { address: pi.address, adapter: pi.adapter, age_ms: Date.now() - pi.at },
         listen: { port: udp.address().port, addresses: laptopAddresses() },
       },
@@ -151,18 +160,21 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
     send(status());
   }
 
-  const setSource = (next) => {
-    if (next === current || (next === 'replay' && !replay)) return;
+  const setSource = (next, id) => {
+    const selected = next === 'replay' && id !== undefined ? entries.find(entry => entry.id === id) : replay;
+    if ((next === 'replay' && !selected) || (next === current && selected === replay)) return;
+    replay = selected;
     current = next;
     clearTimeout(timer);
-    if (current === 'replay') tick();
+    i = 0;
     sendStatus();
+    if (current === 'replay') tick();
   };
   wss.on('connection', (ws) => {
     ws.on('error', () => {}); // a bad dashboard frame must not kill the recording
     ws.on('message', (data, isBinary) => {
       const msg = isBinary ? null : parseWorld(data);
-      if (msg?.source === 'live' || msg?.source === 'replay') setSource(msg.source);
+      if (msg?.source === 'live' || msg?.source === 'replay') setSource(msg.source, msg.replay);
     });
     sendTo(ws, status());
   });

@@ -41,11 +41,14 @@ export function useTelemetry() {
         }
         const msg = JSON.parse(data); // the bridge only sends JSON objects
         if (msg.bridge) {
-          if (source !== undefined && msg.bridge.source !== source) {
+          const feed = msg.bridge.source === 'replay' ? `replay/${msg.bridge.replay}` : 'live';
+          if (source !== undefined && feed !== source) {
             setLog(EMPTY);
+            if (frameUrl) URL.revokeObjectURL(frameUrl);
+            frameUrl = null;
             setFrame(null);
           }
-          source = msg.bridge.source;
+          source = feed;
           setBridge(msg.bridge);
           return;
         }
@@ -67,8 +70,8 @@ export function useTelemetry() {
   }, []);
 
   // Ask the bridge to play 'live' (the Pi) or 'replay' (its recording); it answers with a status message.
-  const setSource = useCallback((next) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ source: next }));
+  const setSource = useCallback((next, replay) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ source: next, replay }));
   }, []);
 
   const last = log.items.at(-1);

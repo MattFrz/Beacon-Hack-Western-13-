@@ -139,7 +139,7 @@ function usePanels(narrow) {
 export default function App() {
   const { log, world, frameUrl, connected, stale, bridge, setSource } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
-  useEffect(() => setCursor(null), [bridge?.source]); // a new source starts a new history
+  useEffect(() => setCursor(null), [bridge?.source, bridge?.replay]);
   const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
   const narrow = useMedia(NARROW);
   const systemReduce = useMedia(REDUCE);
@@ -219,7 +219,7 @@ export default function App() {
         </Sidebar>
 
         <main className="stage" data-stale={!hasData}>
-          <Scene world={shown} />
+          <Scene key={bridge?.source === 'replay' ? bridge.replay : 'live'} world={hasData ? shown : null} />
 
           <div className="stage-top">
             <div className="topbar">
@@ -227,15 +227,7 @@ export default function App() {
                 <span className="mark" aria-hidden="true" />
                 Beacon
               </div>
-              <Highlight mode="parent" controlledItems value={mode} click={false} className="mode-hl" containerClassName="modes">
-                {MODES.map((m) => (
-                  <HighlightItem key={m} value={m} activeClassName={`hl-${m}`}>
-                    <div className={m === mode ? 'mode on' : 'mode'} aria-current={m === mode ? 'true' : undefined}>
-                      {m}
-                    </div>
-                  </HighlightItem>
-                ))}
-              </Highlight>
+              <div className="readout"><span>Tracking</span><b>{mode ?? '–'}</b></div>
               <div className="readout">
                 <span>Law</span>
                 <b><Rolling text={w.law} /></b>
@@ -255,6 +247,13 @@ export default function App() {
                 </Tip>
               </div>
             </div>
+            {bridge?.source === 'replay' && bridge.recordings?.length > 0 && (
+              <label className="recording-picker">Recording
+                <select value={bridge.replay} onChange={e => setSource('replay', e.target.value)}>
+                  {bridge.recordings.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+                </select>
+              </label>
+            )}
           </div>
 
           {!connected && log.items.length === 0 && <Waiting />}
@@ -262,7 +261,7 @@ export default function App() {
 
           <div className="stage-foot">
             <Caption law={w.law} cue={w.cue} targetName={w.target?.name} />
-            <Scrubber log={log} cursor={cursor} setCursor={setCursor} />
+            <Scrubber log={log} cursor={cursor} setCursor={setCursor} replay={bridge?.source === 'replay'} />
           </div>
         </main>
 
@@ -279,7 +278,7 @@ export default function App() {
             <kbd>]</kbd>
           </header>
           <div className="sb-body">
-            <Camera url={frameUrl} paused={paused} />
+            <Camera url={frameUrl} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
           </div>
         </Sidebar>
       </div>
@@ -588,17 +587,18 @@ function System({ w, health, log, setCursor }) {
 
 // Right panel: the latest camera frame at the panel's full width. A replay with probe frames shows the
 // image with its detection boxes and the depth map below it.
-function Camera({ url, paused }) {
+function Camera({ url, paused, recording }) {
+  if (recording && !recording.video) return <p className="muted camera-note">This hand simulation contains 3D telemetry only.</p>;
   // video is not kept in history, so a paused view never shows a live frame next to a past scene
   if (paused) return <p className="muted camera-note">The camera hides while the view is paused: video is not kept in history.</p>;
   if (!url) {
     return (
       <p className="muted camera-note">
-        No camera frames yet. <code>telemd-preview</code> on the Pi sends them, and the Replay recording has them.
+        {recording ? 'Waiting for the recorded frame.' : 'Waiting for camera frames from the Pi.'}
       </p>
     );
   }
-  return <img className="camera" src={url} alt="Latest camera frame from the Pi" />;
+  return <img className="camera" src={url} alt={recording ? 'Recorded camera frame' : 'Live camera frame from the Pi'} />;
 }
 
 // The animations switch: follows the OS reduced-motion setting unless the viewer overrides it here.
