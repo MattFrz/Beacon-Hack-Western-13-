@@ -1,8 +1,15 @@
 """Tests for the hand handling in live_probe (lift_hand, place_hand)."""
 import math
+import sys
+import types
 import unittest
+from unittest.mock import patch
 
-from percept.tools import live_probe as lp
+# live_probe installs the ctypes ONNX Runtime shim at import, which needs the QNX
+# library. CI has no onnxruntime at all: a stand-in module during the import makes
+# the shim step aside, as probe_frame_test does. Nothing here runs a model.
+with patch.dict(sys.modules, {"onnxruntime": types.ModuleType("onnxruntime")}):
+    from percept.tools import live_probe as lp
 
 W, H = 1280, 720
 BOTTLE = {"name": "bottle", "in_latest_boxes": True, "bbox_px": [600, 200, 700, 500],
