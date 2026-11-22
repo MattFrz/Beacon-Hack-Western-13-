@@ -127,21 +127,6 @@ def to_clip(raw: str, out_wav: str) -> None:
          "-ar", "16000", "-ac", "1", "-sample_fmt", "s16", out_wav],
         check=True,
     )
-    normalize(out_wav)
-
-
-PEAK = 0.9  # clips are normalised to this peak: the Bluetooth speaker is quiet otherwise
-
-
-def normalize(path: str) -> None:
-    """Scale one clip so its loudest sample is PEAK of full scale (TTS output peaks ~0.3)."""
-    data, rate = sf.read(path, dtype="int16")
-    peak = int(np.abs(data.astype(np.int32)).max()) if len(data) else 0
-    if peak == 0:
-        return
-    gain = PEAK * 32767 / peak
-    out = np.clip(np.round(data.astype(np.float64) * gain), -32768, 32767).astype(np.int16)
-    sf.write(path, out, rate, subtype="PCM_16")
 
 
 def wanted_clips(args):
@@ -249,16 +234,8 @@ def main() -> None:
     ap.add_argument("--only", default="", help="comma-separated clip names or prefix* (inflect)")
     ap.add_argument("--missing", action="store_true", help="skip clips that already exist (inflect)")
     ap.add_argument("--jobs", type=int, default=6, help="clips rendered in parallel (inflect)")
-    ap.add_argument("--normalize", action="store_true",
-                    help="only re-level the existing clips to the same peak, then exit")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
-    if args.normalize:
-        names = [f for f in sorted(os.listdir(args.out)) if f.endswith(".wav")]
-        for f in names:
-            normalize(os.path.join(args.out, f))
-        print(f"Normalised {len(names)} clips to peak {PEAK}")
-        return
 
     if args.engine == "llamacpp":
         args.voice = args.voice or ("af_heart" if "kokoro" in args.gguf.lower() else None)
