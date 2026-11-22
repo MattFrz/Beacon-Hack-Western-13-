@@ -199,6 +199,8 @@ def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str,
     }
     if "conf" in best:
         hand["conf"] = best["conf"]
+    if best.get("bbox_px") is not None:
+        hand["bbox_px"] = best["bbox_px"]  # so the dashboard can draw the hand on the live video
     if isinstance(best.get("xyz_cam"), (list, tuple)):
         hand["xyz_cam"] = list(best["xyz_cam"])
     if isinstance(best.get("xyz_world"), (list, tuple)):
@@ -295,6 +297,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     last_objects=last_objects,
                     last_target=last_target,
                 )
+                # bbox_px is in full-frame pixels; the dashboard scales the boxes onto
+                # the 24 fps camera feed (which may be downscaled) with this size.
+                if probe.get("W") and probe.get("H"):
+                    world["frame_wh"] = [int(probe["W"]), int(probe["H"])]
 
                 # A YOLO `hand` is not a findable object; it belongs in hand{},
                 # where the law and the dashboard already look for it. Lift before

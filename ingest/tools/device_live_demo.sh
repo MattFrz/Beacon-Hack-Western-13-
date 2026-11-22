@@ -30,6 +30,13 @@ DASHBOARD_HOST=${2:-10.80.55.92}
 DURATION=${3:-120}
 FRAME=${FRAME:-/tmp/live/latest.jpg}
 GRAB_FPS=${GRAB_FPS:-30}
+# The hand is a YOLO class in the 7-class bake (MediaPipe cannot run on QNX); the
+# plain model has no `hand`, so the hand never shows and REACH never starts.
+YOLO=${YOLO:-models/yoloe26n_320_hand.onnx}
+LABELS=${LABELS:-models/labels_hand.txt}
+# Speech: GUIDED_AUDIO=fifo:/data/home/qnxuser/projects/qnx-bluetooth/audio.pcm plays on
+# the JBL (start run-radio.sh first). Default: no audio device, log only.
+GUIDED_AUDIO=${GUIDED_AUDIO:-none}
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -42,7 +49,7 @@ slay_matching() {
 }
 
 echo "== stop leftovers =="
-slay_matching "ingest/build/ingest|guided/build/guided|live_probe|beacon_grab|telemd/build/telemd"
+slay_matching "ingest/build/ingest|[.]/ingest --|world_in|beacon_cmd --udp|guided/build/guided|live_probe|beacon_grab|telemd/build/telemd"
 sleep 1
 rm -f /dev/shmem/beacon_world
 mkdir -p /tmp/live
@@ -57,7 +64,7 @@ sleep 5
 
 echo "== guided (owns the world) =="
 cd "$REPO"
-./guided/build/guided --create --metres --duration "$DURATION" > /tmp/guided.log 2>&1 &
+./guided/build/guided --create --metres --duration "$DURATION" --audio "$GUIDED_AUDIO" > /tmp/guided.log 2>&1 &
 sleep 1
 
 echo "== ingest (relay, no intent yet) =="
@@ -83,8 +90,8 @@ timeout $((DURATION - 4)) python3 -s percept/tools/live_probe.py \
     --grab-file "$FRAME" \
     --udp 127.0.0.1:5006 \
     --video-udp "$DASHBOARD_HOST:5007" \
-    --labels models/labels.txt \
-    --yolo models/yoloe26n_320.onnx \
+    --labels "$LABELS" \
+    --yolo "$YOLO" \
     --depth models/depth_anything_v2_metric_indoor_small.onnx \
     --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf 0.10 --ort-intra 3 \
     > /tmp/live_probe.log 2>&1 &
@@ -117,7 +124,11 @@ fi
 
 slay_matching "ingest/build/ingest"
 sleep 1
-./ingest/build/ingest --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+"$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+# Push-to-talk from the dashboard (laptop speech-to-text -> UDP 5007 -> intent), if built.
+if [ -x "$REPO/voiced/build/beacon_cmd" ]; then
+    "$REPO/voiced/build/beacon_cmd" --udp 5007 > /tmp/beacon_cmd.log 2>&1 &
+fi
 sleep 12
 
 echo "== what guided heard =="

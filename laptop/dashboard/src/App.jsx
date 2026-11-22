@@ -278,7 +278,7 @@ export default function App() {
             <kbd>]</kbd>
           </header>
           <div className="sb-body">
-            <Camera frames={frames} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
+            <Camera frames={frames} world={w} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
           </div>
         </Sidebar>
       </div>
@@ -585,8 +585,10 @@ function System({ w, health, log, setCursor }) {
   );
 }
 
-// Show full-rate camera capture separately from the slower object and depth inference preview.
-function Camera({ frames, paused, recording }) {
+// The 24 fps camera with the newest detection boxes drawn on top (boxes update at the detector's
+// rate, ~1-2 Hz), and the depth map from the slower inference preview below it. A recording without a
+// raw stream falls back to the composite preview, which has its own boxes baked in.
+function Camera({ frames, world, paused, recording }) {
   if (recording && !recording.video) return <p className="muted camera-note">This hand simulation contains 3D telemetry only.</p>;
   // video is not kept in history, so a paused view never shows a live frame next to a past scene
   if (paused) return <p className="muted camera-note">The camera hides while the view is paused: video is not kept in history.</p>;
@@ -597,25 +599,64 @@ function Camera({ frames, paused, recording }) {
       </p>
     );
   }
-  const views = [
-    { title: 'Camera · up to 24 fps', url: frames.raw, alt: 'Live camera feed' },
-    { title: 'Object detection', url: frames.composite, crop: 'top', alt: 'Camera feed with detection boxes and labels' },
-    { title: 'Depth map', url: frames.composite, crop: 'bottom', alt: 'Colorized depth map from the camera' },
-  ];
+  const waiting = <p className="muted camera-wait">{recording ? 'Not included in this recording.' : 'Waiting for this feed.'}</p>;
   return (
     <div className="camera-stack">
-      {views.map(({ title, url, crop, alt }) => (
-        <section className="camera-view" key={title}>
-          <h3>{title}</h3>
-          {url ? (
-            crop ? (
-              <div className={`camera-crop camera-crop-${crop}`}>
-                <img className="camera-crop-image" src={url} alt={alt} />
-              </div>
-            ) : <img className="camera" src={url} alt={alt} />
-          ) : <p className="muted camera-wait">{recording ? 'Not included in this recording.' : 'Waiting for this feed.'}</p>}
-        </section>
-      ))}
+      <section className="camera-view">
+        <h3>{frames.raw ? 'Camera · up to 24 fps · detections' : 'Object detection'}</h3>
+        {frames.raw ? (
+          <LiveWithBoxes url={frames.raw} world={world} />
+        ) : frames.composite ? (
+          <div className="camera-crop camera-crop-top">
+            <img className="camera-crop-image" src={frames.composite} alt="Camera feed with detection boxes and labels" />
+          </div>
+        ) : waiting}
+      </section>
+      <section className="camera-view">
+        <h3>Depth map</h3>
+        {frames.composite ? (
+          <div className="camera-crop camera-crop-bottom">
+            <img className="camera-crop-image" src={frames.composite} alt="Colorized depth map from the camera" />
+          </div>
+        ) : waiting}
+      </section>
+    </div>
+  );
+}
+
+// Boxes are in full-frame pixels (world.frame_wh); the live JPEG may be downscaled, so the SVG uses the
+// full frame as its coordinate system and stretches over the image. Without frame_wh, the image's own
+// size is used (correct whenever the stream is not downscaled).
+function LiveWithBoxes({ url, world }) {
+  const [natural, setNatural] = useState(null);
+  const [fw, fh] = world?.frame_wh ?? natural ?? [0, 0];
+  const objects = (world?.objects ?? []).filter((o) => o?.bbox_px && o.in_latest_boxes !== false);
+  const hand = world?.hand?.bbox_px ? world.hand : null;
+  const target = world?.target?.name;
+  const range = (o) => (o.xyz_cam ? Math.hypot(...o.xyz_cam) : null);
+  const box = (key, [x0, y0, x1, y1], label, cls) => (
+    <g key={key} className={cls}>
+      <rect x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />
+      <text x={x0 + 4} y={Math.max(14, y0 - 6)}>{label}</text>
+    </g>
+  );
+  return (
+    <div className="camera-live">
+      <img
+        className="camera"
+        src={url}
+        alt="Live camera feed with detection boxes"
+        onLoad={(e) => !world?.frame_wh && setNatural([e.currentTarget.naturalWidth, e.currentTarget.naturalHeight])}
+      />
+      {fw > 0 && fh > 0 && (
+        <svg className="camera-boxes" viewBox={`0 0 ${fw} ${fh}`} preserveAspectRatio="none" aria-hidden="true">
+          {objects.map((o, i) => {
+            const r = range(o);
+            return box(`o${i}`, o.bbox_px, `${o.name}${r ? ` ${r.toFixed(2)} m` : ''}`, o.name === target ? 'box box-target' : 'box');
+          })}
+          {hand && box('hand', hand.bbox_px, 'hand', 'box box-hand')}
+        </svg>
+      )}
     </div>
   );
 }
