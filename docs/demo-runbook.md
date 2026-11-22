@@ -9,37 +9,70 @@ Two passes, floor first:
 
 Source of truth for claims: `docs/qnx-prize-track.md`. If this runbook disagrees with the bring-up log (`docs/pi-bringup.md`) on what has been measured, the log wins.
 
-## ADDITION (Nov 22, ~5 am): the live pass as it runs now
+## ADDITION (Nov 22, ~5:30 am): run the live demo, and fix it when it breaks
 
-Verified on the Pi tonight, end to end, on the JBL: the C270 sees the bottle, guided speaks the WALK cue, the wearer's hand is detected, REACH ticks speed up, a steady tone, then "Found it." (3 times in one 3-minute run, 0 missed deadlines, Pi stayed up).
+Verified on the Pi tonight, on the JBL: the camera sees the bottle, guided speaks, the hand is found (with a watch on), ticks speed up, steady tone, "Found it." 0 missed deadlines in every run. Not yet verified: a chest-mounted walk (see step 6).
 
-**Before you start**
+### 1. Hardware
 
-- Power: the Pi alone on the power bank's strongest USB-C port. The JBL runs on its own battery. With the JBL also on the bank, the Pi reset twice as soon as the pipeline started.
-- JBL: switch it on near the Pi. The Pi's Bluetooth service (`bt_audio_service.sh`, started at boot) connects to it on its own. Check: `tail -3 ~/projects/qnx-bluetooth/bt_audio.log` shows `Stream started`.
-- Laptop: on the hotspot; `laptop/bridge` → `npm start`, `laptop/dashboard` → `npm run dev`, open localhost:5173.
-- Scene: one bottle in view (four bottles in view made the target hop between them). Wear the watch on the reaching hand.
+- **Pi power:** the Pi *alone* on the power bank's strongest USB-C (PD) port. With the JBL also on the bank, the Pi rebooted as soon as the demo started.
+- **JBL:** on its own battery, switched on, near the Pi, not connected to any phone or laptop.
+- **Camera:** the C270 on a USB port. For the chest: lens level, about chest height, looking slightly down.
+- **Network:** laptop and phone on the `cybernet` hotspot. The Pi is `10.80.55.25`. Check from the laptop (PowerShell): `Test-Connection 10.80.55.25 -Count 2 -Quiet` → `True`. Ping can be flaky on the hotspot; if ssh works, it's up.
 
-**Run (one command, on the Pi)**
+### 2. Laptop (two terminals, repo root)
 
 ```
+cd laptop\bridge;    npm start      # prints "bridge: live"
+cd laptop\dashboard; npm run dev    # open http://localhost:5173
+```
+
+### 3. Start the demo on the Pi
+
+```
+ssh -i $env:USERPROFILE\.ssh\beacon_pi -c aes128-ctr -m hmac-sha2-256 qnxuser@10.80.55.25
 cd ~/beacon && AUDIO=jbl sh run_live.sh bottle
 ```
 
-- The dashboard address defaults to the machine you ssh'd from; pass it as the second argument otherwise.
-- Phone as the mic: open `http://10.80.55.25:8080` on a phone on the hotspot, dictate "find my bottle", Send.
-- Stop: `sh run_live.sh stop`.
-- Default detector is the 8-word bake with `watch` (`models/yoloe26n_320_watch.onnx`, labels `models/labels_watch.txt`): a wristwatch also marks the hand. On the same 151 recorded reach frames it found the hand in 37 frames vs 1 for the 7-word bake, at the same speed. `MODEL=hand` selects the old bake.
+About 40 s later it prints `bottle visible after Ns` (or `bottle never seen`: it still binds the moment a bottle appears) and the phone page address. First line should end in `model .../yoloe26n_320_watch.onnx`.
 
-**What to say about it (all measured tonight)**
+### 4. Use it
 
-- Detection runs about once a second on the Pi; guided runs at 60 Hz and never waits on it (0 missed deadlines in every run).
-- The hand is a YOLO class (MediaPipe cannot run on QNX). Its distance is taken from the object it touches, measured to the object's outline, because the depth model cannot measure a hand.
-- Say "bottle", not "can": the model labels the Celsius can as "bottle" and the red cup as "can".
+- **Phone as the mic:** `http://10.80.55.25:8080` on a phone on the hotspot. Dictate "find bottle", Send. Buttons: Repeat, Stop.
+- **Dashboard:** camera with boxes (24 fps), depth map under it (~1/s), 3D view with the wearer, the path walked (blue line) and "m walked".
+- **Say "bottle", not "can":** the model calls the Celsius can "bottle" and the red cup "can".
+- Keep **one bottle** in view: with four, the target hops between them.
 
-**Backup video** (if the live pass fails while recording): `beacon-demo-narrated.mp4`, the walk-around clip fed through the Pi pipeline in real time; the voice and captions are what guided said.
+### 5. Stop
 
-The "Reach ticks ... stay in the script only if MediaPipe hands come up" paragraph below is superseded by this section: reach works with the YOLO hand/watch class.
+`sh run_live.sh stop` on the Pi. Ctrl+C will not stop it: everything runs in the background.
+
+### 6. Chest walk test
+
+Start 1–2.5 m from the bottle (objects past 3 m are ignored), facing away. Phone: "find bottle". Expected: "I lost the target" / "Turn left" from the session map with soft pips, a chime when facing it, "bottle: slightly to your right, about two steps ahead", short updates while walking, ticks and "Found it" at the bottle. Turn slowly: detection runs about once a second and fast turns blur the frame. To check the 3D path: walk a known distance (count floor tiles) and compare the "m walked" label; the scale comes from an assumed 1.4 m chest height.
+
+### If something is off
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| Pi doesn't answer | power LED; hotspot | Re-seat power, wait ~90 s. Pi alone on the bank. |
+| Pi reboots when the demo starts | something else on the bank | Unplug everything but the Pi from the bank. |
+| `bottle never seen` | bottle in view, 1–2.5 m | Bring it into view; the FIND waits for it. Or re-send from the phone page. |
+| No voice; `/tmp/guided.log` says "waiting for the Bluetooth PCM reader" | `tail -3 ~/projects/qnx-bluetooth/bt_audio.log` | JBL off or paired to something else: power-cycle it. If the log says "No Bluetooth speakers found", disconnect it from phones/laptops. Last resort: `sudo -n slay a2dp_source_demo` (the service restarts it, ~10 s). |
+| Voice stutters | `sudo -n pidin -p a2dp_source_demo` shows `10r` | `sudo -n slay -P 30r a2dp_source_demo` (run_live.sh does this at start; a Bluetooth reconnect resets it). |
+| Voice harsh/distorted | JBL volume | One or two steps down on the JBL itself. |
+| Demo won't start; `/tmp/live_probe.log` says "unrecognized arguments" | someone replaced files in `~/beacon` | From the laptop repo root: `scp -i $env:USERPROFILE\.ssh\beacon_pi -c aes128-ctr -o MACs=hmac-sha2-256 percept\tools\live_probe.py qnxuser@10.80.55.25:/data/home/qnxuser/beacon/percept/tools/` |
+| No camera frames; `/tmp/sensor.log` has `sensor_open ... err 5` | — | Reboot the Pi: `sudo -n shutdown -S reboot`, wait ~90 s. |
+| Dashboard says "Waiting for the Pi" | laptop IP | run_live.sh sends to the machine you ssh'd from; if you started it elsewhere, pass the laptop IP: `sh run_live.sh bottle 10.80.55.16`. Allow Node through the Windows firewall. |
+| Hand not found | watch on the reaching hand, hand in frame | Wear the watch; first line of the run must name the watch model. |
+| "I lost the target" over and over | target leaving view | Turn slower; one bottle in view. |
+| 3D path jumps or restarts | motion tracking lost (fast turns, blank walls) | Turn slower; Reset map. |
+
+Logs on the Pi: `/tmp/run_live.log`, `/tmp/guided.log`, `/tmp/live_probe.log`, `/tmp/grab.log`, `/tmp/telemd.log`, `/tmp/beacon_cmd.log`, `~/projects/qnx-bluetooth/bt_audio.log`.
+
+**Backup video** if the live pass fails while recording: `beacon-demo-narrated.mp4` (the walk-around clip fed through the Pi pipeline in real time; voice and captions are what guided said).
+
+The "Reach ticks ... stay in the script only if MediaPipe hands come up" paragraph below is superseded: reach works with the YOLO hand/watch class.
 
 ## The 30 seconds
 
