@@ -40,14 +40,14 @@ QNX `camd` and `percept-head` remain the later shm path. Do not freeze `CAM_W`, 
 - If `pose.valid` is false: freeze the last wearer dot. Do not slide or invent motion.
 - Identity pose before VO is honest only as a static cloud: wearer stays at origin.
 
-## Step 1 — sync remote
+## Step 1: sync remote
 
 - `git fetch --all --prune`
 - Confirm `origin/main` is an ancestor of `HEAD`
 - Push `nathan/percept-core`
 - Do not PR the Bluetooth audio commit into `main` as part of this work
 
-## Step 2 — dashboard world-dot view
+## Step 2: dashboard world-dot view
 
 Use the existing fake replay only to verify rendering.
 
@@ -75,7 +75,7 @@ cd laptop/dashboard && npm install && npm run dev
 
 Expect: keys and bottle appear as dots, wearer dot near origin, crumbs visible. This remains scripted data, not spatial truth.
 
-## Step 3 — probe to world JSONL
+## Step 3: probe to world JSONL
 
 Add `percept/tools/probe_to_world.py` as a thin wrapper around `probe_frame.py`. Do not fork a second detector.
 
@@ -92,7 +92,7 @@ Feed it with `node main.js /tmp/beacon-live.jsonl`.
 
 Without `models/calib.json`, `probe_frame.py` omits `xyz_cam`; no real dots until step 4.
 
-## Step 4 — calibration and tape check
+## Step 4: calibration and tape check
 
 - Capture chessboard at the exact laptop/C270 resolution used by the probe.
 - Write `models/calib.json` with `{fx, fy, cx, cy, width, height}` for the laptop path only.
@@ -100,7 +100,7 @@ Without `models/calib.json`, `probe_frame.py` omits `xyz_cam`; no real dots unti
 - If error at 1 m is greater than 30%, do not speak metres and do not treat VO as metric.
 - Never copy laptop/C270 calibration into `include/beacon.h`.
 
-## Step 5 — Range 1 tabletop proof
+## Step 5: Range 1 tabletop proof
 
 No odometry yet.
 
@@ -111,7 +111,7 @@ No odometry yet.
 
 If this is wrong, VO will scatter the map. Do not start step 6.
 
-## Step 6 — RGB-D odometry
+## Step 6: RGB-D odometry
 
 Laptop-only first, per spec §8:
 

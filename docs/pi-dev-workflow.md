@@ -73,7 +73,7 @@ Until you do, anyone on the hotspot can log in as `qnxuser` (and `sudo` to root)
 | `/data` | QNX6 partition, 19 GB, ~17 GB free | **yes** | **no** |
 | `/boot` | FAT boot partition, visible on a PC | yes | no |
 | `/usr` (`/system`) | QNX6 system partition; `/etc` → `/system/etc` | yes | no |
-| `/dev/shmem` | RAM, lost on reboot | no | - |
+| `/dev/shmem` | RAM, lost on reboot | no | n/a |
 
 **Put your code in `/data`.** It is the only large writable space and it is where
 `/home` lives (`/home` → `/data/home`, so `/home/qnxuser` = `/data/home/qnxuser`).
