@@ -77,6 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop after this long; 0 runs until SIGINT (default 0)",
     )
     parser.add_argument(
+        "--max-depth",
+        type=float,
+        default=3.0,
+        help="only report objects whose measured forward distance is within this many "
+        "metres (default 3.0); 0 disables the gate. The metric depth model is not yet "
+        "tape-calibrated, so this gates on the model's own metres -- see docs/pi-bringup.md.",
+    )
+    parser.add_argument(
         "--publish-every",
         type=int,
         default=1,
@@ -107,6 +115,59 @@ def _open_sock(
     return sock, (host, port)
 
 
+def gate_by_depth(
+    world: Dict[str, Any], max_depth: float
+) -> tuple[Dict[str, Any], int]:
+    """Drop objects the depth model places beyond `max_depth` metres ahead.
+
+    A monitor-grade model is confidently wrong at range: a bottle on the desk and
+    the far wall of the hall come back with the same order of magnitude. Rather
+    than speak a number we do not believe, an object that measures farther than
+    the gate is not reported at all -- and if nothing survives, the record says
+    LOST instead of claiming a target it cannot locate.
+
+    Returns (world, dropped_count); the input dict is not modified.
+    """
+    if max_depth <= 0:
+        return world, 0
+
+    def forward_m(obj: Dict[str, Any]) -> Optional[float]:
+        for key in ("xyz_cam", "xyz_world"):
+            vec = obj.get(key)
+            if isinstance(vec, (list, tuple)) and len(vec) == 3:
+                try:
+                    return float(vec[2])
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    kept: List[Dict[str, Any]] = []
+    dropped = 0
+    for obj in world.get("objects") or []:
+        z = forward_m(obj)
+        if z is None or z <= max_depth:
+            kept.append(obj)
+        else:
+            dropped += 1
+    if not dropped:
+        return world, 0
+
+    gated = dict(world)
+    gated["objects"] = kept
+    target = gated.get("target")
+    if target is not None:
+        names = {obj.get("name") for obj in kept}
+        if target.get("name") not in names:
+            gated["target"] = None
+            gated.pop("d_m", None)
+    if not kept:
+        # Nothing we are willing to stand behind is in range.
+        gated["mode"] = "LOST"
+        gated["target"] = None
+        gated.pop("d_m", None)
+    return gated, dropped
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -119,6 +180,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # behaviour we want: same path, newest bytes, fresh frame_id each cycle.
     args.image = grab_file
     args.once = False
+    # Composite previews are stacked (boxes + depth), so keep them small enough
+    # to stay in one UDP datagram under the bridge's 60 KB limit.
+    args.preview_width = min(int(getattr(args, "preview_width", 320) or 320), 480)
+    args.preview_quality = int(getattr(args, "preview_quality", 60) or 60)
 
     world_sock, world_addr = _open_sock(args.udp, None)
     video_sock, video_addr = _open_sock(getattr(args, "video_udp", None), "127.0.0.1:5005")
@@ -132,6 +197,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sent = 0
     world_errors = 0
     dropped_video = 0
+    dropped_far = 0
+    max_depth = float(getattr(args, "max_depth", 3.0) or 0.0)
     last_mtime = 0
     last_d_m: Optional[float] = None
     last_seen_ns: Optional[int] = None
@@ -158,8 +225,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     continue
                 last_mtime = mtime
 
+                # want_preview renders the stacked composite: RGB with YOLO boxes,
+                # labels and ranges on top, the colourised metric depth map with the
+                # same boxes underneath. That is what the monitor should see; the raw
+                # camera JPEG would show pixels with nothing drawn on them.
                 probe = probe_frame.probe_once(
-                    args, labels, mean, std, pad_color, resources, want_jpeg=True
+                    args, labels, mean, std, pad_color, resources,
+                    want_jpeg=False, want_preview=True,
                 )
                 if probe is None:
                     continue
@@ -174,6 +246,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     last_objects=last_objects,
                     last_target=last_target,
                 )
+
+                # Only stand behind what is measurably close. Objects the depth
+                # model places beyond --max-depth are dropped here, before the
+                # state machine, so the wire never carries a far-away "target".
+                world, gated_away = gate_by_depth(world, max_depth)
+                if gated_away:
+                    dropped_far += gated_away
                 # Mirror emit_lines' state machine so LIVE/HOLD/LOST agree.
                 if world["mode"] == "LIVE":
                     last_seen_ns = int(world["t_ns"])
@@ -204,7 +283,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                             sent += 1
                     print(ptw.format_readout(world), file=sys.stderr, flush=True)
 
-                jpeg = probe.get("jpeg")
+                jpeg = probe.get("preview") or probe.get("jpeg")
                 if video_sock is not None and video_addr is not None and jpeg is not None:
                     if len(jpeg) > ptw.MAX_VIDEO_BYTES:
                         dropped_video += 1
@@ -232,7 +311,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 sock.close()
         print(
             f"live_probe: {seen} frame(s) processed, {sent} record(s) sent, "
-            f"{dropped_video} preview(s) oversized",
+            f"{dropped_video} preview(s) oversized, {dropped_far} object(s) beyond "
+            f"{max_depth:g} m",
             file=sys.stderr,
             flush=True,
         )

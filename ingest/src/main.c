@@ -451,10 +451,36 @@ int main(int argc, char **argv)
         }
 
         if (pending_intent) {
-            write_intent(w, &intent, now);
-            pending_intent = 0;
-            fprintf(stderr, "ingest: intent %u with %u candidate(s) written\n",
-                    intent.kind, intent.n_candidates);
+            /* Wait for a record that carries the object the intent names. A FIND
+             * bound off an empty objects[] -- or off an unrelated detection --
+             * gives guided nothing to bind and earns one NACK ("I have not seen
+             * that"), which is never retried (§9). Perception flickers between
+             * LIVE and LOST and low-confidence junk is normal, so the honest
+             * trigger is "a record that contains one of the candidates".
+             * With no candidates listed, any object is enough. */
+            int nobj = 0, nmatch = 0;
+            for (int i = 0; i < BEACON_MAX_OBJECTS; ++i) {
+                if (!cur.objects[i].used)
+                    continue;
+                ++nobj;
+                if (intent.n_candidates == 0) {
+                    ++nmatch;
+                    continue;
+                }
+                for (uint32_t c = 0; c < intent.n_candidates; ++c)
+                    if (!strcmp(cur.objects[i].name, intent.candidates[c])) {
+                        ++nmatch;
+                        break;
+                    }
+            }
+            if (nmatch > 0) {
+                write_intent(w, &intent, now);
+                pending_intent = 0;
+                fprintf(stderr, "ingest: intent %u with %u candidate(s) written "
+                                "after %llu record(s), %d object(s), %d match(es)\n",
+                        intent.kind, intent.n_candidates,
+                        (unsigned long long)records, nobj, nmatch);
+            }
         }
     }
 
