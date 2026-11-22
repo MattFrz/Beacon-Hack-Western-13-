@@ -76,6 +76,54 @@ test('rejects pages from other sites', async () => {
   assert.match(err.message, /401/);
 });
 
+test('replay: sends each frame JPEG before its world record', async () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'r.jsonl');
+  fs.writeFileSync(file, '{"t_ns":0,"n":1}\n{"t_ns":20000000,"n":2}\n');
+  const frames = path.join(dir, 'frames');
+  fs.mkdirSync(frames);
+  const jpeg0 = Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9]);
+  const jpeg1 = Buffer.from([0xff, 0xd8, 0x02, 0xff, 0xd9]);
+  fs.writeFileSync(path.join(frames, '000000.jpg'), jpeg0);
+  fs.writeFileSync(path.join(frames, '000001.jpg'), jpeg1);
+
+  const bridge = await startBridge({ wsPort: 0, replayFile: file, framesDir: frames });
+  const ws = new WebSocket(`ws://127.0.0.1:${bridge.wsPort}`);
+  await once(ws, 'open');
+  const msgs = await collect(ws, 6);
+  ws.close();
+  bridge.close();
+
+  // Replay ticks before the client connects, so the phase varies: assert each
+  // frame JPEG is sent immediately before the world record it depicts.
+  const jpegs = { 1: jpeg0, 2: jpeg1 };
+  let pairs = 0;
+  for (let i = 0; i + 1 < msgs.length; i++) {
+    if (!Buffer.isBuffer(msgs[i]) || typeof msgs[i + 1] !== 'string') continue;
+    const record = JSON.parse(msgs[i + 1]);
+    assert.ok(msgs[i].equals(jpegs[record.n]), `frame before n=${record.n} must be its JPEG`);
+    pairs++;
+  }
+  assert.ok(pairs >= 3, `expected at least 3 frame/record pairs, got ${pairs}`);
+});
+
+test('replay: a missing frame file is skipped, not fatal', async () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'r.jsonl');
+  fs.writeFileSync(file, '{"t_ns":0,"n":1}\n{"t_ns":20000000,"n":2}\n');
+  const frames = path.join(dir, 'frames');
+  fs.mkdirSync(frames); // no JPEG files at all
+
+  const bridge = await startBridge({ wsPort: 0, replayFile: file, framesDir: frames });
+  const ws = new WebSocket(`ws://127.0.0.1:${bridge.wsPort}`);
+  await once(ws, 'open');
+  const msgs = await collect(ws, 3);
+  ws.close();
+  bridge.close();
+
+  assert.ok(msgs.every((m) => typeof m === 'string'));
+});
+
 test('replay: loops a file to dashboards', async () => {
   const file = path.join(tmpDir(), 'r.jsonl');
   fs.writeFileSync(file, '{"t_ns":0,"n":1}\n{"t_ns":20000000,"n":2}\n');

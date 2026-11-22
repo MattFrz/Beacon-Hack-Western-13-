@@ -4,12 +4,16 @@ import { fileURLToPath } from 'node:url';
 import { startBridge } from './bridge.js';
 
 const replayFile = process.argv[2];
+// --frames DIR: optional composite preview JPEGs (probe --frames-dir) replayed in sync.
+const framesFlag = process.argv.indexOf('--frames');
+const framesDir = framesFlag > -1 ? process.argv[framesFlag + 1] : undefined;
 try {
   const bridge = await startBridge({
     wsPort: 8765,
     udpPort: 5005,
     recordDir: fileURLToPath(new URL('recordings/', import.meta.url)),
     replayFile,
+    framesDir,
   });
   console.log(`bridge: dashboards connect to ws://127.0.0.1:${bridge.wsPort}`);
   console.log(replayFile

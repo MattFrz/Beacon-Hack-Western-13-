@@ -37,7 +37,7 @@ export function gapMs(a, b) {
 }
 
 // Live (no replayFile): telemd datagrams on udpPort. Replay: loop replayFile. Both fan out on wsPort.
-export async function startBridge({ wsPort, udpPort, recordDir, replayFile }) {
+export async function startBridge({ wsPort, udpPort, recordDir, replayFile, framesDir }) {
   const replay = replayFile && loadReplay(replayFile);
 
   const wss = new WebSocketServer({
@@ -61,8 +61,21 @@ export async function startBridge({ wsPort, udpPort, recordDir, replayFile }) {
   if (replay) {
     let i = 0;
     let timer;
+    // Offline replay: a composite preview JPEG per record (probe --frames-dir),
+    // sent just before the world state it depicts.
+    const frameFor = (index) => {
+      if (!framesDir) return null;
+      const file = path.join(framesDir, `${String(index).padStart(6, '0')}.jpg`);
+      try {
+        return fs.readFileSync(file);
+      } catch {
+        return null;
+      }
+    };
     const tick = () => {
       const next = (i + 1) % replay.length;
+      const frame = frameFor(i);
+      if (frame) send(frame);
       send(JSON.stringify(replay[i]));
       timer = setTimeout(tick, gapMs(replay[i], replay[next]));
       i = next;

@@ -21,8 +21,11 @@ DEFAULT_LABELS = REPO_ROOT / "models" / "labels.txt"
 def read_labels(path: Path) -> list[str]:
     names = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
     names = [name for name in names if name and not name.startswith("#")]
-    if not (16 <= len(names) <= 64):
-        raise SystemExit(f"expected 16-64 labels, got {len(names)} in {path}")
+    # The demo vocabulary is 6 nouns (bottle, can, keys, phone, box, mouse).
+    # The ceiling stays at 64 because that is what the baked ONNX decoder is
+    # sized for; the floor is only a guard against an empty or truncated file.
+    if not (1 <= len(names) <= 64):
+        raise SystemExit(f"expected 1-64 labels, got {len(names)} in {path}")
     if any(" " in name for name in names):
         raise SystemExit("YOLOE set_classes expects single-token labels")
     return names

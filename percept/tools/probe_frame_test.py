@@ -1190,6 +1190,130 @@ class PreviewEncodeTest(unittest.TestCase):
             self.assertIsNone(probe_frame.encode_preview(frame, 320, 60))
 
 
+class RenderPreviewTest(unittest.TestCase):
+    """Composite preview: RGB+YOLO boxes, then depth with the same boxes.
+    Uses real cv2 (available in the probe venv) with synthetic arrays."""
+
+    WIDTH = 128
+    QUALITY = 60
+
+    def setUp(self):
+        self.frame = np.zeros((72, self.WIDTH, 3), dtype=np.uint8)
+        self.frame[:, :] = (40, 80, 120)
+        self.depth = np.zeros((36, 36), dtype=np.float32)
+        self.depth[:, :18] = 0.6
+        self.depth[:, 18:] = 2.4
+        self.detections = [
+            {"name": "scissors", "bbox_px": [10, 10, 50, 40], "conf": 0.8,
+             "Z_m": 0.7},
+            {"name": "bottle", "bbox_px": [60, 12, 90, 44], "conf": 0.6},
+        ]
+
+    def decode(self, jpeg):
+        import cv2
+        arr = np.frombuffer(jpeg, dtype=np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+    def panel_h(self):
+        return self.WIDTH * self.frame.shape[0] // self.frame.shape[1]
+
+    def test_two_panels_rgb_then_depth(self):
+        jpeg = probe_frame.render_preview(
+            self.frame, self.detections, self.depth,
+            width=self.WIDTH, quality=self.QUALITY)
+        self.assertTrue(jpeg.startswith(b"\xff\xd8"))
+        img = self.decode(jpeg)
+        self.assertEqual(img.shape[1], self.WIDTH)
+        self.assertEqual(img.shape[0], 2 * self.panel_h() + 2)  # one separator
+
+    def test_without_depth_is_a_single_boxed_panel(self):
+        jpeg = probe_frame.render_preview(
+            self.frame, self.detections, None,
+            width=self.WIDTH, quality=self.QUALITY)
+        img = self.decode(jpeg)
+        self.assertEqual(img.shape[0], self.panel_h())
+
+    def test_boxes_are_drawn_on_both_panels(self):
+        plain = probe_frame.render_preview(
+            self.frame, [], self.depth, width=self.WIDTH,
+            quality=self.QUALITY)
+        boxed = probe_frame.render_preview(
+            self.frame, self.detections, self.depth, width=self.WIDTH,
+            quality=self.QUALITY)
+        self.assertNotEqual(plain, boxed)
+        img = self.decode(boxed)
+        panel_h = self.panel_h()
+        rgb_panel = img[:panel_h]
+        depth_panel = img[panel_h + 2:]
+        clean = self.decode(plain)
+        # the RGB panel alone changes with detections
+        self.assertGreater(
+            np.abs(rgb_panel.astype(int) - clean[:panel_h].astype(int)).sum(), 0)
+        # the depth panel gets boxes too
+        self.assertGreater(
+            np.abs(depth_panel.astype(int)
+                   - clean[panel_h + 2:].astype(int)).sum(), 0)
+
+    def test_depth_letterbox_padding_is_cropped_out(self):
+        """The depth net is a square letterboxed canvas: only the middle band is
+        real depth. Padding must not be displayed (it squashed the vertical)."""
+        affine = probe_frame.make_affine(160, 90, 64, 64)  # 16:9 into a square
+        content = np.full((64, 64), 0.5, dtype=np.float32)
+        y0 = int(round(affine.pad_y))
+        h = int(round(affine.full_h * affine.scale))
+        content[y0:y0 + h, :] = np.linspace(0.5, 3.0, h, dtype=np.float32)[:, None]
+
+        padded_a = content.copy()
+        padded_b = content.copy()
+        padded_b[:y0, :] = 0.0        # junk in the top pad
+        padded_b[y0 + h:, :] = 90.0   # junk in the bottom pad
+
+        a = probe_frame.render_preview(
+            self.frame, [], padded_a, width=self.WIDTH, quality=self.QUALITY,
+            depth_affine=affine)
+        b = probe_frame.render_preview(
+            self.frame, [], padded_b, width=self.WIDTH, quality=self.QUALITY,
+            depth_affine=affine)
+        self.assertEqual(a, b)  # padding content cannot change the picture
+
+    def test_depth_without_affine_uses_the_whole_grid(self):
+        without = probe_frame.render_preview(
+            self.frame, [], self.depth, width=self.WIDTH, quality=self.QUALITY)
+        same = probe_frame.render_preview(
+            self.frame, [], self.depth, width=self.WIDTH, quality=self.QUALITY,
+            depth_affine=None)
+        self.assertEqual(without, same)
+
+    def test_target_is_highlighted_distinctly(self):
+        plain = probe_frame.render_preview(
+            self.frame, self.detections, self.depth, width=self.WIDTH,
+            quality=self.QUALITY)
+        highlighted = probe_frame.render_preview(
+            self.frame, self.detections, self.depth, width=self.WIDTH,
+            quality=self.QUALITY, target_name="scissors")
+        self.assertNotEqual(plain, highlighted)
+
+    def test_returns_none_when_encoding_fails(self):
+        fake_cv2 = types.ModuleType("cv2")
+        fake_cv2.INTER_AREA = 3
+        fake_cv2.IMWRITE_JPEG_QUALITY = 2
+        fake_cv2.resize = lambda image, size, interpolation=None: np.zeros(
+            (size[1], size[0], 3), dtype=np.uint8)
+        fake_cv2.imencode = lambda *_args: (False, None)
+        fake_cv2.rectangle = lambda *a, **k: None
+        fake_cv2.putText = lambda *a, **k: None
+        fake_cv2.applyColorMap = lambda image, m: image
+        fake_cv2.COLORMAP_INFERNO = 1
+        fake_cv2.FONT_HERSHEY_SIMPLEX = 0
+        fake_cv2.LINE_AA = 16
+        fake_cv2.normalize = lambda image, *_a, **_k: image
+        fake_cv2.convertScaleAbs = lambda image: image
+        with patch.dict(sys.modules, {"cv2": fake_cv2}):
+            self.assertIsNone(probe_frame.render_preview(
+                self.frame, self.detections, self.depth,
+                width=self.WIDTH, quality=self.QUALITY))
+
+
 class DepthSamplingTest(unittest.TestCase):
     """Synthetic grids and affines: no camera, ONNX, or MediaPipe."""
 
