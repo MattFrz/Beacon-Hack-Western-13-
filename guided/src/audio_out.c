@@ -203,7 +203,14 @@ int audio_out_open(const char *spec)
 /* Only the QNX sound device sets the pace. The Bluetooth pipe follows the
  * clock too: a reader that drains faster than real time must never make us
  * race ahead, and a slow one just blocks this (low-priority) thread briefly. */
-int audio_out_paced(void) { return g_kind == OUT_QNX; }
+/* ADDITION: a connected Bluetooth pipe paces us too. Its reader (qnx-bluetooth
+ * pcm_input.c) pulls on the Bluetooth clock without waiting and fills any
+ * shortfall with silence. Clocked by our own 10 ms timer the pipe ran near
+ * empty, so those zero-filled holes landed inside words and the voice sounded
+ * distorted on the JBL. Writing as fast as the pipe takes keeps it full: the
+ * blocking writes hold the audio thread to the reader's rate, with the pipe's
+ * buffer as the cushion. The 60 Hz law loop is a different thread. */
+int audio_out_paced(void) { return g_kind == OUT_QNX || (g_kind == OUT_FIFO && g_fifo_fd >= 0); }
 
 void audio_out_write(const int16_t *buf, size_t frames)
 {
