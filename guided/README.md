@@ -38,7 +38,7 @@ Example (`lost`):
 guided: 930 loops, 0 missed deadlines, worst lateness 1078 us, p95 150 us
 ```
 
-Flags: `--metres` speaks the distance in steps (spec §11: only after the tape-measure check passes; off by default; "within arm's reach" is always allowed), `--no-orient-pips` (turn off the turn-toward pips), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX), `--audio` (below), `--sounds DIR` (voice clips; default `sounds/` or `../sounds/`).
+Flags: `--metres` speaks the distance in steps (spec §11: only after the tape-measure check passes; off by default; "within arm's reach" is always allowed), `--no-orient-pips` (turn off the turn-toward pips), `--duration S`, `--verbose` (every tick), `--create` (create `/beacon_world` when running alone), `--sup PID:CHID` (supervisor pulses, QNX), `--audio` (below), `--sounds DIR` (voice clips; default `sounds/` or `../sounds/`). `BEACON_WORLD=/beacon_x` overrides the shm name for tests and parallel instances (the product path never sets it; same pattern as supervisor's `BEACON_SUPERVISOR_WORLD`).
 
 ## Sound
 

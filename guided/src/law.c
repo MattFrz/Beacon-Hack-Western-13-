@@ -22,6 +22,7 @@
 #define TURN_MIN_GAP_NS    2000000000ull
 #define TURN_REMIND_NS     5000000000ull
 #define TURN_AFTER_NS      700000000ull  /* out of view this long (not a one-frame blink) before "turn ..." */
+#define LOST_REPLAY_NS     8000000000ull  /* "I lost the target" again at most this often (§10) */
 #define LANDMARK_GAP_NS    8000000000ull /* "It's next to the mug." at most this often */
 #define CHIME_GAP_NS       3000000000ull /* one "facing it" chime, not a burst */
 #define DIR_AHEAD_DEG      8.0f   /* within this: "straight ahead" */
@@ -259,8 +260,8 @@ static int bind_target(guided_state_t *st, const beacon_percept_block_t *p,
             if (!o->used || strncmp(o->name, want, BEACON_NAME_LEN) != 0)
                 continue;
             uint64_t age = now > o->last_seen_ns ? now - o->last_seen_ns : 0;
-            if (age >= BEACON_HOLD_MAX_NS)
-                continue; /* too old for a NEW bind (§9) */
+            if (age >= BEACON_MEMORY_BIND_MAX_NS)
+                continue; /* too old for a NEW bind (§9: 20 s memory window) */
             float d;
             if (o->in_latest_boxes) {
                 d = v3_norm(o->xyz_cam);
@@ -312,6 +313,7 @@ static void reset_guidance(guided_state_t *st)
     st->last_walk_ns = 0;
     st->last_landmark_ns = 0;
     st->lost_said = 0;
+    st->last_lost_say_ns = 0;
     st->prev_mode = BEACON_MODE_NONE;
 }
 
@@ -620,22 +622,30 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
                     st->last_walk_ns = now;
                 }
                 orient(st, out, az, now, speak);
-                st->lost_said = 0;
+                /* lost_said is NOT cleared here: a pose that flickers stale/fresh would
+                 * otherwise say "I lost the target" again and again. Only seeing the
+                 * target again (below) re-arms it. */
                 st->prev_mode = mode;
                 return;
             }
         }
     }
 
-    /* ---------------- LOST (§6, §10): unique cue, never a number */
+    /* ---------------- LOST (§6, §10): unique cue, never a number.
+     * Said once immediately, then at most every LOST_REPLAY_NS: a flickering
+     * view (YOLO conf hovering, scene being arranged) flips mode in and out
+     * of LOST every record, and re-saying it per entry tells the wearer
+     * nothing they can act on. */
     if (mode == BEACON_MODE_LOST) {
         out->law = BEACON_LAW_LOST;
         if (st->in_reach)
             leave_reach(st, out);
-        if (!st->lost_said) {
+        if (!st->lost_said &&
+            (now >= st->last_lost_say_ns + LOST_REPLAY_NS || !st->last_lost_say_ns)) {
             push_cmd(out, GUIDED_CMD_FLUSH_SPEECH);
             say1(out, 1, BEACON_CLIP_LOST_TARGET);
             st->lost_said = 1;
+            st->last_lost_say_ns = now;
         }
         st->d_valid = 0;
         st->prev_mode = mode;

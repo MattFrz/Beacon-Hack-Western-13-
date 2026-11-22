@@ -7,12 +7,14 @@
  *   4. publish target, heartbeat and stats under seq_guided, pulse supervisor
  *   5. sleep to the next absolute deadline; count misses, never catch up
  *
- * Usage: guided [--create] [--metres] [--no-orient-pips] [--duration S] [--verbose] [--sup PID:CHID]
+ * Usage: guided [--create] [--metres] [--no-orient-pips] [--hand-conf C] [--duration S] [--verbose] [--sup PID:CHID]
  *               [--audio none|qnx|fifo:PATH|FILE.wav] [--sounds DIR]
  *   --create    create /beacon_world if missing (laptop / standalone; the
  *               supervisor creates it on the Pi)
  *   --metres    speak distance in steps (only after the tape-measure check, spec §11)
  *   --no-orient-pips  no soft pips while turning toward the target
+ *   --hand-conf C     ADDITION: lowest hand confidence REACH trusts (default 0.5). The
+ *               on-device YOLO hand class scores 0.05-0.25, so the live demo passes 0.05.
  *   --audio     where sound goes (audio_out.h); default none
  *   --sounds    folder with the voice clips; default sounds/ or ../sounds/
  */
@@ -39,10 +41,16 @@ static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
 static beacon_world_t *open_world(int create)
 {
+    /* BEACON_WORLD lets tests / parallel instances use their own shm name
+     * (supervisor has the same escape hatch via BEACON_SUPERVISOR_WORLD).
+     * The product path never sets it: guided attaches to /beacon_world. */
+    const char *shm_name = getenv("BEACON_WORLD");
+    if (!shm_name)
+        shm_name = BEACON_SHM_WORLD;
     int flags = O_RDWR | (create ? O_CREAT : 0);
-    int fd = shm_open(BEACON_SHM_WORLD, flags, 0666);
+    int fd = shm_open(shm_name, flags, 0666);
     if (fd == -1) {
-        fprintf(stderr, "guided: shm_open %s: %s%s\n", BEACON_SHM_WORLD, strerror(errno),
+        fprintf(stderr, "guided: shm_open %s: %s%s\n", shm_name, strerror(errno),
                 create ? "" : " (start the supervisor or fakeworld first, or pass --create)");
         return NULL;
     }
@@ -53,7 +61,7 @@ static beacon_world_t *open_world(int create)
     }
     if ((size_t)sb.st_size < sizeof(beacon_world_t)) {
         if (!create || ftruncate(fd, (off_t)sizeof(beacon_world_t)) == -1) {
-            fprintf(stderr, "guided: %s is %lld bytes, need %zu\n", BEACON_SHM_WORLD,
+            fprintf(stderr, "guided: %s is %lld bytes, need %zu\n", shm_name,
                     (long long)sb.st_size, sizeof(beacon_world_t));
             close(fd);
             return NULL;
@@ -95,12 +103,13 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--metres")) cfg.metres_enabled = 1;
         else if (!strcmp(argv[i], "--no-orient-pips")) cfg.orient_pips = 0;
         else if (!strcmp(argv[i], "--verbose")) verbose = 1;
+        else if (!strcmp(argv[i], "--hand-conf") && i + 1 < argc) cfg.hand_conf_min = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--duration") && i + 1 < argc) duration_s = atof(argv[++i]);
         else if (!strcmp(argv[i], "--sup") && i + 1 < argc) sup = argv[++i];
         else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_spec = argv[++i];
         else if (!strcmp(argv[i], "--sounds") && i + 1 < argc) sounds = argv[++i];
         else {
-            fprintf(stderr, "usage: %s [--create] [--metres] [--no-orient-pips] [--duration S] [--verbose] [--sup PID:CHID]\n"
+            fprintf(stderr, "usage: %s [--create] [--metres] [--no-orient-pips] [--hand-conf C] [--duration S] [--verbose] [--sup PID:CHID]\n"
                             "       [--audio none|qnx|fifo:PATH|FILE.wav] [--sounds DIR]\n", argv[0]);
             return 2;
         }

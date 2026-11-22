@@ -161,9 +161,17 @@ static const char *mode_name(int mode)
 #define SPEECH_GAIN 0.90f
 #define TICK_GAIN   0.40f
 #define TONE_GAIN   0.22f
-#define TICK_LEN    (AUDIO_RATE / 50)   /* 20 ms click */
+/* Soft, wooden "tok" sounds instead of plain high beeps: a lower pitch, a quiet
+ * octave on top for warmth, and a quick fade-out like a struck marimba bar. */
+#define TICK_HZ      660.0f             /* reach tick (was a flat 880 Hz beep) */
+#define TICK_HOLD_HZ 440.0f             /* HOLD: lower and slower */
+#define TONE_HZ      440.0f             /* "your hand is on it" hum (was 1320 Hz) */
+#define CHIME_HZ1    660.0f             /* "facing it": two soft notes, a fifth apart */
+#define CHIME_HZ2    990.0f
+#define TICK_LEN    (AUDIO_RATE / 16)   /* 62 ms, mostly fade-out */
+#define TICK_DECAY  (AUDIO_RATE / 60.0f) /* fade time constant ~17 ms */
 #define PIP_GAIN    0.32f               /* turn-toward pips: soft, under the voice level */
-#define PIP_HZ      600.0f              /* lower and rounder than the 880 Hz reach tick */
+#define PIP_HZ      600.0f              /* turn-toward pips */
 #define PIP_LEN     (AUDIO_RATE / 33)   /* 30 ms */
 #define CHIME_LEN   (AUDIO_RATE / 5)    /* 200 ms: two notes, "you are facing it" */
 #define RAMP        (AUDIO_RATE / 333)  /* 3 ms fade in and out, no pops */
@@ -244,12 +252,14 @@ static void render_block(int16_t *out, int frames)
         float l = sp, r = sp;
         if (S.tick_left > 0) {
             int k = S.tick_len - S.tick_left;
-            float env = 1.0f;
-            if (k < RAMP)
-                env = (float)k / RAMP;
-            else if (S.tick_left < RAMP)
-                env = (float)S.tick_left / RAMP;
-            float v = sinf(S.tick_phase) * env * S.tick_amp * TICK_GAIN, gl, gr;
+            int half = S.tick_len / 2;
+            /* the chime's second note is struck again: restart its fade */
+            int kk = (S.tick_freq2 != S.tick_freq && k >= half) ? k - half : k;
+            float env = kk < RAMP ? (float)kk / RAMP : expf(-(float)(kk - RAMP) / TICK_DECAY);
+            if (S.tick_left < RAMP)
+                env *= (float)S.tick_left / RAMP;
+            float ph = S.tick_phase;
+            float v = (sinf(ph) + 0.3f * sinf(2.0f * ph)) * 0.77f * env * S.tick_amp * TICK_GAIN, gl, gr;
             pan_gains(S.tick_pan, &gl, &gr);
             l += v * gl;
             r += v * gr;
@@ -259,11 +269,12 @@ static void render_block(int16_t *out, int frames)
         float target = S.tone_on ? 1.0f : 0.0f; /* fade the tone in and out */
         S.tone_level += (target - S.tone_level) * 0.01f;
         if (S.tone_level > 0.001f) {
-            float v = sinf(S.tone_phase) * S.tone_level * TONE_GAIN, gl, gr;
+            float tp = S.tone_phase;
+            float v = (sinf(tp) + 0.25f * sinf(2.0f * tp)) * 0.8f * S.tone_level * TONE_GAIN, gl, gr;
             pan_gains(S.tone_pan, &gl, &gr);
             l += v * gl;
             r += v * gr;
-            S.tone_phase += two_pi * 1320.0f / AUDIO_RATE;
+            S.tone_phase += two_pi * TONE_HZ / AUDIO_RATE;
         }
         if (S.tick_phase > two_pi)
             S.tick_phase -= two_pi;
@@ -341,7 +352,7 @@ static void *audio_main(void *arg)
                 S.tick_phase = 0.0f;
                 S.tick_pan = tk.cmd.pan;
                 S.tick_amp = tk.cmd.amp * (tk.cmd.dark ? 0.6f : 1.0f);
-                S.tick_freq = S.tick_freq2 = tk.cmd.dark ? 523.0f : 880.0f; /* HOLD ticks are lower */
+                S.tick_freq = S.tick_freq2 = tk.cmd.dark ? TICK_HOLD_HZ : TICK_HZ; /* HOLD ticks are lower */
                 ticks_since_print += 1 + (int)missed;
                 double now = secs();
                 if (g_cfg.verbose || now - last_tick_print >= 0.5) {
@@ -360,8 +371,8 @@ static void *audio_main(void *arg)
             S.tick_phase = 0.0f;
             S.tick_pan = 0.0f;
             S.tick_amp = 0.8f;
-            S.tick_freq = 880.0f;   /* rising two-note chime */
-            S.tick_freq2 = 1320.0f;
+            S.tick_freq = CHIME_HZ1; /* rising two-note chime */
+            S.tick_freq2 = CHIME_HZ2;
             printf("[%7.3f] CHIME facing the target\n", secs());
         }
 

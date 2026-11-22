@@ -55,16 +55,30 @@
 #define BEACON_GUIDED_PERIOD_NS     16666667ull   /* 60 Hz */
 #define BEACON_LIVE_MAX_NS_DEFAULT  1000000000ull /* until p95_vision_ns is measured */
 #define BEACON_HOLD_MAX_NS          1500000000ull
+/* §9, amended 2026-11-22: a remembered row still binds a NEW FIND for up to
+ * 20 s after its last sighting, provided the pose is valid in the same epoch
+ * ("ask after the turn"). The 1.5 s HOLD gate above still governs
+ * LIVE/HOLD/LOST mode timing, HOLD ticks and the LOST clip; only the bind
+ * window widened. */
+#define BEACON_MEMORY_BIND_MAX_NS   20000000000ull
 #define BEACON_SUP_TICK_NS          50000000ull   /* supervisor pulse timer */
 
 /* ---------------------------------------------------------------- scheduling (spec §5.1) */
 #define BEACON_RUNMASK_CORE0   0x1u
-#define BEACON_RUNMASK_CORES13 0xeu
+#define BEACON_RUNMASK_CORES13 0xeu   /* design intent; rejected on this image, see below */
+/* Measured 2026-11-21 on the loaner (QNX 8.0.0, Pi 5, SMP, 4 CPUs): the kernel
+ * accepts a single-CPU runmask or all CPUs, and returns EINVAL for every
+ * multi-bit proper subset. 0x3, 0x6, 0x7, 0xc and 0xe all fail; 0x1, 0x2, 0x4,
+ * 0x8 and 0xf succeed, as root, through both ThreadCtl(_NTO_TCTL_RUNMASK) and
+ * _NTO_TCTL_RUNMASK_GET_AND_SET. So "cores 1-3" cannot be applied here: pin a
+ * single core off core 0 instead, and log the kernel's own answer. */
+#define BEACON_RUNMASK_CPU1    0x2u
 #define BEACON_PRIO_SUPERVISOR 63
 #define BEACON_PRIO_GUIDED     58
 #define BEACON_PRIO_CAMD       50
 #define BEACON_PRIO_AUDIO      40   /* guided's audio thread */
 #define BEACON_PRIO_PERCEPT    22
+#define BEACON_PRIO_INGEST     20   /* ADDITION: the relay that writes seq_percept */
 #define BEACON_PRIO_VOICED     18
 
 /* Pulse codes, as offsets from _PULSE_CODE_MINAVAIL (spec §5.1 table). */

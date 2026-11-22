@@ -1,0 +1,8 @@
+bottle
+can
+keys
+phone
+box
+mouse
+hand
+watch

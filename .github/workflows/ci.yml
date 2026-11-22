@@ -3,6 +3,8 @@ name: CI
 
 on:
   pull_request:
+    # labeled/unlabeled: adding or removing graph-not-needed re-runs the graphify check
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -48,7 +50,7 @@ jobs:
         run: make -C percept test-python PYTHON=python3
 
   native:
-    name: guided, supervisor, telemd
+    name: guided, supervisor, telemd, ingest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -60,10 +62,13 @@ jobs:
         run: make -C supervisor test
       - name: telemd build, with and without preview
         run: make -C telemd all preview
+      - name: ingest build and end-to-end relay test
+        run: make -C ingest test
 
   graphify:
     name: graphify graph updated
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    # graph-not-needed: a person judged the change can't alter the graph (typos, punctuation, formatting)
+    if: github.event_name == 'pull_request' && github.base_ref == 'main' && !contains(github.event.pull_request.labels.*.name, 'graph-not-needed')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -75,7 +80,7 @@ jobs:
           # shortcut: these extensions mirror what graphify reads in this repo; extend the list if it starts reading new types
           tracked=$(printf '%s\n' "$changed" | grep -vE '^graphify-out/|package-lock\.json$' | grep -E '\.(c|h|cpp|py|js|jsx|json|sh|ps1|yml|md|html|txt)$' || true)
           if [ -n "$tracked" ] && ! printf '%s\n' "$changed" | grep -qx 'graphify-out/graph.json'; then
-            echo "::error::This PR changes code or docs but not graphify-out/graph.json. Refresh the graph (see AGENTS.md) and commit graphify-out/."
+            echo "::error::This PR changes code or docs but not graphify-out/graph.json. Refresh the graph (see AGENTS.md) and commit graphify-out/. If the change can't alter the graph (typos, punctuation, formatting), add the graph-not-needed label instead."
             printf '%s\n' "$tracked"
             exit 1
           fi
