@@ -66,3 +66,7 @@ Branched from the live-camera tip; `zain/live-camera-24fps` is not touched.
 - `ingest/tools/device_live_demo.sh`: set `BEACON_VO=1` to pass `--vo`.
 - Tests: `python percept/tools/live_vo_test.py` (pose maths, and a synthetic pan moves the pose right).
 - Not yet done: a run on the Pi (cv2 and VO cost per cycle unmeasured there), and a visual check that the frustum moves in the dashboard.
+
+### Testing the live path without the Pi
+
+`python percept/tools/sim_live_pi.py` replays the vid360 mock (real VO pose, objects, crumbs, composite frames) into the bridge's live ports: world JSON and a 24 fps raw JPEG on UDP 5005, the detector composite on UDP 5007. With the bridge on Live, the dashboard shows the three camera views and the 3D frustum turning, the same wiring as a real run. Checked in Chrome: Live source, all three panels filled, frustum and objects moving.
