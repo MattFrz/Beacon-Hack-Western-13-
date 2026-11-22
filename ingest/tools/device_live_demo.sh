@@ -86,7 +86,7 @@ timeout $((DURATION - 4)) python3 -s percept/tools/live_probe.py \
     --labels models/labels.txt \
     --yolo models/yoloe26n_320.onnx \
     --depth models/depth_anything_v2_metric_indoor_small.onnx \
-    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf 0.10 --ort-intra 3 \
+    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf 0.10 --ort-intra 3 ${BEACON_VO:+--vo} \
     > /tmp/live_probe.log 2>&1 &
 PROBE_PID=$!
 

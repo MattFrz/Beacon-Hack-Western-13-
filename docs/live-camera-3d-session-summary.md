@@ -56,3 +56,13 @@ The VO code has a chest-height correction option. No measured chest height was e
 5. After the pose path is ready and the camera run can be coordinated, verify that the 3D frustum moves with the camera and objects remain in a stable world position. Separately measure the raw video rate; it was about 13 fps in the last short browser sample.
 
 No tests were run for the three-view dashboard or the unfinished VO change in this session. The dashboard was inspected live in Chrome; the Pi's actual camera/depth composite and the three-card layout were visible.
+
+## Update: 3D follows the camera (branch `zain/3d-follows-camera`)
+
+Branched from the live-camera tip; `zain/live-camera-24fps` is not touched.
+
+- `percept/tools/live_vo.py`: `LiveVo` runs `vo_core.Vo` on the same frame and depth grid `live_probe` already computed (`probe_once(..., want_vo=True)`); `apply_pose` writes `pose.T_world_from_cam` and moves this frame's camera-space objects, target and hand into world space. Held (HOLD) objects keep their old world coordinates. A lost VO step publishes `pose.valid: false` and the last pose.
+- `live_probe.py --vo [--h-chest M]`: opt-in. `--h-chest` defaults to 0, which turns the scale watchdog off, so travelled distance is approximate until the camera height is measured.
+- `ingest/tools/device_live_demo.sh`: set `BEACON_VO=1` to pass `--vo`.
+- Tests: `python percept/tools/live_vo_test.py` (pose maths, and a synthetic pan moves the pose right).
+- Not yet done: a run on the Pi (cv2 and VO cost per cycle unmeasured there), and a visual check that the frustum moves in the dashboard.
