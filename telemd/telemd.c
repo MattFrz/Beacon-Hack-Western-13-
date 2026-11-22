@@ -82,9 +82,15 @@ static int append_scene(char *packet, size_t cap, size_t used, const beacon_perc
         /* ingest can receive string IDs that do not fit the numeric ABI. */
         if (o->id) snprintf(id, sizeof(id), "%u", o->id);
         else snprintf(id, sizeof(id), "\"slot-%u\"", i);
+        /* full-frame pixel box from the detector, for boxes drawn on the dashboard's live camera */
+        char bbox[128] = "";
+        if ((o->bbox_px[2] > o->bbox_px[0] || o->bbox_px[3] > o->bbox_px[1]) &&
+            isfinite(o->bbox_px[0]) && isfinite(o->bbox_px[1]) && isfinite(o->bbox_px[2]) && isfinite(o->bbox_px[3]))
+            snprintf(bbox, sizeof(bbox), ",\"bbox_px\":[%.1f,%.1f,%.1f,%.1f]",
+                     o->bbox_px[0], o->bbox_px[1], o->bbox_px[2], o->bbox_px[3]);
         if (!append(packet, cap, &used, "%s{\"id\":%s,\"name\":\"%s\",\"xyz_cam\":%s,\"xyz_world\":%s,"
-                    "\"last_seen_ns\":%" PRIu64 ",\"in_latest_boxes\":%s}", count++ ? "," : "",
-                    id, name, cam, position, o->last_seen_ns, o->in_latest_boxes ? "true" : "false")) return 0;
+                    "\"last_seen_ns\":%" PRIu64 ",\"in_latest_boxes\":%s%s}", count++ ? "," : "",
+                    id, name, cam, position, o->last_seen_ns, o->in_latest_boxes ? "true" : "false", bbox)) return 0;
     }
     return append(packet, cap, &used, "]}") ? (int)used : 0;
 }

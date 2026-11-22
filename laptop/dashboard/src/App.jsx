@@ -627,11 +627,26 @@ function Camera({ frames, world, paused, recording }) {
 // Boxes are in full-frame pixels (world.frame_wh); the live JPEG may be downscaled, so the SVG uses the
 // full frame as its coordinate system and stretches over the image. Without frame_wh, the image's own
 // size is used (correct whenever the stream is not downscaled).
+const CAMERA_HFOV_DEG = 60; // live_probe --fov 60: the pinhole the Pi unprojects with
+const FULL_FRAME_W = 1280; // the C270's capture width on the Pi; boxes are in these pixels
+
 function LiveWithBoxes({ url, world }) {
   const [natural, setNatural] = useState(null);
-  const [fw, fh] = world?.frame_wh ?? natural ?? [0, 0];
+  // Frame size the boxes are measured in: sent by the probe, else the image itself when it is full
+  // size, else the C270's 1280-wide frame at the image's aspect ratio (the stream was shrunk).
+  const [fw, fh] = world?.frame_wh
+    ?? (natural && (natural[0] >= FULL_FRAME_W ? natural : [FULL_FRAME_W, Math.round((FULL_FRAME_W * natural[1]) / natural[0])]))
+    ?? [0, 0];
   const objects = (world?.objects ?? []).filter((o) => o?.bbox_px && o.in_latest_boxes !== false);
   const hand = world?.hand?.bbox_px ? world.hand : null;
+  // Through telemd the hand has no box (the shm ABI has none), only a 3D point: project it.
+  const handPt = !hand && world?.hand?.xyz_cam?.[2] > 0.05 && fw > 0
+    ? (() => {
+        const f = fw / (2 * Math.tan((CAMERA_HFOV_DEG * Math.PI) / 360));
+        const [x, y, z] = world.hand.xyz_cam;
+        return [f * (x / z) + fw / 2, f * (y / z) + fh / 2];
+      })()
+    : null;
   const target = world?.target?.name;
   const range = (o) => (o.xyz_cam ? Math.hypot(...o.xyz_cam) : null);
   const box = (key, [x0, y0, x1, y1], label, cls) => (
@@ -655,6 +670,12 @@ function LiveWithBoxes({ url, world }) {
             return box(`o${i}`, o.bbox_px, `${o.name}${r ? ` ${r.toFixed(2)} m` : ''}`, o.name === target ? 'box box-target' : 'box');
           })}
           {hand && box('hand', hand.bbox_px, 'hand', 'box box-hand')}
+          {handPt && (
+            <g className="box box-hand">
+              <circle cx={handPt[0]} cy={handPt[1]} r={fw * 0.035} />
+              <text x={handPt[0] + fw * 0.04} y={handPt[1]}>hand</text>
+            </g>
+          )}
         </svg>
       )}
     </div>

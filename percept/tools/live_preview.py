@@ -33,19 +33,25 @@ def main():
                     previous = stamp
                 else:
                     encoded = cv2.imdecode(np.frombuffer(source, dtype="uint8"), cv2.IMREAD_COLOR)
-                    if encoded is None:
-                        continue
-                    height, width = encoded.shape[:2]
-                    if width > 320:
-                        encoded = cv2.resize(encoded, (320, max(1, round(height * 320 / width))))
-                    for quality in (45, 35):
-                        ok, jpeg = cv2.imencode(".jpg", encoded, [cv2.IMWRITE_JPEG_QUALITY, quality])
-                        if ok and len(jpeg) <= MAX_DATAGRAM:
-                            sock.sendto(jpeg.tobytes(), (host, int(port)))
-                            previous = stamp
-                            break
-                    else:
+                    if encoded is not None:
+                        # Keep full resolution (lower JPEG quality instead) so the dashboard's
+                        # detection boxes, which are in full-frame pixels, line up with the video.
+                        # Shrink only if even quality 25 does not fit one datagram.
+                        height, width = encoded.shape[:2]
+                        sent = False
+                        for target_w in (width, 640, 320):
+                            frame = encoded if target_w >= width else cv2.resize(
+                                encoded, (target_w, max(1, round(height * target_w / width))))
+                            for quality in (60, 45, 35, 25):
+                                ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                                if ok and len(jpeg) <= MAX_DATAGRAM:
+                                    sock.sendto(jpeg.tobytes(), (host, int(port)))
+                                    sent = True
+                                    break
+                            if sent:
+                                break
                         previous = stamp
+                    # a half-written frame fails to decode: retry on the next tick, not in a busy loop
         except (FileNotFoundError, OSError):
             pass
         deadline += period

@@ -401,5 +401,5 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 .camera-boxes .box rect { fill: none; stroke: #3ddc84; stroke-width: 4; vector-effect: non-scaling-stroke; }
 .camera-boxes .box text { fill: #3ddc84; font: 600 26px var(--font-mono); paint-order: stroke; stroke: #000; stroke-width: 4px; }
 .camera-boxes .box-target rect { stroke-width: 6; }
-.camera-boxes .box-hand rect { stroke: #ffb020; }
+.camera-boxes .box-hand rect, .camera-boxes .box-hand circle { fill: none; stroke: #ffb020; stroke-width: 4; vector-effect: non-scaling-stroke; }
 .camera-boxes .box-hand text { fill: #ffb020; }
