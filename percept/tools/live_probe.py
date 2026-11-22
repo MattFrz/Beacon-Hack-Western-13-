@@ -168,6 +168,54 @@ def gate_by_depth(
     return gated, dropped
 
 
+def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Move a `hand` detection out of objects[] into the record's hand field.
+
+    MediaPipe cannot run on QNX (its pybind11 proto caster is broken there), so the
+    hand arrives as an ordinary YOLO class instead. The guidance law does not want
+    landmarks -- law.c only asks "is the hand converging on the target", which needs
+    one point, and a box centroid unprojected through the same depth grid gives it.
+
+    Lifting keeps objects[] meaning "things you can find": a hand is not a target
+    and must not win a FIND, nor show up as a findable box on the dashboard. When
+    this returns a hand, it has the same shape probe_to_world emits, so ingest and
+    guided cannot tell the difference.
+
+    Returns (world, hand); the input dict is not modified.
+    """
+    objects = world.get("objects") or []
+    hand_objs = [
+        obj
+        for obj in objects
+        if isinstance(obj, dict) and str(obj.get("name", "")).lower() == "hand"
+    ]
+    if not hand_objs:
+        return world, None
+
+    best = max(hand_objs, key=lambda obj: float(obj.get("conf") or 0.0))
+    hand: Dict[str, Any] = {
+        "t_ns": world.get("t_ns"),
+        "frame_id": best.get("frame_id"),
+    }
+    if "conf" in best:
+        hand["conf"] = best["conf"]
+    if isinstance(best.get("xyz_cam"), (list, tuple)):
+        hand["xyz_cam"] = list(best["xyz_cam"])
+    if isinstance(best.get("xyz_world"), (list, tuple)):
+        hand["xyz_world"] = list(best["xyz_world"])
+
+    lifted = dict(world)
+    lifted["objects"] = [
+        obj for obj in objects if not isinstance(obj, dict) or str(obj.get("name", "")).lower() != "hand"
+    ]
+    lifted["hand"] = hand
+    target = lifted.get("target")
+    if isinstance(target, dict) and str(target.get("name", "")).lower() == "hand":
+        lifted["target"] = None
+        lifted.pop("d_m", None)
+    return lifted, hand
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -198,6 +246,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     world_errors = 0
     dropped_video = 0
     dropped_far = 0
+    hands_seen = 0
     max_depth = float(getattr(args, "max_depth", 3.0) or 0.0)
     last_mtime = 0
     last_d_m: Optional[float] = None
@@ -246,6 +295,22 @@ def main(argv: Optional[List[str]] = None) -> int:
                     last_objects=last_objects,
                     last_target=last_target,
                 )
+
+                # A YOLO `hand` is not a findable object; it belongs in hand{},
+                # where the law and the dashboard already look for it. Lift before
+                # the depth gate: the gate is a claim about *things we name a
+                # distance for*, and the hand is the user's own hand -- with the
+                # depth model's known far-bias, gating it would silently kill hand
+                # tracking at about arm's length.
+                world, hand_det = lift_hand(world)
+                if hand_det is not None:
+                    hands_seen += 1
+                    print(
+                        f"live_probe: HAND conf {float(hand_det.get('conf') or 0.0):.2f} "
+                        f"xyz_cam {[round(float(v), 2) for v in hand_det.get('xyz_cam', [])]}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
                 # Only stand behind what is measurably close. Objects the depth
                 # model places beyond --max-depth are dropped here, before the
@@ -312,7 +377,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"live_probe: {seen} frame(s) processed, {sent} record(s) sent, "
             f"{dropped_video} preview(s) oversized, {dropped_far} object(s) beyond "
-            f"{max_depth:g} m",
+            f"{max_depth:g} m, {hands_seen} hand observation(s)",
             file=sys.stderr,
             flush=True,
         )
