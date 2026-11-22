@@ -56,10 +56,10 @@ export default function Scene({ world }) {
 
   return (
     <Canvas camera={{ position: [2.0, 2.2, 2.0], fov: 45 }}>
-      <color attach="background" args={['#0f1318']} />
+      <color attach="background" args={['#18191b']} />
       <ambientLight intensity={0.7} />
       <directionalLight position={[2, 4, 3]} intensity={1.5} />
-      <gridHelper args={[10, 40, '#3b4350', '#232933']} />
+      <gridHelper args={[10, 40, '#3d3f44', '#26282b']} />
 
       {crumbs.map((p, i) => (
         <mesh key={`crumb-${i}`} position={p}>
@@ -135,7 +135,7 @@ function Frustum({ length = 0.9 }) {
     <Line
       points={[o, a, o, b, o, c, o, d, a, b, b, c, c, d, d, a]}
       segments
-      color="#8899aa"
+      color="#9c9ea3"
       lineWidth={1}
       transparent
       opacity={0.6}
@@ -146,6 +146,7 @@ function Frustum({ length = 0.9 }) {
 function Marker({ position = [0, 0, 0], visible = true, color, label, faded = false, size = 0.035, labelBelow = false }) {
   // <Html> picks its DOM target from r3f's event system, which connects just after startup; a label
   // mounted before that gets re-created (the same React 19 unmount error), so wait for it.
+  // zIndexRange keeps labels under the top bar (10) and the panels (20); drei's default draws them over everything.
   const ready = useThree((s) => Boolean(s.events.connected));
   return (
     <group position={position} visible={visible}>
@@ -154,7 +155,7 @@ function Marker({ position = [0, 0, 0], visible = true, color, label, faded = fa
         <meshStandardMaterial color={color} transparent opacity={faded ? 0.35 : 1} />
       </mesh>
       {ready && (
-        <Html position={[0, labelBelow ? size + 0.035 : -size - 0.03, 0]} center className="label">
+        <Html position={[0, labelBelow ? size + 0.035 : -size - 0.03, 0]} center className="label" zIndexRange={[9, 0]}>
           {visible ? label : null}
         </Html>
       )}
