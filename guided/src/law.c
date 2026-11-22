@@ -259,8 +259,8 @@ static int bind_target(guided_state_t *st, const beacon_percept_block_t *p,
             if (!o->used || strncmp(o->name, want, BEACON_NAME_LEN) != 0)
                 continue;
             uint64_t age = now > o->last_seen_ns ? now - o->last_seen_ns : 0;
-            if (age >= BEACON_HOLD_MAX_NS)
-                continue; /* too old for a NEW bind (§9) */
+            if (age >= BEACON_MEMORY_BIND_MAX_NS)
+                continue; /* too old for a NEW bind (§9: 20 s memory window) */
             float d;
             if (o->in_latest_boxes) {
                 d = v3_norm(o->xyz_cam);
