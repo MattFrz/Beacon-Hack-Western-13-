@@ -10,6 +10,7 @@ import {
   worldHand,
   worldObjects,
   worldTarget,
+  targetObjectId,
 } from './worldScene.js';
 
 test('toScene converts OpenCV world coordinates to three.js coordinates', () => {
@@ -136,4 +137,17 @@ test('crumbsToScene maps only valid xyz_world points', () => {
     crumbs: [{ xyz_world: [1, 2, 3], t_ns: 1 }, { xyz_cam: [4, 5, 6], t_ns: 2 }],
   };
   assert.deepEqual(crumbsToScene(world), [[1, -2, -3]]);
+});
+
+test('targetObjectId finds the bound object by id, else by name at the same spot', () => {
+  const bottle = { id: 'bottle-1', name: 'bottle', xyz_world: [0.818, 0.156, 1.779] };
+  const other = { id: 'bottle-2', name: 'bottle', xyz_world: [-1.859, -1.142, 8.424] };
+  const byId = { target: { id: 'bottle-2', name: 'bottle', xyz_world: [-1.859, -1.142, 8.424] }, objects: [bottle, other] };
+  assert.equal(targetObjectId(byId), 'bottle-2');
+  // vid360: guided's target id is 0, percept's rows are named; the position picks the right bottle.
+  const byPlace = { target: { id: 0, name: 'bottle', xyz_world: [0.818, 0.156, 1.779] }, objects: [other, bottle] };
+  assert.equal(targetObjectId(byPlace), 'bottle-1');
+  const elsewhere = { target: { id: 0, name: 'bottle', xyz_world: [3, 0, 3] }, objects: [bottle, other] };
+  assert.equal(targetObjectId(elsewhere), null);
+  assert.equal(targetObjectId({ objects: [bottle] }), null);
 });

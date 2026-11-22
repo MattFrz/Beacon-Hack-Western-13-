@@ -6,6 +6,7 @@ import {
   crumbsToScene,
   displayPose,
   poseSceneMatrix,
+  targetObjectId,
   wearerState,
   worldHand,
   worldObjects,
@@ -48,8 +49,8 @@ export default function Scene({ world }) {
   const poseMatrix = poseSceneMatrix(pose);
 
   // telemd can send a bound target without objects[]; draw it on its own unless an object row already shows it.
-  const targetId = world?.target?.id;
-  const targetAlone = Boolean(target) && !objects.some((o) => o.id === targetId);
+  const targetId = targetObjectId(world, objects);
+  const targetAlone = Boolean(target) && targetId == null;
   const targetFaded =
     world?.target?.in_latest_boxes === false ||
     (isNum(world?.t_ns) && isNum(world?.target?.last_seen_ns) && world.t_ns - world.target.last_seen_ns > 1e9);
@@ -75,7 +76,7 @@ export default function Scene({ world }) {
             key={id}
             visible={Boolean(o)}
             position={o?.position}
-            color={id === world?.target?.id ? COLORS.target : COLORS.object}
+            color={id === targetId ? COLORS.target : COLORS.object}
             faded={o?.faded}
             label={o?.label}
           />

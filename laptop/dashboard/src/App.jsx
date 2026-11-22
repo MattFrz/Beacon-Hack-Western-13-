@@ -1,3 +1,4 @@
+import { Collapsible } from '@animate-ui/react/primitives/base-ui/collapsible';
 import { Switch } from '@animate-ui/react/primitives/base-ui/switch';
 import { Button } from '@animate-ui/react/primitives/buttons/button';
 import { Highlight, HighlightItem } from '@animate-ui/react/primitives/effects/highlight';
@@ -9,13 +10,13 @@ import { MotionConfig } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { captionFromClips } from './clips.js';
 import Events from './Events.jsx';
-import { Collapse, Expand, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from './icons.jsx';
+import { ChevronDown, Collapse, Expand, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from './icons.jsx';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import Sidebar from './Sidebar.jsx';
 import Tip from './Tip.jsx';
 import { useTelemetry } from './useTelemetry.js';
-import { crumbsToScene, worldObjects } from './worldScene.js';
+import { crumbsToScene, targetObjectId } from './worldScene.js';
 
 const MODES = ['LIVE', 'HOLD', 'LOST'];
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -23,6 +24,9 @@ const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const measured = (v) => (isNum(v) && v > 0 ? v : null);
 const msAgo = (now, then) => (isNum(now) && isNum(then) ? (now - then) / 1e6 : null);
 const panWord = (p) => (!isNum(p) ? '–' : p < -0.1 ? 'left' : p > 0.1 ? 'right' : 'centre');
+const SHOWN_OBJECTS = 8;
+// Seconds since a sighting, as words: a remembered object can be minutes old.
+const agoText = (s) => (!isNum(s) ? '–' : s < 1 ? 'just now' : s < 60 ? `${s.toFixed(1)} s ago` : `${Math.round(s / 60)} min ago`);
 
 const NARROW = '(max-width: 899px)';
 const REDUCE = '(prefers-reduced-motion: reduce)';
@@ -180,37 +184,41 @@ export default function App() {
         <main className="stage" data-stale={!hasData}>
           <Scene world={shown} />
 
-          <div className="topbar">
-            <div className="brand">
-              <span className="mark" aria-hidden="true" />
-              Beacon
+          <div className="stage-top">
+            <div className="topbar">
+              <div className="brand">
+                <span className="mark" aria-hidden="true" />
+                Beacon
+              </div>
+              <Highlight mode="parent" controlledItems value={mode} click={false} className="mode-hl" containerClassName="modes">
+                {MODES.map((m) => (
+                  <HighlightItem key={m} value={m} activeClassName={`hl-${m}`}>
+                    <div className={m === mode ? 'mode on' : 'mode'} aria-current={m === mode ? 'true' : undefined}>
+                      {m}
+                    </div>
+                  </HighlightItem>
+                ))}
+              </Highlight>
+              <div className="readout">
+                <span>Law</span>
+                <b><Rolling text={w.law} /></b>
+              </div>
+              <div className="readout">
+                <span>Intent</span>
+                <b><Rolling text={w.intent?.kind} /></b>
+                {w.intent?.candidates?.length > 0 && <em>{w.intent.candidates.join(', ')}</em>}
+              </div>
+              <div className="topbar-end">
+                <Status connected={connected} paused={paused} hasData={hasData} />
+                <Tip label={focused ? 'Bring the panels back' : 'Focus the 3D view'} keys="Ctrl B">
+                  <Button className="icon-btn" aria-label={focused ? 'Show the panels' : 'Focus the 3D view'} aria-pressed={focused} onClick={toggleFocus}>
+                    {focused ? <Collapse /> : <Expand />}
+                  </Button>
+                </Tip>
+              </div>
             </div>
-            <Highlight mode="parent" controlledItems value={mode} click={false} className="mode-hl" containerClassName="modes">
-              {MODES.map((m) => (
-                <HighlightItem key={m} value={m} activeClassName={`hl-${m}`}>
-                  <div className={m === mode ? 'mode on' : 'mode'} aria-current={m === mode ? 'true' : undefined}>
-                    {m}
-                  </div>
-                </HighlightItem>
-              ))}
-            </Highlight>
-            <div className="readout">
-              <span>Law</span>
-              <b><Rolling text={w.law} /></b>
-            </div>
-            <div className="readout">
-              <span>Intent</span>
-              <b><Rolling text={w.intent?.kind} /></b>
-              {w.intent?.candidates?.length > 0 && <em>{w.intent.candidates.join(', ')}</em>}
-            </div>
-            <div className="topbar-end">
-              <Status connected={connected} paused={paused} hasData={hasData} />
-              <Tip label={focused ? 'Bring the panels back' : 'Focus the 3D view'} keys="Ctrl B">
-                <Button className="icon-btn" aria-label={focused ? 'Show the panels' : 'Focus the 3D view'} aria-pressed={focused} onClick={toggleFocus}>
-                  {focused ? <Collapse /> : <Expand />}
-                </Button>
-              </Tip>
-            </div>
+            {/* video is not kept in history, so a paused view never shows a live frame next to a past scene */}
+            {frameUrl && !paused && <CameraCard url={frameUrl} />}
           </div>
 
           {!connected && log.items.length === 0 && <Waiting />}
@@ -229,7 +237,7 @@ export default function App() {
           onOpenChange={(open) => setPanel('right', open)}
           icons={{ open: <PanelRightOpen />, close: <PanelRightClose /> }}
         >
-          <System w={w} health={health} log={log} setCursor={setCursor} frameUrl={paused ? null : frameUrl} />
+          <System w={w} health={health} log={log} setCursor={setCursor} />
           <Section title="Display">
             <div className="setting">
               <span id="anim-label">Animations</span>
@@ -317,6 +325,9 @@ function Guidance({ w }) {
   const phrase = spoken(cue, t?.name);
   const conf = isNum(t?.conf) ? Math.min(Math.max(t.conf, 0), 1) : null;
   const pan = isNum(cue?.pan) ? Math.min(Math.max(cue.pan, -1), 1) : null;
+  // What the session remembers, newest sighting first (only replays joined with percept's stream carry objects today).
+  const objects = (w.objects ?? []).filter((o) => o?.name).sort((a, b) => (b.last_seen_ns ?? 0) - (a.last_seen_ns ?? 0));
+  const targetId = targetObjectId(w);
   return (
     <>
       <Section title="Target" aside={t ? 'bound' : null}>
@@ -334,7 +345,7 @@ function Guidance({ w }) {
               <dt>From camera</dt>
               <dd><Num value={t.xyz_cam && Math.hypot(...t.xyz_cam)} digits={2} unit=" m" /></dd>
               <dt>Last seen</dt>
-              <dd><Num value={msAgo(w.t_ns, t.last_seen_ns)} unit=" ms ago" /></dd>
+              <dd><Ago ms={msAgo(w.t_ns, t.last_seen_ns)} /></dd>
               <dt>Confidence</dt>
               <dd className="with-meter">
                 <span className="meter" aria-hidden="true"><span style={{ width: `${(conf ?? 0) * 100}%` }} /></span>
@@ -362,24 +373,42 @@ function Guidance({ w }) {
         {phrase && <blockquote className="phrase">{phrase}</blockquote>}
       </Section>
 
-      <Section title="Session map">
+      <Section title="Session map" aside={objects.length ? `${objects.length} remembered` : null}>
         <dl className="kv">
           <dt>Pose</dt>
-          <dd>{w.pose == null ? 'not sent' : w.pose.valid === true ? 'valid' : 'lost'}</dd>
+          <dd>{w.pose == null ? 'not sent' : w.pose.valid !== true ? 'lost' : w.pose.interpolated ? 'valid, interpolated' : 'valid'}</dd>
           <dt>Pose age</dt>
           <dd><Num value={isNum(w.pose?.age_ns) ? w.pose.age_ns / 1e6 : null} unit=" ms" /></dd>
-          <dt>Object dots</dt>
-          <dd>{worldObjects(w).length}</dd>
           <dt>Crumbs</dt>
           <dd>{crumbsToScene(w).length}</dd>
         </dl>
+        {objects.length > 0 && (
+          <ul className="objs" aria-label="Remembered objects, newest sighting first">
+            {objects.slice(0, SHOWN_OBJECTS).map((o) => {
+              const id = o.id ?? o.name;
+              const far = Array.isArray(o.xyz_cam) && o.xyz_cam.every(isNum) ? `${Math.hypot(...o.xyz_cam).toFixed(1)} m` : '–';
+              const seen = o.in_latest_boxes === true ? 'in view' : agoText(msAgo(w.t_ns, o.last_seen_ns) / 1000);
+              return (
+                <li key={id} data-live={o.in_latest_boxes === true} data-target={id === targetId}>
+                  <span className="dot" aria-hidden="true" />
+                  <span className="obj-name">
+                    {o.name}
+                    {id === targetId && <em>target</em>}
+                  </span>
+                  <span className="obj-meta">{far} · {seen}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {objects.length > SHOWN_OBJECTS && <p className="muted more">and {objects.length - SHOWN_OBJECTS} more</p>}
       </Section>
     </>
   );
 }
 
-// Right panel: process health, the kill-and-restart story, timing and the camera.
-function System({ w, health, log, setCursor, frameUrl }) {
+// Right panel: process health, the kill-and-restart story and timing.
+function System({ w, health, log, setCursor }) {
   const procs = Object.entries(health.procs ?? {});
   const up = procs.filter(([, p]) => p.alive).length;
   return (
@@ -428,15 +457,33 @@ function System({ w, health, log, setCursor, frameUrl }) {
           </div>
         </dl>
       </Section>
-
-      {/* video is not kept in history, so a paused view never shows a live frame next to a past scene */}
-      {frameUrl && (
-        <Section title="Camera" aside="telemd preview">
-          <img className="camera" src={frameUrl} alt="Latest downscaled camera frame from telemd" />
-        </Section>
-      )}
     </>
   );
+}
+
+// The latest camera frame, floating over the 3D view so it stays in sight with both panels hidden.
+// A replay with probe frames shows the camera with its detection boxes and the depth map below.
+function CameraCard({ url }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <Collapsible.Root className="pip" open={open} onOpenChange={setOpen}>
+      <div className="pip-head">
+        <span>Camera</span>
+        <Collapsible.Trigger render={<Button className="icon-btn pip-toggle" aria-label={open ? 'Hide the camera' : 'Show the camera'} />}>
+          <ChevronDown />
+        </Collapsible.Trigger>
+      </div>
+      <Collapsible.Panel className="pip-panel">
+        <img src={url} alt="Latest camera frame from the Pi" />
+      </Collapsible.Panel>
+    </Collapsible.Root>
+  );
+}
+
+// Milliseconds under a second, seconds above, so a stale sighting never reads "10678 ms ago".
+function Ago({ ms }) {
+  if (!isNum(ms)) return '–';
+  return ms < 1000 ? <Num value={ms} unit=" ms ago" /> : <Num value={ms / 1000} digits={1} unit=" s ago" />;
 }
 
 // What the wearer hears right now: the spoken sentence, or the reach ticks.

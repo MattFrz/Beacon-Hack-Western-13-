@@ -76,6 +76,16 @@ export function worldTarget(world) {
   return worldPoint(world?.target);
 }
 
+// Which objects[] row is the bound target. guided numbers its target while percept names objects
+// ("bottle-1"), so when no id matches, the row with the target's name at the target's position is it.
+export function targetObjectId(world, objects = worldObjects(world)) {
+  const t = world?.target;
+  const p = worldTarget(world);
+  if (!t || !p) return null;
+  const near = (o) => o.name === t.name && Math.hypot(o.position[0] - p[0], o.position[1] - p[1], o.position[2] - p[2]) < 0.05;
+  return (objects.find((o) => o.id === t.id) ?? objects.find(near))?.id ?? null;
+}
+
 export function crumbsToScene(world) {
   return (world?.crumbs ?? []).map(worldPoint).filter(Boolean);
 }

@@ -184,19 +184,46 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 .timeline li[data-kind='LIVE'] .tl-dot { color: var(--live); }
 .timeline time { font: 12px var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* remembered objects: green dot while in view, amber for the bound target */
+.objs { margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--line); list-style: none; }
+.objs li { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+.objs .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nodata); }
+.objs li[data-live='true'] .dot { background: var(--live); }
+.objs li[data-target='true'] .dot { background: var(--hold); }
+.obj-name { display: flex; align-items: baseline; gap: 8px; }
+.obj-name em { color: var(--hold); font: 500 11px var(--font-mono); font-style: normal; }
+.obj-meta { color: var(--muted); font: 12px var(--font-mono); font-variant-numeric: tabular-nums; }
+.more { margin-top: 6px; font-size: 12px; }
+
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0; }
 .stats div { display: flex; flex-direction: column; gap: 4px; }
 .stats dt { color: var(--muted); font-size: 12px; }
 .stats dd { margin: 0; font: 500 18px var(--font-mono); font-variant-numeric: tabular-nums; }
-.camera { display: block; width: 100%; border: 1px solid var(--line); border-radius: var(--r); }
+/* camera card (animate-ui Collapsible: the panel's height animates open and shut) */
+.pip { width: 260px; border: 1px solid var(--line); border-radius: var(--r); background: var(--glass); backdrop-filter: blur(14px); overflow: hidden; }
+.pip-head { display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 4px 0 12px; font-size: 13px; font-weight: 600; }
+.pip-toggle { width: 28px; height: 28px; border-color: transparent; background: transparent; backdrop-filter: none; }
+.pip-toggle svg { transition: transform 0.2s var(--ease); }
+.pip-toggle[data-panel-open] svg { transform: rotate(180deg); }
+.pip-panel { overflow: hidden; }
+.pip-panel img { display: block; width: 100%; border-top: 1px solid var(--line); }
 
-/* ---------- floating top bar over the 3D view, between the two panel handles */
-.topbar {
+/* ---------- floating top bar over the 3D view, between the two panel handles; the camera card hangs below it */
+.stage-top {
   position: absolute;
   top: var(--gutter);
   left: calc(var(--gutter) * 2 + var(--ctl));
   right: calc(var(--gutter) * 2 + var(--ctl));
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: none;
+}
+.stage-top > * { pointer-events: auto; }
+.topbar {
+  align-self: stretch;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -296,6 +323,7 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
   .sb-gap { width: 0 !important; }
   .sb { box-shadow: 0 0 48px rgb(0 0 0 / 0.55); }
   .brand { display: none; }
+  .pip { width: 160px; }
   .scrub-label { min-width: 0; }
   .scrub-label em { display: none; }
 }
