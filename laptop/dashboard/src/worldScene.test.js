@@ -167,3 +167,17 @@ test('rememberObjects keeps an object after it drops out of view', async () => {
   assert.equal(memory.length, 2);
   assert.deepEqual(memory[0].position, [1.05, 0, -2]);
 });
+
+test('nearby duplicate rows keep the newest position regardless of packet order', async () => {
+  const { rememberObjects } = await import('./worldScene.js');
+  const old = { id: 1, name: 'bottle', position: [1, 0, 0], seen: 10, faded: true };
+  const fresh = { ...old, id: 2, position: [1.45, 0, 0], seen: 20, faded: false };
+  const memory = rememberObjects([], [old]);
+  for (const rows of [[old, fresh], [fresh, old]]) {
+    const result = rememberObjects(memory, rows);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].key, memory[0].key);
+    assert.deepEqual(result[0].position, fresh.position);
+    assert.equal(result[0].live, true);
+  }
+});

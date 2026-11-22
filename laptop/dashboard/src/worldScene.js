@@ -52,7 +52,7 @@ export function wearerState(pose, previous = null) {
 
 export function worldObjects(world) {
   const tNs = world?.t_ns;
-  return (world?.objects ?? [])
+  return (world?.objects ?? world?.scene?.objects ?? [])
     .map((o) => {
       const position = worldPoint(o);
       if (!position) return null;
@@ -61,39 +61,39 @@ export function worldObjects(world) {
         id: o.id ?? o.name,
         name: o.name ?? String(o.id ?? 'object'),
         position,
-        faded: o.in_latest_boxes === false || stale,
+        seen: o.last_seen_ns ?? (o.in_latest_boxes === false ? 0 : tNs) ?? 0,
+        faded: !(o.in_latest_boxes ?? !stale),
         range: norm(isVec3(o.xyz_cam) ? o.xyz_cam : o.xyz_world),
-        label: `${o.name ?? 'object'} ${norm(o.xyz_world).toFixed(2)} m`,
+        label: `${o.name ?? 'object'} ${norm(isVec3(o.xyz_cam) ? o.xyz_cam : o.xyz_world).toFixed(2)} m`,
       };
     })
     .filter(Boolean);
 }
 
-// Sightings of the same name this close are one object. Monocular depth wobbles more the farther away
-// the object is, so the radius grows with range: 0.3 m up close, 20% of the distance beyond 1.5 m.
-const sameObjectM = (range) => Math.max(0.3, 0.2 * (isNum(range) ? range : 0));
-
-// The session's object map: every object stays where it was last seen until the map is reset, so a
-// bottle that drops out of one frame (or LOST clearing objects[]) does not vanish from the 3D view.
-// A sighting moves the nearest remembered object with its name; anything further away is a new object.
-// Returns a new array; entries are { key, name, position, label, live, faded, sourceId }.
+// Cluster newest sightings first so older duplicate rows cannot move a marker back.
 export function rememberObjects(memory, objects) {
-  const next = memory.map((m) => ({ ...m, live: false, faded: true }));
-  const claimed = new Set();
+  const entries = memory.map(m => ({ ...m, live: false, faded: true }));
   for (const o of objects) {
-    let best = null;
-    let bestD = sameObjectM(o.range);
-    for (const m of next) {
-      if (m.name !== o.name || claimed.has(m)) continue;
-      const d = Math.hypot(m.position[0] - o.position[0], m.position[1] - o.position[1], m.position[2] - o.position[2]);
-      if (d < bestD) [best, bestD] = [m, d];
-    }
-    const entry = { name: o.name, position: o.position, label: o.label, live: !o.faded, faded: o.faded, sourceId: o.id };
-    if (best) Object.assign(best, entry);
-    else next.push((best = { key: `${o.name}-${next.length}`, ...entry }));
-    claimed.add(best);
+    entries.push({ ...o, sourceId: o.id, live: !o.faded });
   }
-  return next;
+  entries.sort((a, b) => (b.seen ?? 0) - (a.seen ?? 0) || Number(b.live) - Number(a.live)
+    || Number(Boolean(a.key)) - Number(Boolean(b.key)));
+  const markers = [];
+  for (const entry of entries) {
+    const match = markers.find(m => m.name === entry.name && Math.hypot(
+      m.position[0] - entry.position[0], m.position[1] - entry.position[1], m.position[2] - entry.position[2],
+    ) <= 0.5);
+    if (match) {
+      if (entry.key && !match.key) match.key = entry.key;
+    } else {
+      markers.push(entry);
+    }
+  }
+  for (const marker of markers) {
+    marker.key ??= JSON.stringify([marker.name, marker.position]);
+  }
+  const order = new Map(memory.map((entry, i) => [entry.key, i]));
+  return markers.sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity));
 }
 
 export function worldHand(world) {
