@@ -50,7 +50,7 @@ jobs:
         run: make -C percept test-python PYTHON=python3
 
   native:
-    name: guided, supervisor, telemd
+    name: guided, supervisor, telemd, ingest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -62,6 +62,8 @@ jobs:
         run: make -C supervisor test
       - name: telemd build, with and without preview
         run: make -C telemd all preview
+      - name: ingest build and end-to-end relay test
+        run: make -C ingest test
 
   graphify:
     name: graphify graph updated
