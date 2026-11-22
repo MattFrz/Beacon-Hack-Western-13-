@@ -49,7 +49,7 @@ slay_matching() {
 }
 
 echo "== stop leftovers =="
-slay_matching "ingest/build/ingest|[.]/ingest --|world_in|beacon_cmd --udp|guided/build/guided|live_probe|beacon_grab|telemd/build/telemd"
+slay_matching "ingest/build/ingest|[.]/ingest --|world_in|beacon_cmd --|guided/build/guided|live_probe|beacon_grab|telemd/build/telemd"
 sleep 1
 rm -f /dev/shmem/beacon_world
 mkdir -p /tmp/live
@@ -125,9 +125,11 @@ fi
 slay_matching "ingest/build/ingest"
 sleep 1
 "$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
-# Push-to-talk from the dashboard (laptop speech-to-text -> UDP 5007 -> intent), if built.
-if [ -x "$REPO/voiced/build/beacon_cmd" ]; then
-    "$REPO/voiced/build/beacon_cmd" --udp 5007 > /tmp/beacon_cmd.log 2>&1 &
+# Phone page: open http://<pi>:8080 on a phone on the hotspot, dictate with the keyboard mic, Send.
+BEACON_CMD=${BEACON_CMD:-/data/home/qnxuser/beacon/voiced/build/beacon_cmd}
+if [ -x "$BEACON_CMD" ]; then
+    "$BEACON_CMD" --http 8080 > /tmp/beacon_cmd.log 2>&1 &
+    echo "== phone page: http://$(ifconfig bcm0 2>/dev/null | awk '/inet /{print $2}'):8080 =="
 fi
 sleep 12
 
