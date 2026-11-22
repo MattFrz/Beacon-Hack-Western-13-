@@ -164,9 +164,18 @@ static void map_pose(beacon_percept_block_t *blk, const jval *root)
     blk->pose.t_ns = juint(jobj_get(p, "t_ns"), 0);
     blk->pose.age_ns = juint(jobj_get(p, "age_ns"), 0);
     const jval *t = jobj_get(p, "T_world_from_cam");
-    if (jis(t, J_ARR))
-        for (int i = 0; i < 16 && i < t->n; ++i)
-            blk->pose.T_world_from_cam[i] = (float)jnum(jarr_at(t, i), 0.0);
+    /* The live VO probe emits four rows. Recorded probes also use a flat matrix. */
+    int nested = jis(t, J_ARR) && t->n == 4;
+    for (int i = 0; i < 16; ++i) {
+        const jval *row = nested ? jarr_at(t, i / 4) : t;
+        const jval *v = jarr_at(row, nested ? i % 4 : i);
+        if (!jis(row, J_ARR) || row->n != (nested ? 4 : 16) ||
+            (!jis(v, J_INT) && !jis(v, J_NUM))) {
+            blk->pose.valid = 0;
+            return;
+        }
+        blk->pose.T_world_from_cam[i] = (float)jnum(v, 0.0);
+    }
 }
 
 /* hand: absent or without xyz_cam -> no hand this record (valid = 0). */
@@ -208,11 +217,9 @@ static int map_record(beacon_percept_block_t *blk, const jval *root, uint64_t no
     if (!jis(objects, J_ARR)) {
         return -1; /* not a world record; probably a stray datagram */
     }
+    map_pose(blk, root);
     if (map_objects(blk, objects, blk->pose.pose_epoch) < 0)
         return -1;
-    /* Order matters: pose before hand (epoch) and before objects' default
-     * epoch is not needed because objects carry their own. */
-    map_pose(blk, root);
     map_hand(blk, root);
     map_health(blk, root, now);
     return 0;
