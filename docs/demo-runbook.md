@@ -9,6 +9,38 @@ Two passes, floor first:
 
 Source of truth for claims: `docs/qnx-prize-track.md`. If this runbook disagrees with the bring-up log (`docs/pi-bringup.md`) on what has been measured, the log wins.
 
+## ADDITION (Nov 22, ~5 am): the live pass as it runs now
+
+Verified on the Pi tonight, end to end, on the JBL: the C270 sees the bottle, guided speaks the WALK cue, the wearer's hand is detected, REACH ticks speed up, a steady tone, then "Found it." (3 times in one 3-minute run, 0 missed deadlines, Pi stayed up).
+
+**Before you start**
+
+- Power: the Pi alone on the power bank's strongest USB-C port. The JBL runs on its own battery. With the JBL also on the bank, the Pi reset twice as soon as the pipeline started.
+- JBL: switch it on near the Pi. The Pi's Bluetooth service (`bt_audio_service.sh`, started at boot) connects to it on its own. Check: `tail -3 ~/projects/qnx-bluetooth/bt_audio.log` shows `Stream started`.
+- Laptop: on the hotspot; `laptop/bridge` → `npm start`, `laptop/dashboard` → `npm run dev`, open localhost:5173.
+- Scene: one bottle in view (four bottles in view made the target hop between them). Wear the watch on the reaching hand.
+
+**Run (one command, on the Pi)**
+
+```
+cd ~/beacon && AUDIO=jbl sh run_live.sh bottle
+```
+
+- The dashboard address defaults to the machine you ssh'd from; pass it as the second argument otherwise.
+- Phone as the mic: open `http://10.80.55.25:8080` on a phone on the hotspot, dictate "find my bottle", Send.
+- Stop: `sh run_live.sh stop`.
+- Default detector is the 8-word bake with `watch` (`models/yoloe26n_320_watch.onnx`, labels `models/labels_watch.txt`): a wristwatch also marks the hand. On the same 151 recorded reach frames it found the hand in 37 frames vs 1 for the 7-word bake, at the same speed. `MODEL=hand` selects the old bake.
+
+**What to say about it (all measured tonight)**
+
+- Detection runs about once a second on the Pi; guided runs at 60 Hz and never waits on it (0 missed deadlines in every run).
+- The hand is a YOLO class (MediaPipe cannot run on QNX). Its distance is taken from the object it touches, measured to the object's outline, because the depth model cannot measure a hand.
+- Say "bottle", not "can": the model labels the Celsius can as "bottle" and the red cup as "can".
+
+**Backup video** (if the live pass fails while recording): `beacon-demo-narrated.mp4`, the walk-around clip fed through the Pi pipeline in real time; the voice and captions are what guided said.
+
+The "Reach ticks ... stay in the script only if MediaPipe hands come up" paragraph below is superseded by this section: reach works with the YOLO hand/watch class.
+
 ## The 30 seconds
 
 The camera (phone on a tripod) sees the table, the JBL Go 3, and the wearer's hand. The SSH terminal is visible on the laptop screen behind. The JBL must be audible in the recording; everything else is optional.
