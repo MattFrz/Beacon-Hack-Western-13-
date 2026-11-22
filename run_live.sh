@@ -31,5 +31,9 @@ MODEL=${MODEL:-watch}
 if [ "$MODEL" = watch ] && [ -f "$HERE/models/yoloe26n_320_watch.onnx" ]; then
     export YOLO="$HERE/models/yoloe26n_320_watch.onnx" LABELS="$HERE/models/labels_watch.txt"
 fi
+# The Bluetooth sender starts at priority 10, the same as the vision Python, which keeps
+# all four cores busy: starved, the speaker runs dry and the voice stutters. 30 is above
+# vision and below guided's audio thread (40) and control loop (58).
+sudo -n slay -P 30r a2dp_source_demo >/dev/null 2>&1 || true
 echo "live demo: target ${1:-bottle}, dashboard at $LAPTOP, audio ${GUIDED_AUDIO:-none}, model ${YOLO:-default}"
 exec sh "$HERE/ingest/tools/device_live_demo.sh" "${1:-bottle}" "$LAPTOP" "${DURATION:-1800}"

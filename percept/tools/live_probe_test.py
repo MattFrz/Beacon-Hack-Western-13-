@@ -34,6 +34,18 @@ class LiftHandTest(unittest.TestCase):
         self.assertIs(out, w)
 
 
+class HandLookalikeTest(unittest.TestCase):
+    def test_hand_boxed_as_bottle_is_dropped(self):
+        fake = {"name": "bottle", "in_latest_boxes": True, "bbox_px": [100, 100, 300, 300]}
+        w = {"hand": {"bbox_px": [110, 110, 300, 290]}, "objects": [fake, dict(BOTTLE)]}
+        self.assertEqual([o["bbox_px"] for o in lp.drop_hand_lookalikes(w)["objects"]], [BOTTLE["bbox_px"]])
+
+    def test_gripped_bottle_is_kept(self):
+        # hand over the middle of a tall bottle: overlap is partial
+        w = {"hand": {"bbox_px": [590, 300, 690, 380]}, "objects": [dict(BOTTLE)]}
+        self.assertEqual(len(lp.drop_hand_lookalikes(w)["objects"]), 1)
+
+
 class PlaceHandTest(unittest.TestCase):
     def dist(self, w):
         return math.dist(lp.place_hand(w, W, H, 60.0)["hand"]["xyz_cam"], BOTTLE["xyz_cam"])

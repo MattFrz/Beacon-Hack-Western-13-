@@ -485,6 +485,42 @@ def _boxes_touch(a: Sequence[float], b: Sequence[float], pad: float = 0.15) -> b
                 or a[3] < b[1] - pad * bh or a[1] > b[3] + pad * bh)
 
 
+def _iou(a: Sequence[float], b: Sequence[float]) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+HAND_LOOKALIKE_IOU = 0.5
+
+
+def drop_hand_lookalikes(world: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop live objects whose box is mostly the hand's box.
+
+    Seen on the Pi: the open hand was also boxed as "bottle 0.53 m". That fake
+    bottle can become the target, and the hand is always "on" it, so REACH and
+    "Found it" fire with nothing there. A real object being gripped overlaps the
+    hand box only partly (IoU well under 0.5), so it stays.
+    """
+    hand = world.get("hand")
+    if not isinstance(hand, dict) or not hand.get("bbox_px"):
+        return world
+    hb = [float(v) for v in hand["bbox_px"]]
+    objects = world.get("objects") or []
+    kept = [
+        o for o in objects
+        if not (isinstance(o, dict) and o.get("in_latest_boxes") and o.get("bbox_px")
+                and _iou(hb, [float(v) for v in o["bbox_px"]]) >= HAND_LOOKALIKE_IOU)
+    ]
+    if len(kept) == len(objects):
+        return world
+    out = dict(world)
+    out["objects"] = kept
+    return out
+
+
 def place_hand(world: Dict[str, Any], frame_w: int, frame_h: int,
                hfov_deg: float) -> Dict[str, Any]:
     """Give the hand a usable 3D point; the depth model cannot measure a hand.
@@ -704,6 +740,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # depth model's known far-bias, gating it would silently kill hand
                 # tracking at about arm's length.
                 world, hand_det = lift_hand(world)
+                if hand_det is not None:
+                    world = drop_hand_lookalikes(world)
                 if hand_det is not None and probe.get("W") and probe.get("H"):
                     world = place_hand(world, int(probe["W"]), int(probe["H"]),
                                        float(getattr(args, "fov", None) or 60.0))
