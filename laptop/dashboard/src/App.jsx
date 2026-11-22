@@ -137,7 +137,7 @@ function usePanels(narrow) {
 }
 
 export default function App() {
-  const { log, world, frames, connected, stale, bridge, setSource } = useTelemetry();
+  const { log, world, connected, stale, bridge, setSource } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
   useEffect(() => setCursor(null), [bridge?.source, bridge?.replay]);
   const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
@@ -278,7 +278,7 @@ export default function App() {
             <kbd>]</kbd>
           </header>
           <div className="sb-body">
-            <Camera frames={frames} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
+            <Camera paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
           </div>
         </Sidebar>
       </div>
@@ -586,11 +586,35 @@ function System({ w, health, log, setCursor }) {
 }
 
 // Show full-rate camera capture separately from the slower object and depth inference preview.
-function Camera({ frames, paused, recording }) {
+function Camera({ paused, recording }) {
+  const [frames, setFrames] = useState({});
+  useEffect(() => {
+    const staleTimers = {};
+    const onFrame = ({ detail: { channel, frame } }) => {
+      setFrames((current) => ({ ...current, [channel]: frame }));
+      clearTimeout(staleTimers[channel]);
+      staleTimers[channel] = setTimeout(() => {
+        setFrames((current) => current[channel]?.at === frame.at ? { ...current, [channel]: null } : current);
+      }, channel === 'raw' ? 2000 : 3500);
+    };
+    const onClear = () => {
+      for (const timer of Object.values(staleTimers)) clearTimeout(timer);
+      setFrames({});
+    };
+    window.addEventListener('beacon:frame', onFrame);
+    window.addEventListener('beacon:frames-clear', onClear);
+    return () => {
+      window.removeEventListener('beacon:frame', onFrame);
+      window.removeEventListener('beacon:frames-clear', onClear);
+      for (const timer of Object.values(staleTimers)) clearTimeout(timer);
+    };
+  }, []);
+  const rawUrl = frames.raw?.url;
+  const compositeUrl = frames.composite?.url;
   if (recording && !recording.video) return <p className="muted camera-note">This hand simulation contains 3D telemetry only.</p>;
   // video is not kept in history, so a paused view never shows a live frame next to a past scene
   if (paused) return <p className="muted camera-note">The camera hides while the view is paused: video is not kept in history.</p>;
-  if (!frames.raw && !frames.composite) {
+  if (!rawUrl && !compositeUrl) {
     return (
       <p className="muted camera-note">
         {recording ? 'Waiting for the recorded frame.' : 'Waiting for camera frames from the Pi.'}
@@ -598,9 +622,9 @@ function Camera({ frames, paused, recording }) {
     );
   }
   const views = [
-    { title: 'Camera · up to 24 fps', url: frames.raw, alt: 'Live camera feed' },
-    { title: 'Object detection', url: frames.composite, crop: 'top', alt: 'Camera feed with detection boxes and labels' },
-    { title: 'Depth map', url: frames.composite, crop: 'bottom', alt: 'Colorized depth map from the camera' },
+    { title: 'Camera · up to 24 fps', url: rawUrl, alt: 'Live camera feed' },
+    { title: 'Object detection', url: compositeUrl, crop: 'top', alt: 'Camera feed with detection boxes and labels' },
+    { title: 'Depth map', url: compositeUrl, crop: 'bottom', alt: 'Colorized depth map from the camera' },
   ];
   return (
     <div className="camera-stack">

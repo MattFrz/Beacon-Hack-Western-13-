@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const BRIDGE_URL = 'ws://127.0.0.1:8765';
 const STALE_MS = 1000; // no world state for this long -> NO DATA, never a frozen LIVE
-const FRAME_STALE_MS = 2000; // JPEG turned off or stopped -> hide the last frame
 const MAX_HISTORY = 6000; // world states kept for the scrubber: 10 min at 10 Hz
 const TRIM = 600; // drop this many of the oldest at a time
 const EMPTY = { first: 0, items: [] };
@@ -12,7 +11,6 @@ const EMPTY = { first: 0, items: [] };
 // can scrub after a run, but starts over when the source changes, so replay and live never share a timeline.
 export function useTelemetry() {
   const [log, setLog] = useState(EMPTY); // items[i] = { at, world }; first = index of items[0]
-  const [frames, setFrames] = useState({}); // newest live camera JPEG and slower detector composite
   const [bridge, setBridge] = useState(null); // { source, replay, pi, listen } from the bridge, every second
   const [connected, setConnected] = useState(false);
   const [now, setNow] = useState(() => performance.now());
@@ -45,7 +43,9 @@ export function useTelemetry() {
             if (frameUrls[channel]) URL.revokeObjectURL(frameUrls[channel]);
             frameUrls[channel] = url;
             frameTimes[channel] = performance.now();
-            setFrames((current) => ({ ...current, [channel]: { url, at: frameTimes[channel] } }));
+            window.dispatchEvent(new CustomEvent('beacon:frame', {
+              detail: { channel, frame: { url, at: frameTimes[channel] } },
+            }));
           });
           return;
         }
@@ -57,7 +57,7 @@ export function useTelemetry() {
             for (const url of Object.values(frameUrls)) URL.revokeObjectURL(url);
             for (const key of Object.keys(frameUrls)) delete frameUrls[key];
             for (const key of Object.keys(frameTimes)) delete frameTimes[key];
-            setFrames({});
+            window.dispatchEvent(new CustomEvent('beacon:frames-clear'));
           }
           source = feed;
           setBridge(msg.bridge);
@@ -93,9 +93,5 @@ export function useTelemetry() {
     setSource,
     connected,
     stale: !last || now - last.at > STALE_MS,
-    frames: Object.fromEntries(Object.entries(frames).map(([channel, frame]) => [
-      channel,
-      now - frame.at < (channel === 'raw' ? FRAME_STALE_MS : 3500) ? frame.url : null,
-    ])),
   };
 }

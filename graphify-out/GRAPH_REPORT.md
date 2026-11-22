@@ -1,7 +1,7 @@
 # Graph Report - Beacon-Hack-Western-13-  (2026-11-22)
 
 ## Corpus Check
-- 127 files · ~132,110 words
+- 127 files · ~132,162 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 15 file(s) not represented in the graph (top: (none) 11, .jsonl 3, .css 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 831,404 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `2429b7c9`
+- Built from commit: `d9a9c4c2`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -471,7 +471,7 @@ Cohesion: 0.50
 Nodes (4): xyz_cam OpenCV Camera Frame (+X right, +Y down, +Z forward), calib.json Camera Intrinsics (laptop-local, gitignored), calibrate_camera.py Chessboard Calibration, --fov Pinhole Guess (66 deg)
 
 ## Knowledge Gaps
-- **173 isolated node(s):** `LD_LIBRARY_PATH`, `PYTHONPATH`, `ORT_LIB`, `BEACON_MODE_HOLD`, `BEACON_MODE_LIVE` (+168 more)
+- **173 isolated node(s):** `BEACON_MODE_HOLD`, `BEACON_MODE_LIVE`, `BEACON_MODE_LOST`, `BEACON_MODE_NONE`, `BEACON_CLIP_A_LITTLE` (+168 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 589 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **14 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -479,15 +479,15 @@ Nodes (4): xyz_cam OpenCV Camera Frame (+X right, +Y down, +Z forward), calib.js
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Clip caption table (enum beacon_clip order)` connect `Clip caption table (enum beacon_clip order)` to `beacon.h`, `App.jsx`?**
-  _High betweenness centrality (0.399) - this node is a cross-community bridge._
+  _High betweenness centrality (0.400) - this node is a cross-community bridge._
 - **Are the 18 inferred relationships involving `guided_step()` (e.g. with `beacon_live_max_ns()` and `beacon_mode`) actually correct?**
   _`guided_step()` has 18 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `LD_LIBRARY_PATH`, `PYTHONPATH`, `ORT_LIB` to the rest of the system?**
+- **What connects `BEACON_MODE_HOLD`, `BEACON_MODE_LIVE`, `BEACON_MODE_LOST` to the rest of the system?**
   _173 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `probe_to_world` be split into smaller, more focused modules?**
   _Cohesion score 0.05491268672417421 - nodes in this community are weakly interconnected._
 - **Why does `Beacon: Nathan's revision (spec)` connect `Beacon: Nathan's revision (spec)` to `Tape-measure depth gate (>30% error mutes metres)`, `Beacon Accessibility Research`, `Pi Development Workflow (QNX 8.0 on Raspberry Pi 5)`, `App.jsx`, `supervisor (spawn, runmasks, heartbeats, restarts)`, `guided (60 Hz cue synthesizer)`, `Merge verdict: BLOCK`, `dashboard (Vite + React + three.js remote monitor)`, `YOLOE-26n-seg (text-prompted, baked static ONNX)`, `telemd (read-only telemetry sender)`?**
-  _High betweenness centrality (0.148) - this node is a cross-community bridge._
+  _High betweenness centrality (0.159) - this node is a cross-community bridge._
 - **Are the 3 inferred relationships involving `probe_once()` (e.g. with `.depth_session()` and `.read_frame()`) actually correct?**
   _`probe_once()` has 3 INFERRED edges - model-reasoned connections that need verification._
 - **Should `guided_step` be split into smaller, more focused modules?**
