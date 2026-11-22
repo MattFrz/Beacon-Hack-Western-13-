@@ -21,6 +21,9 @@
 #define TURN_STABLE_NS     400000000ull
 #define TURN_MIN_GAP_NS    2000000000ull
 #define TURN_REMIND_NS     5000000000ull
+#define TURN_AFTER_NS      700000000ull  /* out of view this long (not a one-frame blink) before "turn ..." */
+#define LANDMARK_GAP_NS    8000000000ull /* "It's next to the mug." at most this often */
+#define CHIME_GAP_NS       3000000000ull /* one "facing it" chime, not a burst */
 #define DIR_AHEAD_DEG      8.0f   /* within this: "straight ahead" */
 #define DIR_SLIGHT_DEG     22.0f  /* within this: "slightly to your left/right" */
 #define WITHIN_REACH_M     0.60f
@@ -307,6 +310,7 @@ static void reset_guidance(guided_state_t *st)
     st->change_ns = 0;
     st->d_valid = 0;
     st->last_walk_ns = 0;
+    st->last_landmark_ns = 0;
     st->lost_said = 0;
     st->prev_mode = BEACON_MODE_NONE;
 }
@@ -450,8 +454,11 @@ static int measure_d(const guided_state_t *st, const beacon_percept_block_t *p, 
 /* ------------------------------------------------------------------ the step */
 /* "It's next to the mug.": another object in the same frame right beside the
  * target. Said after a full sentence only. */
-static void say_landmark(const guided_state_t *st, const beacon_percept_block_t *p, guided_out_t *out)
+static void say_landmark(guided_state_t *st, const beacon_percept_block_t *p, guided_out_t *out,
+                         uint64_t now)
 {
+    if (st->last_landmark_ns && now - st->last_landmark_ns < LANDMARK_GAP_NS)
+        return;
     const float *t = st->target.xyz_cam;
     for (int i = 0; i < BEACON_MAX_OBJECTS; ++i) {
         const beacon_object_t *o = &p->objects[i];
@@ -462,6 +469,7 @@ static void say_landmark(const guided_state_t *st, const beacon_percept_block_t 
         if (sqrtf(dx * dx + dy * dy + dz * dz) <= LANDMARK_M) {
             uint16_t c = BEACON_CLIP_NEXT_TO;
             say(out, 0, &c, 1, o->name);
+            st->last_landmark_ns = now;
             return;
         }
     }
@@ -486,7 +494,10 @@ static void orient(guided_state_t *st, guided_out_t *out, float az, uint64_t now
     }
     if (a < FACING_DEG) {
         st->orienting = 0;
-        push_cmd(out, GUIDED_CMD_CHIME);
+        if (!st->last_chime_ns || now - st->last_chime_ns >= CHIME_GAP_NS) {
+            push_cmd(out, GUIDED_CMD_CHIME);
+            st->last_chime_ns = now;
+        }
         return;
     }
     if (spoke) {
@@ -580,15 +591,19 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
         if (memory_bearing(st, p, now, pc)) {
             float az = atan2f(pc[0], pc[2]) * 57.2957795f;
             float a = fabsf(az);
-            if (a > TURN_DEG) {
+            /* a real camera blinks: one missing frame is not "out of view" */
+            int gone = now - st->target.last_seen_ns >= TURN_AFTER_NS;
+            if (a > TURN_DEG && (st->turning || gone)) {
                 out->law = BEACON_LAW_WALK;
                 uint16_t clip = a > 135.0f ? BEACON_CLIP_TURN_AROUND
                               : a > 70.0f ? (az < 0 ? BEACON_CLIP_TURN_LEFT : BEACON_CLIP_TURN_RIGHT)
                               : (az < 0 ? BEACON_CLIP_TURN_SLIGHT_LEFT : BEACON_CLIP_TURN_SLIGHT_RIGHT);
                 int speak = 0;
-                if (!st->turning) {               /* just left the view: say it now */
+                if (!st->turning) {               /* just left the view: say it now (spaced) */
                     st->turning = 1;
-                    speak = 1;
+                    st->turn_clip = 0;
+                    st->turn_change_ns = now;
+                    speak = !st->last_walk_ns || now - st->last_walk_ns >= TURN_MIN_GAP_NS;
                 } else if (clip != st->turn_clip) { /* e.g. "turn left" -> "a little to your left" */
                     if (!st->turn_change_ns)
                         st->turn_change_ns = now;
@@ -728,9 +743,12 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
         uint16_t clips[GUIDED_MAX_CLIPS];
         int n = 0, full = 0;
         if (!st->walk_started) {
-            n = guided_walk_cue(dir, dist, 1, 1, 1, clips, GUIDED_MAX_CLIPS);
-            full = 1;
-            st->walk_started = 1;
+            /* new target: now; back in view after a turn or LOST: not on top of the last cue */
+            if (!st->last_walk_ns || now - st->last_walk_ns >= WALK_MIN_GAP_NS) {
+                n = guided_walk_cue(dir, dist, 1, 1, 1, clips, GUIDED_MAX_CLIPS);
+                full = 1;
+                st->walk_started = 1;
+            }
         } else {
             int dir_changed = dir != st->cue_dir, dist_changed = dist != st->cue_dist;
             if (dir_changed || dist_changed) {
@@ -752,7 +770,7 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
         if (n > 0) {
             say_remember(st, out, 0, clips, n, st->target.name);
             if (full)
-                say_landmark(st, p, out);
+                say_landmark(st, p, out, now);
             st->cue_dir = dir;
             st->cue_dist = dist;
             st->change_ns = 0;
