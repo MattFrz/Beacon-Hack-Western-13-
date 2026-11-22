@@ -13,13 +13,15 @@ function SyncMobile({ open }) {
 // One animate-ui sidebar per side. Gap keeps the panel's width in the row, so the 3D view widens as the
 // panel closes; Container slides the fixed panel and its handle on the same timing (0 ms under reduced
 // motion); TriggerIcon swaps the handle's icon. The open state lives in App, which owns the shortcuts.
+// Each side has its own width (--sb-w-left, --sb-w-right); children bring their own .sb-head and .sb-body.
 export default function Sidebar({ side, open, onOpenChange, title, keys, icons, children }) {
   const id = `panel-${side}`;
-  const edge = (offset) => ({ [side]: open ? `calc(var(--sb-w) + ${offset})` : offset });
+  const width = `var(--sb-w-${side})`;
+  const edge = (offset) => ({ [side]: open ? `calc(${width} + ${offset})` : offset });
   return (
     <SidebarPrimitive.Provider open={open} onOpenChange={onOpenChange} className="sb-provider">
       <SyncMobile open={open} />
-      <SidebarPrimitive.Gap className="sb-gap" style={{ width: open ? 'var(--sb-w)' : 0 }} />
+      <SidebarPrimitive.Gap className="sb-gap" style={{ width: open ? width : 0 }} />
 
       <SidebarPrimitive.Container
         id={id}
@@ -28,13 +30,9 @@ export default function Sidebar({ side, open, onOpenChange, title, keys, icons, 
         role="complementary"
         aria-label={title}
         inert={!open}
-        style={{ [side]: open ? 0 : 'calc(var(--sb-w) * -1)' }}
+        style={{ width, [side]: open ? 0 : `calc(${width} * -1)` }}
       >
-        <header className="sb-head">
-          <h2>{title}</h2>
-          <kbd>{keys}</kbd>
-        </header>
-        <div className="sb-body">{children}</div>
+        {children}
       </SidebarPrimitive.Container>
 
       <SidebarPrimitive.Container className="sb-handle" data-side={side} style={edge('var(--gutter)')}>

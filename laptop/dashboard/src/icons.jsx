@@ -28,6 +28,4 @@ export const Collapse = () => (
     <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
   </Icon>
 );
-export const ChevronLeft = () => <Icon><path d="m15 18-6-6 6-6" /></Icon>;
-export const ChevronDown = () => <Icon><path d="m6 9 6 6 6-6" /></Icon>;
-export const ChevronRight = () => <Icon><path d="m9 18 6-6-6-6" /></Icon>;
+export const ChevronLeft = () => <Icon><path d="m15 18-6-6 6-6" /></Icon>;export const ChevronRight = () => <Icon><path d="m9 18 6-6-6-6" /></Icon>;

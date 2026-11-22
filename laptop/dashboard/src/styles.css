@@ -24,7 +24,8 @@
   --r-sm: 3px;
   --ctl: 40px;
   --gutter: 12px;
-  --sb-w: 320px;
+  --sb-w-left: 320px;
+  --sb-w-right: 440px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -87,7 +88,6 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
   z-index: 20;
   display: flex;
   flex-direction: column;
-  width: var(--sb-w);
   background: var(--surface);
 }
 .sb[data-side='left'] { border-right: 1px solid var(--line); }
@@ -199,16 +199,20 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 .stats div { display: flex; flex-direction: column; gap: 4px; }
 .stats dt { color: var(--muted); font-size: 12px; }
 .stats dd { margin: 0; font: 500 18px var(--font-mono); font-variant-numeric: tabular-nums; }
-/* camera card (animate-ui Collapsible: the panel's height animates open and shut) */
-.pip { width: 260px; border: 1px solid var(--line); border-radius: var(--r); background: var(--glass); backdrop-filter: blur(14px); overflow: hidden; }
-.pip-head { display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 4px 0 12px; font-size: 13px; font-weight: 600; }
-.pip-toggle { width: 28px; height: 28px; border-color: transparent; background: transparent; backdrop-filter: none; }
-.pip-toggle svg { transition: transform 0.2s var(--ease); }
-.pip-toggle[data-panel-open] svg { transform: rotate(180deg); }
-.pip-panel { overflow: hidden; }
-.pip-panel img { display: block; width: 100%; border-top: 1px solid var(--line); }
+/* left panel tabs (animate-ui on React Aria): the indicator copies the selected tab's look and slides to it */
+.sb-tabs { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.tabs { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: var(--r); background: rgb(0 0 0 / 0.25); }
+.tab { padding: 6px 14px; border-radius: var(--r-sm); color: var(--muted); font: 600 13px var(--font-text); cursor: pointer; outline: none; }
+.tab[data-hovered]:not([aria-selected='true']) { color: var(--ink); }
+.tab[aria-selected='true'] { background: var(--raise); color: var(--ink); }
+.tab[data-focus-visible] { outline: 2px solid var(--ink); outline-offset: 2px; }
+.tabs [data-slot='tabs-indicator'] { border-radius: var(--r-sm); }
 
-/* ---------- floating top bar over the 3D view, between the two panel handles; the camera card hangs below it */
+/* right panel: the camera at full width */
+.camera { display: block; width: 100%; margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r); }
+.camera-note { margin-top: 20px; }
+
+/* ---------- floating top bar over the 3D view, between the two panel handles */
 .stage-top {
   position: absolute;
   top: var(--gutter);
@@ -319,11 +323,13 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 /* ---------- narrow screens: panels cover the view instead of pushing it, one at a time */
 @media (max-width: 899px) {
   /* leave room beside an open panel for both handles: its own, and the other side's */
-  :root { --sb-w: min(320px, calc(100vw - var(--gutter) * 2 - var(--ctl) * 2 - 8px)); }
+  :root {
+    --sb-w-left: min(320px, calc(100vw - var(--gutter) * 2 - var(--ctl) * 2 - 8px));
+    --sb-w-right: min(440px, calc(100vw - var(--gutter) * 2 - var(--ctl) * 2 - 8px));
+  }
   .sb-gap { width: 0 !important; }
   .sb { box-shadow: 0 0 48px rgb(0 0 0 / 0.55); }
   .brand { display: none; }
-  .pip { width: 160px; }
   .scrub-label { min-width: 0; }
   .scrub-label em { display: none; }
 }

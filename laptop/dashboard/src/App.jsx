@@ -1,16 +1,17 @@
-import { Collapsible } from '@animate-ui/react/primitives/base-ui/collapsible';
 import { Switch } from '@animate-ui/react/primitives/base-ui/switch';
 import { Button } from '@animate-ui/react/primitives/buttons/button';
 import { Highlight, HighlightItem } from '@animate-ui/react/primitives/effects/highlight';
 import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
 import { ShimmeringText } from '@animate-ui/react/primitives/texts/shimmering';
+import { Tab, TabList, TabPanel } from '@animate-ui/react/primitives/react-aria/tabs';
 import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
 import { ReducedMotionContext, useShouldReduceMotion } from '@animate-ui/react/utils/motion';
 import { MotionConfig } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Tabs } from 'react-aria-components';
 import { captionFromClips } from './clips.js';
 import Events from './Events.jsx';
-import { ChevronDown, Collapse, Expand, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from './icons.jsx';
+import { Collapse, Expand, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from './icons.jsx';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import Sidebar from './Sidebar.jsx';
@@ -33,6 +34,8 @@ const NARROW = '(max-width: 899px)';
 const REDUCE = '(prefers-reduced-motion: reduce)';
 const PANELS_KEY = 'beacon.panels';
 const MOTION_KEY = 'beacon.motion';
+const TAB_KEY = 'beacon.tab';
+const TABS = ['guidance', 'system'];
 const BOTH = { left: true, right: true };
 // The viewer's animation choice -> the reduced-motion setting Motion and animate-ui read.
 const MOTION_SETTING = { system: 'user', on: 'never', off: 'always' };
@@ -68,24 +71,32 @@ function useMedia(query) {
   );
 }
 
-// 'system' follows the OS reduced-motion setting; 'on' and 'off' override it in this browser only.
-function useMotionChoice() {
-  const [choice, setChoice] = useState(() => {
+// A choice remembered per browser, a convenience only: storage may be blocked, so every call may fail.
+function useStored(key, fallback, allowed) {
+  const [value, setValue] = useState(() => {
     try {
-      const v = localStorage.getItem(MOTION_KEY);
-      if (v in MOTION_SETTING) return v;
+      const v = localStorage.getItem(key);
+      if (allowed.includes(v)) return v;
     } catch {
       /* fall through */
     }
-    return 'system';
+    return fallback;
   });
   useEffect(() => {
-    document.documentElement.dataset.motion = choice; // the CSS reduced-motion rule skips 'on'
     try {
-      localStorage.setItem(MOTION_KEY, choice);
+      localStorage.setItem(key, value);
     } catch {
       /* not remembered this time */
     }
+  }, [key, value]);
+  return [value, setValue];
+}
+
+// 'system' follows the OS reduced-motion setting; 'on' and 'off' override it in this browser only.
+function useMotionChoice() {
+  const [choice, setChoice] = useStored(MOTION_KEY, 'system', Object.keys(MOTION_SETTING));
+  useEffect(() => {
+    document.documentElement.dataset.motion = choice; // the CSS reduced-motion rule skips 'on'
   }, [choice]);
   return [choice, setChoice];
 }
@@ -127,6 +138,7 @@ export default function App() {
   const systemReduce = useMedia(REDUCE);
   const [motionChoice, setMotionChoice] = useMotionChoice();
   const [panels, setPanels, setPanel] = usePanels(narrow);
+  const [tab, setTab] = useStored(TAB_KEY, 'guidance', TABS);
   const restore = useRef(BOTH);
   const setting = MOTION_SETTING[motionChoice];
   const animationsOn = motionChoice === 'on' || (motionChoice === 'system' && !systemReduce);
@@ -173,13 +185,29 @@ export default function App() {
       <div className="shell">
         <Sidebar
           side="left"
-          title="Guidance"
+          title="Guidance and system"
           keys="["
           open={panels.left}
           onOpenChange={(open) => setPanel('left', open)}
           icons={{ open: <PanelLeftOpen />, close: <PanelLeftClose /> }}
         >
-          <Guidance w={w} />
+          {/* React Aria tabs, animated by animate-ui: the indicator slides between tabs, the panels blur across */}
+          <Tabs className="sb-tabs" selectedKey={tab} onSelectionChange={(key) => setTab(String(key))}>
+            <header className="sb-head">
+              <TabList aria-label="Left panel" className="tabs">
+                <Tab id="guidance" className="tab">Guidance</Tab>
+                <Tab id="system" className="tab">System</Tab>
+              </TabList>
+              <kbd>[</kbd>
+            </header>
+            <TabPanel id="guidance" className="sb-body">
+              <Guidance w={w} />
+            </TabPanel>
+            <TabPanel id="system" className="sb-body">
+              <System w={w} health={health} log={log} setCursor={setCursor} />
+              <Display animationsOn={animationsOn} systemReduce={systemReduce} motionChoice={motionChoice} setMotionChoice={setMotionChoice} />
+            </TabPanel>
+          </Tabs>
         </Sidebar>
 
         <main className="stage" data-stale={!hasData}>
@@ -218,8 +246,6 @@ export default function App() {
                 </Tip>
               </div>
             </div>
-            {/* video is not kept in history, so a paused view never shows a live frame next to a past scene */}
-            {frameUrl && !paused && <CameraCard url={frameUrl} />}
           </div>
 
           {!connected && log.items.length === 0 && <Waiting />}
@@ -232,33 +258,19 @@ export default function App() {
 
         <Sidebar
           side="right"
-          title="System"
+          title="Camera"
           keys="]"
           open={panels.right}
           onOpenChange={(open) => setPanel('right', open)}
           icons={{ open: <PanelRightOpen />, close: <PanelRightClose /> }}
         >
-          <System w={w} health={health} log={log} setCursor={setCursor} />
-          <Section title="Display">
-            <div className="setting">
-              <span id="anim-label">Animations</span>
-              <Switch.Root
-                className="switch"
-                checked={animationsOn}
-                onCheckedChange={(on) => setMotionChoice(on === !systemReduce ? 'system' : on ? 'on' : 'off')}
-                aria-labelledby="anim-label"
-              >
-                <Switch.Thumb className="switch-thumb" />
-              </Switch.Root>
-            </div>
-            {systemReduce && (
-              <p className="muted setting-note">
-                {motionChoice === 'on'
-                  ? 'Your system asks for less motion. Animations are on in this browser anyway.'
-                  : 'Your system asks for less motion, so the panels snap instead of sliding.'}
-              </p>
-            )}
-          </Section>
+          <header className="sb-head">
+            <h2>Camera</h2>
+            <kbd>]</kbd>
+          </header>
+          <div className="sb-body">
+            <Camera url={frameUrl} paused={paused} />
+          </div>
         </Sidebar>
       </div>
     </MotionScope>
@@ -463,22 +475,45 @@ function System({ w, health, log, setCursor }) {
   );
 }
 
-// The latest camera frame, floating over the 3D view so it stays in sight with both panels hidden.
-// A replay with probe frames shows the camera with its detection boxes and the depth map below.
-function CameraCard({ url }) {
-  const [open, setOpen] = useState(true);
+// Right panel: the latest camera frame at the panel's full width. A replay with probe frames shows the
+// image with its detection boxes and the depth map below it.
+function Camera({ url, paused }) {
+  // video is not kept in history, so a paused view never shows a live frame next to a past scene
+  if (paused) return <p className="muted camera-note">The camera hides while the view is paused: video is not kept in history.</p>;
+  if (!url) {
+    return (
+      <p className="muted camera-note">
+        No camera frames yet. <code>telemd-preview</code> sends them from the Pi, and <code>npm run replay:vid360</code> includes
+        them.
+      </p>
+    );
+  }
+  return <img className="camera" src={url} alt="Latest camera frame from the Pi" />;
+}
+
+// The animations switch: follows the OS reduced-motion setting unless the viewer overrides it here.
+function Display({ animationsOn, systemReduce, motionChoice, setMotionChoice }) {
   return (
-    <Collapsible.Root className="pip" open={open} onOpenChange={setOpen}>
-      <div className="pip-head">
-        <span>Camera</span>
-        <Collapsible.Trigger render={<Button className="icon-btn pip-toggle" aria-label={open ? 'Hide the camera' : 'Show the camera'} />}>
-          <ChevronDown />
-        </Collapsible.Trigger>
+    <Section title="Display">
+      <div className="setting">
+        <span id="anim-label">Animations</span>
+        <Switch.Root
+          className="switch"
+          checked={animationsOn}
+          onCheckedChange={(on) => setMotionChoice(on === !systemReduce ? 'system' : on ? 'on' : 'off')}
+          aria-labelledby="anim-label"
+        >
+          <Switch.Thumb className="switch-thumb" />
+        </Switch.Root>
       </div>
-      <Collapsible.Panel className="pip-panel">
-        <img src={url} alt="Latest camera frame from the Pi" />
-      </Collapsible.Panel>
-    </Collapsible.Root>
+      {systemReduce && (
+        <p className="muted setting-note">
+          {motionChoice === 'on'
+            ? 'Your system asks for less motion. Animations are on in this browser anyway.'
+            : 'Your system asks for less motion, so the panels snap instead of sliding.'}
+        </p>
+      )}
+    </Section>
   );
 }
 
