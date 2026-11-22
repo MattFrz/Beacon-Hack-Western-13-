@@ -1,2 +1,9 @@
 # Voice clips: short TTS words whose text is already in sounds/README.md and include/beacon.h
 sounds/*.wav
+
+# Judging reference for the QNX prize track, not code or product documentation
+docs/qnx-prize-track.md
+
+# VO test-recording frames: sample data for replay, not corpus content
+laptop/samples/vid360-frames/
+

@@ -41,6 +41,9 @@ class VoConfig:
     max_corners: int = 300
     fb_err_px: float = VO_FB_ERR_PX
     max_disp_px: float = VO_MAX_DISP_PX
+    lk_win: Tuple[int, int] = (21, 21)   # wider windows + a taller pyramid let LK
+    lk_level: int = 2                    # reach the large per-cycle steps of a
+                                         # ~2 Hz live loop; 21/2 is the laptop default
     moved_m: float = 0.10
     rot_deg: float = 15.0
     min_tracks: int = VO_MIN_TRACKS
@@ -69,6 +72,7 @@ class VoStep:
     scale_mult: float
     median_disp_px: float
     t_ns: int
+    n_tracks: int = 0              # surviving LK tracks; 0 also when untrusted
 
 
 def vo_pts_to_full(pts, vo_w: int, vo_h: int, cam_w: int, cam_h: int) -> np.ndarray:
@@ -303,7 +307,7 @@ class Vo:
         self._prev_gray = self._K["gray"]
         self._prev_pts = self._K["pts2d_vo"]
 
-    def _invalid(self, med_disp: float, t_ns: int) -> VoStep:
+    def _invalid(self, med_disp: float, t_ns: int, n_tracks: int = 0) -> VoStep:
         # Any untrusted step re-anchors to a newer depth-complete candidate
         # (bounds K->F drift by the depth cadence) but never moves the pose.
         if (self._candidate is not None and self._K is not None
@@ -311,7 +315,8 @@ class Vo:
             self._promote(self._pose)
         return VoStep(valid=False, T_world_from_cam=self._pose.copy(),
                       inliers=0, h_est=None, scale_mult=1.0,
-                      median_disp_px=med_disp, t_ns=int(t_ns))
+                      median_disp_px=med_disp, t_ns=int(t_ns),
+                      n_tracks=int(n_tracks))
 
     def step(self, gray_vo, frame_id: int, t_ns: int) -> Optional[VoStep]:
         if self._K is None:
@@ -321,13 +326,15 @@ class Vo:
         self._last_frame_id = int(frame_id)
         K = self._K
         ptsF_vo, ok, med_disp = lk_track(K["gray"], gray_vo, K["pts2d_vo"],
-                                          self.cfg.fb_err_px)
+                                          self.cfg.fb_err_px, self.cfg.lk_win,
+                                          self.cfg.lk_level)
         # Rolling-shutter guard: spec says "~8 px/frame" — per camera frame.
         # Measure prev->F velocity, not K->F accumulation; K->F stays for PnP.
         if self._prev_gray is not None and self._prev_pts is not None \
                 and len(self._prev_pts):
             _, ok_prev, med_prev = lk_track(self._prev_gray, gray_vo,
-                                            self._prev_pts, self.cfg.fb_err_px)
+                                            self._prev_pts, self.cfg.fb_err_px,
+                                            self.cfg.lk_win, self.cfg.lk_level)
             guard_disp = med_prev
         else:
             guard_disp = med_disp
@@ -335,16 +342,16 @@ class Vo:
             self._prev_gray = gray_vo
             self._prev_pts = ptsF_vo[ok]
         if guard_disp > self.cfg.max_disp_px:
-            return self._invalid(guard_disp, t_ns)   # fast pan: refuse, keep pose
+            return self._invalid(guard_disp, t_ns, int(ok.sum()))   # fast pan: refuse, keep pose
         n_ok = int(ok.sum())
         if n_ok < self.cfg.min_tracks:
-            return self._invalid(guard_disp, t_ns)
+            return self._invalid(guard_disp, t_ns, n_ok)
         ptsF_full = vo_pts_to_full(ptsF_vo[ok], self.vo_w, self.vo_h,
                                    self.cam_w, self.cam_h)
         pts3d_ok = K["pts3d"][ok]
         res = solve_pose(pts3d_ok, ptsF_full, self.calib, self.cfg)
         if res is None:
-            return self._invalid(guard_disp, t_ns)
+            return self._invalid(guard_disp, t_ns, n_ok)
         h_est = fit_ground_height(pts3d_ok[res.inlier_idx], self.calib)
         mult = scale_correction(h_est, self.cfg.h_chest_m, self._window,
                                 self.cfg.scale_tol)
@@ -359,4 +366,5 @@ class Vo:
         self._pose = T_world_from_F
         return VoStep(valid=True, T_world_from_cam=T_world_from_F,
                       inliers=res.inliers, h_est=h_est, scale_mult=mult,
-                      median_disp_px=guard_disp, t_ns=int(t_ns))
+                      median_disp_px=guard_disp, t_ns=int(t_ns),
+                      n_tracks=n_ok)

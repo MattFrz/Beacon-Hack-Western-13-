@@ -109,6 +109,7 @@ typedef struct {
     uint64_t last_walk_ns;
     int      prev_mode;
     int      lost_said;
+    uint64_t last_lost_say_ns; /* "I lost the target": first say immediate, then gap */
 } guided_state_t;
 
 void guided_default_cfg(guided_cfg_t *cfg);
