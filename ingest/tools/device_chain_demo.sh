@@ -13,14 +13,18 @@
 # never retried, which is the documented behaviour (§9), not a bug.
 #
 # Usage: sh ingest/tools/device_chain_demo.sh [/path/to/clip.avi] [label]
+#   CONF=0.05 (default) is the detection floor the Nov 22 clips can clear
+#   (measured: box 0.14, bottle 0.06). The label must be in models/labels.txt;
+#   the six-noun bake has no "cup".
 set -e
 
 REPO=${REPO:-/data/home/qnxuser/Beacon-Hack-Western-13-}
 PERCEPT=${PERCEPT:-/data/home/qnxuser/beacon-test}
 AIROOT=${AIROOT:-/data/home/qnxuser/airoot}
 CLIP=${1:-/tmp/replay.avi}
-TARGET=${2:-cup}
+TARGET=${2:-bottle}
 DURATION=${DURATION:-40}
+CONF=${CONF:-0.05}
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -48,11 +52,11 @@ timeout $((DURATION - 8)) python3 -s percept/tools/device_probe.py --tool probe_
     --udp 127.0.0.1:5006 --video "$CLIP" --labels models/labels.txt \
     --yolo models/yoloe26n_320.onnx \
     --depth models/depth_anything_v2_metric_indoor_small.onnx \
-    --depth-scale 1.0 --fov 60 --conf 0.15 --ort-intra 3 > /tmp/probe.log 2>&1 &
+    --depth-scale 1.0 --fov 60 --conf "$CONF" --ort-intra 3 > /tmp/probe.log 2>&1 &
 
 # Let perception warm up (the first depth frame also pays the session load).
 sleep 11
-echo "records so far: $(grep -c 'rec ' /tmp/ingest-a.log || echo 0)"
+echo "records so far: $(grep -c 'seq=' /tmp/probe.log || echo 0)"
 
 echo "== intent: FIND:$TARGET (perception is warm now) =="
 for p in $(pidin ar 2>/dev/null | grep "ingest/build/ingest" | awk '{print $1}'); do

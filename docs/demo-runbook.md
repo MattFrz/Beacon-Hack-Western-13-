@@ -30,14 +30,16 @@ Say once, early (the spec's paragraph, shortened): "Beacon is a supplement to th
 
 Both scripts clean up after themselves and print the deadline readout at the end. Metres are on by default in the scripts; see "Metres" below before recording.
 
+The target must be a word in the six-noun bake (`models/labels.txt`: bottle, can, keys, phone, box, mouse). The old `cup` scripts from the 32-noun era cannot bind. On the Nov 22 clips the strongest detection is the box at conf 0.14; the bottle sits at 0.06, so the scripts default `CONF` to 0.05. If the WALK cue never comes with `bottle`, re-run with `box`.
+
 ```
-sh ingest/tools/device_chain_demo.sh /tmp/replay.avi cup
+sh ingest/tools/device_chain_demo.sh /tmp/replay.avi bottle
 ```
 
 Expected: guided speaks the WALK cue three times, mode goes LIVE then HOLD, and the STAT line at the end reads 1500 loops, 0 missed deadlines, worst lateness 4.7 ms, p95 1.9 ms.
 
 ```
-sh ingest/tools/device_slay_beat.sh /tmp/long.avi cup
+sh ingest/tools/device_slay_beat.sh /tmp/long.avi bottle
 ```
 
 Expected, in order:
@@ -54,7 +56,7 @@ These two recordings are the floor video. If the live pass never stabilizes, sub
 One-time setup, already solved once (log rows 2026-11-22 ~01:30): the sensor service needs `default_video_format = jpeg`, `create_window = false`, `memory_allocator_type = from_sensor` on the `usb_camera` unit. The script starts the service itself:
 
 ```
-sh ingest/tools/device_live_demo.sh cup 10.80.55.91
+sh ingest/tools/device_live_demo.sh bottle 10.80.55.91
 ```
 
 Perception must be warm before the FIND. The script enforces the order; if you start parts by hand, wait for the "records so far" count before the intent.
@@ -121,5 +123,6 @@ Things that have already broken once, with the fix that worked:
 | A3: `pidin ar` with ORT live, saved to the log | Nathan | the readback is in `docs/pi-bringup.md` |
 | A5: live perception producer killed twice on hardware | Nathan | two clean HOLD to LOST transitions logged |
 | A6: metres decision executed | Nathan | tape check logged, or `--metres` removed from the three scripts |
+| Re-record the replay clips with a clear object at about 1 m | Nathan | a clip where the target clears conf 0.15 at default lighting |
 | BT service kill/restart rehearsed once | Matt, Munadir | the speaker comes back on its own in a run |
 | Floor video recorded | any | a take exists with the JBL audible |
