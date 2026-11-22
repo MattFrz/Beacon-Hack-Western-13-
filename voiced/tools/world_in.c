@@ -10,7 +10,8 @@
  * are used. Times and frame ids are replaced with the Pi's own (the laptop clock
  * differs); hand and objects from one datagram share a frame id. Rows are never
  * deleted, so guided can still turn the wearer toward things out of view.
- * Pose is identity (no visual odometry from the laptop).
+ * Pose comes from the probe's visual odometry when it sends one (so "turn left"
+ * follows the wearer's real turns); otherwise identity.
  */
 #include "world_shm.h"
 
@@ -68,14 +69,14 @@ static const char *find_key(const char *s, const char *e, const char *key)
     return NULL;
 }
 
-static int get_vec3(const char *s, const char *e, const char *key, float v[3])
+static int get_vecn(const char *s, const char *e, const char *key, float *v, int n)
 {
     const char *p = find_key(s, e, key);
     if (!p || *p != '[')
         return 0;
     char *end;
     ++p;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < n; ++i) {
         v[i] = strtof(p, &end);
         if (end == p)
             return 0;
@@ -84,6 +85,31 @@ static int get_vec3(const char *s, const char *e, const char *key, float v[3])
             ++p;
     }
     return 1;
+}
+#define get_vec3(s, e, key, v) get_vecn((s), (e), (key), (v), 3)
+
+/* The probe sends numeric ids or instance ids like "scissors-1": hash strings. */
+static uint32_t get_id(const char *s, const char *e)
+{
+    const char *p = find_key(s, e, "id");
+    if (!p)
+        return 0;
+    if (*p != '"')
+        return (uint32_t)strtoul(p, NULL, 10);
+    uint32_t h = 2166136261u; /* FNV-1a */
+    for (++p; p < e && *p != '"'; ++p)
+        h = (h ^ (unsigned char)*p) * 16777619u;
+    return h ? h : 1;
+}
+
+/* Pose from the probe's visual odometry, if it has one; else identity. */
+static float g_T[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+static uint32_t g_epoch = 1;
+
+static void to_world(const float c[3], float w[3])
+{
+    for (int r = 0; r < 3; ++r)
+        w[r] = g_T[r * 4] * c[0] + g_T[r * 4 + 1] * c[1] + g_T[r * 4 + 2] * c[2] + g_T[r * 4 + 3];
 }
 
 static float get_num(const char *s, const char *e, const char *key, float dflt)
@@ -132,6 +158,17 @@ static int apply(const char *json, uint64_t now)
     for (int i = 0; i < BEACON_MAX_OBJECTS; ++i)
         g_p.objects[i].in_latest_boxes = 0;
 
+    const char *ps = find_key(json, end, "pose");
+    if (ps && *ps == '{') {
+        const char *pe = skip_value(ps);
+        const char *v = find_key(ps, pe, "valid");
+        float T[16];
+        if (v && *v == 't' && get_vecn(ps, pe, "T_world_from_cam", T, 16)) {
+            memcpy(g_T, T, sizeof(T));
+            g_epoch = (uint32_t)get_num(ps, pe, "pose_epoch", (float)g_epoch);
+        }
+    }
+
     int seen = 0;
     const char *arr = find_key(json, end, "objects");
     if (arr && *arr == '[') {
@@ -147,8 +184,7 @@ static int apply(const char *json, uint64_t now)
             const char *live = find_key(p, oe, "in_latest_boxes");
             int is_live = !live || *live == 't';   /* HOLD replays arrive as false: skip */
             if (is_live && get_str(p, oe, "name", name, sizeof(name)) && get_vec3(p, oe, "xyz_cam", xyz)) {
-                const char *idp = find_key(p, oe, "id");
-                uint32_t id = idp ? (uint32_t)strtoul(idp, NULL, 10) : 0;
+                uint32_t id = get_id(p, oe);
                 beacon_object_t *o = &g_p.objects[row_for(name, id)];
                 /* Real depth jumps around: average with the last position if it was
                  * seen recently, so "two steps" / "three steps" don't flip each frame. */
@@ -161,11 +197,11 @@ static int apply(const char *json, uint64_t now)
                 o->id = id;
                 snprintf(o->name, BEACON_NAME_LEN, "%s", name);
                 memcpy(o->xyz_cam, xyz, sizeof(xyz));
-                memcpy(o->xyz_world, xyz, sizeof(xyz)); /* identity pose */
+                to_world(xyz, o->xyz_world);
                 o->conf = get_num(p, oe, "conf", 0.8f);
                 o->last_seen_ns = now;
                 o->frame_id = g_frame;
-                o->pose_epoch = 1;
+                o->pose_epoch = g_epoch;
                 o->in_latest_boxes = 1;
                 ++seen;
             }
@@ -180,11 +216,11 @@ static int apply(const char *json, uint64_t now)
         float xyz[3];
         if (get_vec3(h, he, "xyz_cam", xyz)) {
             memcpy(g_p.hand.xyz_cam, xyz, sizeof(xyz));
-            memcpy(g_p.hand.xyz_world, xyz, sizeof(xyz));
+            to_world(xyz, g_p.hand.xyz_world);
             g_p.hand.conf = get_num(h, he, "conf", 0.9f);
             g_p.hand.t_ns = now;
             g_p.hand.frame_id = g_frame;
-            g_p.hand.pose_epoch = 1;
+            g_p.hand.pose_epoch = g_epoch;
             g_p.hand.valid = 1;
         }
     }
@@ -193,10 +229,9 @@ static int apply(const char *json, uint64_t now)
 
 static void publish(uint64_t now, uint64_t p95)
 {
-    static const float I[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
-    memcpy(g_p.pose.T_world_from_cam, I, sizeof(I));
+    memcpy(g_p.pose.T_world_from_cam, g_T, sizeof(g_T));
     g_p.pose.t_ns = now;
-    g_p.pose.pose_epoch = 1;
+    g_p.pose.pose_epoch = g_epoch;
     g_p.pose.valid = 1;
     g_p.health.hb_percept_ns = now;
     g_p.health.p95_vision_ns = p95;

@@ -102,6 +102,8 @@ typedef struct {
     int      orienting;      /* target off to one side: pips until we face it */
     uint64_t next_pip_ns;
     uint64_t pips_until_ns;  /* pips stop after a few seconds; the next spoken cue restarts them */
+    uint64_t last_chime_ns;  /* one chime per ~3 s */
+    uint64_t last_landmark_ns; /* "It's next to ..." at most every ~8 s */
 
     /* WALK and mode bookkeeping */
     uint64_t last_walk_ns;
