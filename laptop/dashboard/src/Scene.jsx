@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { Html, Line, OrbitControls } from '@react-three/drei';
 import { Matrix4 } from 'three';
 import {
@@ -32,32 +32,35 @@ const COLORS = {
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const norm = (v) => Math.hypot(...v);
 
-export default function Scene({ world }) {
+export default function Scene({ world, latest, hand, handOpacity, paused }) {
   const { mode } = world ?? {};
   const objects = worldObjects(world);
-  const hand = worldHand(world);
+  const measuredHand = worldHand(world);
   const target = worldTarget(world);
   const crumbs = crumbsToScene(world);
 
   // The map only grows: objects and the camera's last pose survive dropped frames, LOST and pose loss.
   // Only remounting the Scene (the Reset map button, or switching source) clears it.
-  const memory = useRef({ world: undefined, objects: [], matrix: null, wearer: null, targetName: null });
+  const memory = useRef({ world: undefined, objects: [], matrix: null, wearer: null });
   const m = memory.current;
-  const pose = displayPose(world);
-  if (world !== m.world) {
-    m.world = world;
-    m.objects = rememberObjects(m.objects, objects);
-    const nextWearer = wearerState(pose, m.wearer);
-    if (nextWearer.position) m.wearer = nextWearer.position;
-    m.matrix = poseSceneMatrix(pose) ?? m.matrix;
-    if (world?.target?.name) m.targetName = world.target.name;
+  if (latest !== m.world) {
+    const rewind = latest?.t_ns < m.world?.t_ns;
+    const pose = displayPose(latest);
+    m.objects = rememberObjects(rewind ? [] : m.objects, worldObjects(latest));
+    m.wearer = wearerState(pose, rewind ? null : m.wearer).position;
+    m.matrix = poseSceneMatrix(pose) ?? (rewind ? null : m.matrix);
+    m.world = latest;
   }
-  const wearer = { ...wearerState(pose, m.wearer), position: m.wearer };
-  const poseMatrix = m.matrix;
+  const pose = displayPose(world);
+  const markers = paused ? rememberObjects([], objects) : m.objects;
+  const wearer = wearerState(pose, paused ? null : m.wearer);
+  const poseMatrix = paused ? poseSceneMatrix(pose) : m.matrix;
 
   // telemd can send a bound target without objects[]; draw it on its own unless an object row already shows it.
   const targetId = targetObjectId(world, objects);
-  const targetAlone = Boolean(target) && targetId == null;
+  const targetMarker = target && (markers.find(o => targetId != null && o.sourceId === targetId)
+    ?? markers.find(o => o.name === world.target.name && Math.hypot(...target.map((v, i) => v - o.position[i])) <= 0.5));
+  const targetAlone = Boolean(target) && !targetMarker;
   const targetFaded =
     world?.target?.in_latest_boxes === false ||
     (isNum(world?.t_ns) && isNum(world?.target?.last_seen_ns) && world.t_ns - world.target.last_seen_ns > 1e9);
@@ -76,28 +79,30 @@ export default function Scene({ world }) {
         </mesh>
       ))}
 
-      {m.objects.map((o) => (
+      {markers.map((o) => (
         <Marker
           key={o.key}
           position={o.position}
-          color={(o.live ? o.sourceId === targetId : o.name === m.targetName) ? COLORS.target : COLORS.object}
+          priority={o === targetMarker}
+          color={(o === targetMarker) ? COLORS.target : COLORS.object}
           faded={o.faded}
-          label={o.label}
+          label={o.live || o === targetMarker ? o.label : null}
         />
       ))}
 
-      {hand && <Marker position={hand} color={COLORS.hand} size={0.025} label="hand" labelBelow />}
+      {hand && <Marker position={hand} opacity={handOpacity} color={COLORS.hand} size={0.025} label={measuredHand ? 'hand' : null} labelBelow />}
 
       {targetAlone && (
         <Marker
+          priority
           position={target}
           color={COLORS.target}
           faded={targetFaded}
-          label={`${world?.target?.name ?? 'target'} ${norm(target).toFixed(2)} m`}
+          label={`${world?.target?.name ?? 'target'} ${norm(world.target.xyz_cam ?? target).toFixed(2)} m`}
         />
       )}
 
-      {hand && target && COLORS[mode] && (
+      {measuredHand && hand && target && isNum(world?.d_m) && COLORS[mode] && (
         <Line
           points={[hand, target]}
           color={COLORS[mode]}
@@ -123,6 +128,7 @@ export default function Scene({ world }) {
         </>
       )}
 
+      <LabelVisibility />
       <OrbitControls target={wearer.position ?? [0, 0, 0]} makeDefault />
     </Canvas>
   );
@@ -147,7 +153,26 @@ function Frustum({ length = 0.9 }) {
   );
 }
 
-function Marker({ position = [0, 0, 0], visible = true, color, label, faded = false, size = 0.035, labelBelow = false }) {
+// Orbit and zoom change which labels collide even between telemetry frames.
+function LabelVisibility() {
+  useFrame(({ gl }) => {
+    const stage = gl.domElement.closest('.stage');
+    if (!stage) return;
+    const labels = [...stage.querySelectorAll('.label')]
+      .sort((a, b) => Number(b.classList.contains('target-label')) - Number(a.classList.contains('target-label')));
+    const boxes = labels.map(label => label.getBoundingClientRect());
+    const occupied = [];
+    labels.forEach((label, i) => {
+      const r = boxes[i];
+      const overlaps = occupied.some(b => r.left < b.right && r.right > b.left && r.top < b.bottom && r.bottom > b.top);
+      label.style.visibility = overlaps ? 'hidden' : 'visible';
+      if (!overlaps && r.width) occupied.push(r);
+    });
+  });
+  return null;
+}
+
+function Marker({ position = [0, 0, 0], visible = true, color, label, priority = false, faded = false, opacity = 1, size = 0.035, labelBelow = false }) {
   // <Html> picks its DOM target from r3f's event system, which connects just after startup; a label
   // mounted before that gets re-created (the same React 19 unmount error), so wait for it.
   // zIndexRange keeps labels under the top bar (10) and the panels (20); drei's default draws them over everything.
@@ -156,10 +181,10 @@ function Marker({ position = [0, 0, 0], visible = true, color, label, faded = fa
     <group position={position} visible={visible}>
       <mesh>
         <sphereGeometry args={[size, 24, 16]} />
-        <meshStandardMaterial color={color} transparent opacity={faded ? 0.35 : 1} />
+        <meshStandardMaterial color={color} transparent opacity={faded ? 0.3 : opacity} />
       </mesh>
-      {ready && (
-        <Html position={[0, labelBelow ? size + 0.035 : -size - 0.03, 0]} center className="label" zIndexRange={[9, 0]}>
+      {ready && label && (
+        <Html position={[0, labelBelow ? size + 0.035 : -size - 0.03, 0]} center className={priority ? "label target-label" : "label"} zIndexRange={[9, 0]}>
           {visible ? label : null}
         </Html>
       )}

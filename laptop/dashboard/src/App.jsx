@@ -1,10 +1,8 @@
 import { Switch } from '@animate-ui/react/primitives/base-ui/switch';
 import { Button } from '@animate-ui/react/primitives/buttons/button';
 import { Highlight, HighlightItem } from '@animate-ui/react/primitives/effects/highlight';
-import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
 import { ShimmeringText } from '@animate-ui/react/primitives/texts/shimmering';
 import { Tab, TabList, TabPanel } from '@animate-ui/react/primitives/react-aria/tabs';
-import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
 import { ReducedMotionContext, useShouldReduceMotion } from '@animate-ui/react/utils/motion';
 import { MotionConfig } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -14,10 +12,10 @@ import Events from './Events.jsx';
 import { Collapse, Expand, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from './icons.jsx';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
-import Sidebar from './Sidebar.jsx';
+import Sidebar, { usePanelWidth } from './Sidebar.jsx';
 import Tip from './Tip.jsx';
 import { useTelemetry } from './useTelemetry.js';
-import { crumbsToScene, targetObjectId } from './worldScene.js';
+import { crumbsToScene, targetObjectId, worldHand } from './worldScene.js';
 
 const MODES = ['LIVE', 'HOLD', 'LOST'];
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -36,7 +34,7 @@ const PANELS_KEY = 'beacon.panels';
 const MOTION_KEY = 'beacon.motion';
 const TAB_KEY = 'beacon.tab';
 const TABS = ['guidance', 'system'];
-const PI_FRESH_MS = 2000; // the Pi counts as connected while its last packet is younger than this
+const PI_FRESH_MS = 5000; // the Pi counts as connected while its last packet is younger than this
 const SOURCES = [
   ['live', 'Live', 'Show data from the Pi'],
   ['replay', 'Replay', 'Play the recording'],
@@ -45,21 +43,8 @@ const BOTH = { left: true, right: true };
 // The viewer's animation choice -> the reduced-motion setting Motion and animate-ui read.
 const MOTION_SETTING = { system: 'user', on: 'never', off: 'always' };
 
-// A live number whose digits roll to each new value; '–' when telemetry has none.
 function Num({ value, digits = 0, unit = '' }) {
-  if (!isNum(value)) return '–';
-  return (
-    <>
-      <SlidingNumber number={value} decimalPlaces={digits} initiallyStable />
-      {unit}
-    </>
-  );
-}
-
-// Words that change (law, intent, spoken sentence) roll in letter by letter.
-function Rolling({ text, stagger = 0.03 }) {
-  if (!text) return '–';
-  return <RollingText key={text} text={text} transition={{ duration: 0.3, delay: stagger, ease: 'easeOut' }} />;
+  return <span className="number">{isNum(value) ? value.toFixed(digits) + unit : '–'}</span>;
 }
 
 // The last spoken sentence: telemd's caption, else guided's clip ids turned into words.
@@ -136,8 +121,14 @@ function usePanels(narrow) {
   return [panels, setPanels, set];
 }
 
+const subscribeWidth = listener => {
+  window.addEventListener('resize', listener);
+  return () => window.removeEventListener('resize', listener);
+};
+const viewportWidth = () => window.innerWidth;
+
 export default function App() {
-  const { log, world, connected, stale, bridge, setSource } = useTelemetry();
+  const { log, world, connected, stale, bridge, setSource, now } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
   const [mapEpoch, setMapEpoch] = useState(0); // bumped by Reset map: the 3D scene remounts with an empty map
   useEffect(() => setCursor(null), [bridge?.source, bridge?.replay]);
@@ -146,6 +137,13 @@ export default function App() {
   const systemReduce = useMedia(REDUCE);
   const [motionChoice, setMotionChoice] = useMotionChoice();
   const [panels, setPanels, setPanel] = usePanels(narrow);
+  const [leftWidth, setLeftWidth] = usePanelWidth('left');
+  const [rightWidth, setRightWidth] = usePanelWidth('right');
+  const viewport = useSyncExternalStore(subscribeWidth, viewportWidth);
+  const maxPanel = narrow ? Math.max(1, viewport - 120) : Math.floor(viewport * 0.45);
+  const bothOpen = !narrow && panels.left && panels.right;
+  const leftLimit = bothOpen ? Math.min(maxPanel, viewport - 320 - 260) : maxPanel;
+  const rightLimit = bothOpen ? Math.min(maxPanel, viewport - 320 - Math.min(leftWidth, leftLimit)) : maxPanel;
   const [tab, setTab] = useStored(TAB_KEY, 'guidance', TABS);
   const restore = useRef(BOTH);
   const setting = MOTION_SETTING[motionChoice];
@@ -154,6 +152,19 @@ export default function App() {
   const paused = cursor != null;
   const shown = paused ? log.items[Math.max(cursor, log.first) - log.first]?.world : world;
   const hasData = paused ? Boolean(shown) : Boolean(connected && !stale && world);
+  const end = paused ? Math.max(0, cursor - log.first) : log.items.length - 1;
+  const viewTime = paused ? log.items[end]?.at : now;
+  let historyHand = null;
+  let handOpacity = 1;
+  for (let i = end; i >= 0 && log.items[i]; i--) {
+    const age = Math.max(0, viewTime - log.items[i].at);
+    if (age >= 1000 || log.items[i].world.t_ns > shown?.t_ns) break;
+    historyHand = worldHand(log.items[i].world);
+    if (historyHand) {
+      handOpacity = i === end && age < 250 ? 1 : 1 - age / 1000;
+      break;
+    }
+  }
   const w = shown ?? {};
   const mode = hasData && MODES.includes(w.mode) ? w.mode : null;
   const health = w.health ?? {};
@@ -192,6 +203,7 @@ export default function App() {
     <MotionScope setting={setting}>
       <div className="shell">
         <Sidebar
+          preferred={leftWidth} limit={leftLimit} setWidth={setLeftWidth}
           side="left"
           title="Guidance and system"
           keys="["
@@ -220,7 +232,7 @@ export default function App() {
         </Sidebar>
 
         <main className="stage" data-stale={!hasData}>
-          <Scene key={`${bridge?.source === 'replay' ? bridge.replay : 'live'}-${mapEpoch}`} world={hasData ? shown : null} />
+          <Scene key={`${bridge?.source === 'replay' ? bridge.replay : 'live'}-${mapEpoch}`} latest={connected && !stale ? world : null} paused={paused} hand={historyHand} handOpacity={handOpacity} world={hasData ? shown : null} />
 
           <div className="stage-top">
             <div className="topbar">
@@ -231,11 +243,11 @@ export default function App() {
               <div className="readout"><span>Tracking</span><b>{mode ?? '–'}</b></div>
               <div className="readout">
                 <span>Law</span>
-                <b><Rolling text={w.law} /></b>
+                <b>{w.law ?? '–'}</b>
               </div>
               <div className="readout">
                 <span>Intent</span>
-                <b><Rolling text={w.intent?.kind} /></b>
+                <b>{w.intent?.kind ?? '–'}</b>
                 {w.intent?.candidates?.length > 0 && <em>{w.intent.candidates.join(', ')}</em>}
               </div>
               <div className="topbar-end">
@@ -261,15 +273,16 @@ export default function App() {
           </div>
 
           {!connected && log.items.length === 0 && <Waiting />}
-          {connected && bridge?.source === 'live' && !hasData && !paused && <WaitingForPi bridge={bridge} setSource={setSource} />}
+          {connected && bridge?.source === 'live' && !piFresh && !hasData && !paused && <WaitingForPi bridge={bridge} setSource={setSource} />}
 
           <div className="stage-foot">
             <Caption law={w.law} cue={w.cue} targetName={w.target?.name} />
-            <Scrubber log={log} cursor={cursor} setCursor={setCursor} replay={bridge?.source === 'replay'} />
+            <Scrubber log={log} cursor={cursor} setCursor={setCursor} replay={bridge?.source === 'replay' && bridge.replay} />
           </div>
         </main>
 
         <Sidebar
+          preferred={rightWidth} limit={rightLimit} setWidth={setRightWidth}
           side="right"
           title="Camera"
           keys="]"
@@ -757,7 +770,7 @@ function Caption({ law, cue, targetName }) {
   if (!text) return null;
   return (
     <p className="caption">
-      “<Rolling text={text} stagger={0.012} />”
+      “{text}”
     </p>
   );
 }

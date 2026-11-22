@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const BRIDGE_URL = 'ws://127.0.0.1:8765';
-const STALE_MS = 1000; // no world state for this long -> NO DATA, never a frozen LIVE
+const STALE_MS = 5000; // no world state for this long -> NO DATA, never a frozen LIVE
 const MAX_HISTORY = 6000; // world states kept for the scrubber: 10 min at 10 Hz
 const TRIM = 600; // drop this many of the oldest at a time
 const EMPTY = { first: 0, items: [] };
@@ -87,6 +87,7 @@ export function useTelemetry() {
 
   const last = log.items.at(-1);
   return {
+    now,
     log,
     world: last?.world ?? null,
     bridge: connected ? bridge : null,
