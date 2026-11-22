@@ -333,19 +333,6 @@ def build_parser() -> argparse.ArgumentParser:
         "tape-calibrated, so this gates on the model's own metres -- see docs/pi-bringup.md.",
     )
     parser.add_argument(
-        "--vo",
-        action="store_true",
-        help="track the camera with visual odometry so the dashboard's 3D scene follows it; "
-        "needs --fov or --calib. Without it the pose stays identity.",
-    )
-    parser.add_argument(
-        "--h-chest",
-        type=float,
-        default=0.0,
-        help="measured camera height above the floor in metres, for VO's scale watchdog; "
-        "0 (default) leaves the scale uncorrected, so distances travelled are approximate",
-    )
-    parser.add_argument(
         "--publish-every",
         type=int,
         default=1,
@@ -394,6 +381,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--vo-levels", type=int, default=4,
         help="LK pyramid levels (default 4; reaches ~150 px steps)",
+    )
+    parser.add_argument(
+        "--hand-conf", type=float, default=0.05, metavar="C",
+        help="detector threshold for the `hand` class only (default 0.05; weak hands are "
+             "common on-device); every other class keeps --conf",
     )
     parser.add_argument(
         "--memory-s", type=float, default=20.0, metavar="S",
@@ -478,6 +470,53 @@ def gate_by_depth(
     return gated, dropped
 
 
+HAND_MIN_Z_M = 0.2  # the wearer's own hand, seen from a chest camera, is within arm's reach
+HAND_MAX_Z_M = 0.8
+
+
+def _boxes_touch(a: Sequence[float], b: Sequence[float], pad: float = 0.15) -> bool:
+    """True when box a overlaps box b grown by `pad` of its size on each side."""
+    bw, bh = b[2] - b[0], b[3] - b[1]
+    return not (a[2] < b[0] - pad * bw or a[0] > b[2] + pad * bw
+                or a[3] < b[1] - pad * bh or a[1] > b[3] + pad * bh)
+
+
+def place_hand(world: Dict[str, Any], frame_w: int, frame_h: int,
+               hfov_deg: float) -> Dict[str, Any]:
+    """Give the hand a usable 3D point; the depth model cannot measure a hand.
+
+    Measured on the Pi: a hand ~0.3 m away read 0.5-3.7 m, so REACH (d <= 0.5 m)
+    never started. Two facts fix it without guessing: (1) a hand whose box
+    touches an object's box is at that object, so it takes that object's depth
+    (the lateral offset still comes from the boxes, so the ticks still steer);
+    (2) otherwise the wearer's own hand is within arm's reach, so its depth is
+    clamped to 0.2-0.8 m. The direction from the camera is kept either way.
+    Returns a new world dict; unchanged when there is no hand box or geometry.
+    """
+    hand = world.get("hand")
+    if not isinstance(hand, dict) or not hand.get("bbox_px") or frame_w <= 0 or frame_h <= 0:
+        return world
+    x0, y0, x1, y1 = (float(v) for v in hand["bbox_px"])
+    u, v = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    f = frame_w / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
+    z = None
+    for obj in world.get("objects") or []:
+        if (isinstance(obj, dict) and obj.get("in_latest_boxes") and obj.get("bbox_px")
+                and isinstance(obj.get("xyz_cam"), (list, tuple))
+                and _boxes_touch((x0, y0, x1, y1), obj["bbox_px"])):
+            z = float(obj["xyz_cam"][2])
+            break
+    if z is None:
+        raw = hand.get("xyz_cam")
+        z = float(raw[2]) if isinstance(raw, (list, tuple)) and len(raw) == 3 else HAND_MAX_Z_M
+        z = min(max(z, HAND_MIN_Z_M), HAND_MAX_Z_M)
+    placed = dict(hand)
+    placed["xyz_cam"] = [(u - frame_w / 2.0) / f * z, (v - frame_h / 2.0) / f * z, z]
+    out = dict(world)
+    out["hand"] = placed
+    return out
+
+
 def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """Move a `hand` detection out of objects[] into the record's hand field.
 
@@ -550,7 +589,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     publish_every = max(1, int(getattr(args, "publish_every", 1)))
 
     labels, mean, std, pad_color, resources = probe_frame.prepare(args)
-    live_vo = LiveVo(args.depth_scale, args.h_chest) if args.vo else None
     deadline = time.monotonic() + args.max_seconds if args.max_seconds > 0 else None
 
     seq = 0
@@ -560,8 +598,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     dropped_video = 0
     dropped_far = 0
     hands_seen = 0
-    warned_vo = False
     max_depth = float(getattr(args, "max_depth", 3.0) or 0.0)
+    # The detector runs at the lower of the two thresholds; non-hand rows are
+    # filtered back to --conf after each frame (see object_conf below).
+    object_conf = float(args.conf)
+    args.conf = min(object_conf, float(getattr(args, "hand_conf", object_conf)))
     last_mtime = 0
     last_d_m: Optional[float] = None
     last_seen_ns: Optional[int] = None
@@ -604,17 +645,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # labels and ranges on top, the colourised metric depth map with the
                 # same boxes underneath. That is what the monitor should see; the raw
                 # camera JPEG would show pixels with nothing drawn on them.
-                try:
-                    probe = probe_frame.probe_once(
-                        args, labels, mean, std, pad_color, resources,
-                        want_jpeg=False, want_preview=True, want_vo=live_vo is not None,
-                    )
-                except SystemExit as exc:
-                    # On Windows (udp_grab.py) the file can vanish for an instant while
-                    # the next frame is swapped in; skip that read instead of stopping.
-                    if "could not read image" not in str(exc):
-                        raise
-                    continue
+                probe = probe_frame.probe_once(
+                    args, labels, mean, std, pad_color, resources,
+                    want_jpeg=False, want_preview=True,
+                )
                 if probe is None:
                     continue
                 seen += 1
@@ -632,6 +666,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # the 24 fps camera feed (which may be downscaled) with this size.
                 if probe.get("W") and probe.get("H"):
                     world["frame_wh"] = [int(probe["W"]), int(probe["H"])]
+                # The detector ran at the lower hand threshold; other objects keep --conf.
+                if object_conf > args.conf:
+                    world["objects"] = [
+                        o for o in (world.get("objects") or [])
+                        if not isinstance(o, dict) or str(o.get("name", "")).lower() == "hand"
+                        or float(o.get("conf") or 0.0) >= object_conf
+                    ]
 
                 # A YOLO `hand` is not a findable object; it belongs in hand{},
                 # where the law and the dashboard already look for it. Lift before
@@ -640,6 +681,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # depth model's known far-bias, gating it would silently kill hand
                 # tracking at about arm's length.
                 world, hand_det = lift_hand(world)
+                if hand_det is not None and probe.get("W") and probe.get("H"):
+                    world = place_hand(world, int(probe["W"]), int(probe["H"]),
+                                       float(getattr(args, "fov", None) or 60.0))
+                    hand_det = world["hand"]
                 if hand_det is not None:
                     hands_seen += 1
                     print(

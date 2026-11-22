@@ -40,6 +40,8 @@ LABELS=${LABELS:-$PERCEPT/models/labels_hand.txt}
 # Speech: GUIDED_AUDIO=fifo:/data/home/qnxuser/projects/qnx-bluetooth/audio.pcm plays on
 # the JBL (start run-radio.sh first). Default: no audio device, log only.
 GUIDED_AUDIO=${GUIDED_AUDIO:-none}
+# The on-device YOLO hand scores 0.05-0.25; guided's default (0.5) would ignore it.
+HAND_CONF=${HAND_CONF:-0.05}
 # Which checkout runs guided (with its sounds/) and telemd; default the repo above.
 GUIDED_ROOT=${GUIDED_ROOT:-$REPO}
 TELEMD=${TELEMD:-$REPO/telemd/build/telemd}
@@ -73,7 +75,7 @@ sleep 5
 
 echo "== guided (owns the world) =="
 cd "$GUIDED_ROOT"
-./guided/build/guided --create --metres --duration "$DURATION" --audio "$GUIDED_AUDIO" > /tmp/guided.log 2>&1 &
+./guided/build/guided --create --metres --hand-conf "$HAND_CONF" --duration "$DURATION" --audio "$GUIDED_AUDIO" > /tmp/guided.log 2>&1 &
 sleep 1
 
 echo "== ingest (relay, no intent yet) =="
@@ -104,7 +106,7 @@ timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --labels "$LABELS" \
     --yolo "$YOLO" \
     --depth "$PERCEPT/models/depth_anything_v2_metric_indoor_small.onnx" \
-    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --ort-intra 3 \
+    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --hand-conf "$HAND_CONF" --ort-intra 3 \
     --h-chest 1.4 \
     --vo-max-disp 200 --vo-fb-err 3.0 --vo-min-tracks 40 \
     --vo-max-corners 180 --vo-win 21 --vo-levels 3 \

@@ -170,7 +170,25 @@ static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
                     heartbeat_alive(health.hb_percept_ns, now), health.hb_percept_ns,
                     modes[mode], law, target, hand_json, distance,
                     ticks, pan, display->continuous ? "true" : "false", clips);
-    return n > 0 && (size_t)n < cap ? append_scene(packet, cap, (size_t)n, &percept) : 0;
+    if (n <= 0 || (size_t)n >= cap) return 0;
+    size_t len = (size_t)n;
+    /* The spoken request (voiced/beacon_cmd -> intent), for the dashboard's Intent card. */
+    static const char *const kinds[] = {"NONE", "FIND", "GO", "RETURN", "STOP", "REPEAT", "REJECT",
+                                        "NACK_UNHEARD", "NACK_UNSEEN", "NACK_CANT"};
+    beacon_intent_t intent;
+    beacon_seq_t vs;
+    if (beacon_seq_read(&world->seq_voiced, &intent, &world->intent, sizeof(intent), 3, &vs) &&
+        intent.kind != BEACON_INTENT_NONE && intent.kind < sizeof(kinds) / sizeof(kinds[0])) {
+        if (!append(packet, cap, &len, ",\"intent\":{\"kind\":\"%s\",\"utterance_id\":%u,\"candidates\":[",
+                    kinds[intent.kind], intent.utterance_id)) return 0;
+        for (uint32_t i = 0; i < intent.n_candidates && i < BEACON_MAX_CANDIDATES; ++i) {
+            char name[6 * BEACON_NAME_LEN + 1];
+            escape_name(intent.candidates[i], name);
+            if (!append(packet, cap, &len, "%s\"%s\"", i ? "," : "", name)) return 0;
+        }
+        if (!append(packet, cap, &len, "]}")) return 0;
+    }
+    return append_scene(packet, cap, len, &percept);
 }
 
 int main(int argc, char **argv)
