@@ -26,10 +26,10 @@ PERCEPT=${PERCEPT:-/data/home/qnxuser/beacon-test}
 AIROOT=${AIROOT:-/data/home/qnxuser/airoot}
 SENSOR_CONF=${SENSOR_CONF:-/data/home/qnxuser/sensor-usbjpeg.conf}
 TARGET=${1:-cup}
-DASHBOARD_HOST=${2:-10.80.55.91}
+DASHBOARD_HOST=${2:-10.80.55.92}
 DURATION=${3:-120}
 FRAME=${FRAME:-/tmp/live/latest.jpg}
-GRAB_FPS=${GRAB_FPS:-5}
+GRAB_FPS=${GRAB_FPS:-30}
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -64,9 +64,10 @@ echo "== ingest (relay, no intent yet) =="
 ./ingest/build/ingest --udp 5006 > /tmp/ingest-a.log 2>&1 &
 sleep 1
 
-echo "== grabber: newest frame every 200 ms =="
+echo "== grabber: newest frame at camera rate =="
 cd "$PERCEPT"
 ./beacon_grab -u 5 -w -r "$GRAB_FPS" -s 6 -o "$FRAME" > /tmp/grab.log 2>&1 &
+python3 -s percept/tools/live_preview.py --grab-file "$FRAME" --udp "$DASHBOARD_HOST:5005" --fps 24 > /tmp/live_preview.log 2>&1 &
 # Wait for a real frame before starting inference: the first ones are black
 # while the camera's auto-exposure settles.
 i=0
@@ -81,7 +82,7 @@ echo "== percept: YOLOE + depth on one frame per cycle =="
 timeout $((DURATION - 4)) python3 -s percept/tools/live_probe.py \
     --grab-file "$FRAME" \
     --udp 127.0.0.1:5006 \
-    --video-udp "$DASHBOARD_HOST:5005" \
+    --video-udp "$DASHBOARD_HOST:5007" \
     --labels models/labels.txt \
     --yolo models/yoloe26n_320.onnx \
     --depth models/depth_anything_v2_metric_indoor_small.onnx \
@@ -131,3 +132,4 @@ echo "== grabber =="
 tail -3 /tmp/grab.log
 
 echo "(processes left running: guided, ingest, grabber, percept — dashboard on $DASHBOARD_HOST:5005)"
+wait "$PROBE_PID" || true

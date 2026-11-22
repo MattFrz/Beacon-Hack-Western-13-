@@ -64,7 +64,7 @@ export function gapMs(a, b) {
 // replayFile. Both fan out on wsPort. UDP is always open, so live sessions are recorded (when recordDir is
 // set) whichever source dashboards are watching. A dashboard switches by sending {"source": "live"} or
 // {"source": "replay"}; nothing else it sends is acted on.
-export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, framesDir, source, recordings = [] }) {
+export async function startBridge({ wsPort, udpPort = 0, previewPort = 0, recordDir, replayFile, framesDir, source, recordings = [] }) {
   const entries = recordings.map((entry) => ({ ...entry, records: loadReplay(entry.file) }));
   let replay = entries.find(entry => entry.file === replayFile) ?? entries[0];
   if (replayFile && !entries.some(entry => entry.file === replayFile)) {
@@ -121,6 +121,12 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
     file = path.join(recordDir, `${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
   }
   const stats = { world: 0, video: 0, dropped: 0 };
+  const sendFrame = (buf, channel) => send(Buffer.concat([Buffer.from([channel]), buf]));
+  const notePi = (rinfo) => {
+    const fresh = !pi || pi.address !== rinfo.address;
+    pi = { address: rinfo.address, adapter: fresh ? adapterFor(rinfo.address) : pi.adapter, at: Date.now() };
+    if (fresh) sendStatus();
+  };
   const udp = dgram.createSocket('udp4');
   udp.on('message', (buf, rinfo) => {
     const jpeg = buf[0] === 0xff && buf[1] === 0xd8;
@@ -129,12 +135,10 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
       stats.dropped++;
       return;
     }
-    const fresh = !pi || pi.address !== rinfo.address;
-    pi = { address: rinfo.address, adapter: fresh ? adapterFor(rinfo.address) : pi.adapter, at: Date.now() };
-    if (fresh) sendStatus();
+    notePi(rinfo);
     if (jpeg) {
       stats.video++;
-      if (current === 'live') send(buf);
+      if (current === 'live') sendFrame(buf, 1);
       return;
     }
     const line = JSON.stringify(msg); // one line even if telemd pretty-prints
@@ -145,6 +149,22 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
   udp.bind(udpPort);
   await once(udp, 'listening');
 
+  // Slower detector output has its own port so it cannot replace the camera's 24 fps stream.
+  const previewUdp = dgram.createSocket('udp4');
+  previewUdp.on('message', (buf, rinfo) => {
+    if (buf[0] !== 0xff || buf[1] !== 0xd8) {
+      stats.dropped++;
+      return;
+    }
+    notePi(rinfo);
+    if (current === 'live') {
+      stats.video++;
+      sendFrame(buf, 2);
+    }
+  });
+  previewUdp.bind(previewPort);
+  await once(previewUdp, 'listening');
+
   // What dashboards show about the feed. World states never carry a top-level "bridge" key.
   const status = () =>
     JSON.stringify({
@@ -153,7 +173,7 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
         replay: replay?.id ?? null,
         recordings: entries.map(({ id, label, framesDir }) => ({ id, label, video: Boolean(framesDir) })),
         pi: pi && { address: pi.address, adapter: pi.adapter, age_ms: Date.now() - pi.at },
-        listen: { port: udp.address().port, addresses: laptopAddresses() },
+    listen: { port: udp.address().port, preview_port: previewUdp.address().port, addresses: laptopAddresses() },
       },
     });
   function sendStatus() {
@@ -191,7 +211,8 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
   return {
     wsPort: wss.address().port,
     udpPort: udp.address().port,
+    previewPort: previewUdp.address().port,
     file,
-    close: () => { clearTimeout(timer); clearInterval(heartbeat); udp.close(); closeWs(); },
+    close: () => { clearTimeout(timer); clearInterval(heartbeat); udp.close(); previewUdp.close(); closeWs(); },
   };
 }

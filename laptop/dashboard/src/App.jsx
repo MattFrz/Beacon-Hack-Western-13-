@@ -137,7 +137,7 @@ function usePanels(narrow) {
 }
 
 export default function App() {
-  const { log, world, frameUrl, connected, stale, bridge, setSource } = useTelemetry();
+  const { log, world, frames, connected, stale, bridge, setSource } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
   useEffect(() => setCursor(null), [bridge?.source, bridge?.replay]);
   const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
@@ -278,7 +278,7 @@ export default function App() {
             <kbd>]</kbd>
           </header>
           <div className="sb-body">
-            <Camera url={frameUrl} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
+            <Camera frames={frames} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
           </div>
         </Sidebar>
       </div>
@@ -585,20 +585,39 @@ function System({ w, health, log, setCursor }) {
   );
 }
 
-// Right panel: the latest camera frame at the panel's full width. A replay with probe frames shows the
-// image with its detection boxes and the depth map below it.
-function Camera({ url, paused, recording }) {
+// Show full-rate camera capture separately from the slower object and depth inference preview.
+function Camera({ frames, paused, recording }) {
   if (recording && !recording.video) return <p className="muted camera-note">This hand simulation contains 3D telemetry only.</p>;
   // video is not kept in history, so a paused view never shows a live frame next to a past scene
   if (paused) return <p className="muted camera-note">The camera hides while the view is paused: video is not kept in history.</p>;
-  if (!url) {
+  if (!frames.raw && !frames.composite) {
     return (
       <p className="muted camera-note">
         {recording ? 'Waiting for the recorded frame.' : 'Waiting for camera frames from the Pi.'}
       </p>
     );
   }
-  return <img className="camera" src={url} alt={recording ? 'Recorded camera frame' : 'Live camera frame from the Pi'} />;
+  const views = [
+    { title: 'Camera · up to 24 fps', url: frames.raw, alt: 'Live camera feed' },
+    { title: 'Object detection', url: frames.composite, crop: 'top', alt: 'Camera feed with detection boxes and labels' },
+    { title: 'Depth map', url: frames.composite, crop: 'bottom', alt: 'Colorized depth map from the camera' },
+  ];
+  return (
+    <div className="camera-stack">
+      {views.map(({ title, url, crop, alt }) => (
+        <section className="camera-view" key={title}>
+          <h3>{title}</h3>
+          {url ? (
+            crop ? (
+              <div className={`camera-crop camera-crop-${crop}`}>
+                <img className="camera-crop-image" src={url} alt={alt} />
+              </div>
+            ) : <img className="camera" src={url} alt={alt} />
+          ) : <p className="muted camera-wait">{recording ? 'Not included in this recording.' : 'Waiting for this feed.'}</p>}
+        </section>
+      ))}
+    </div>
+  );
 }
 
 // The animations switch: follows the OS reduced-motion setting unless the viewer overrides it here.

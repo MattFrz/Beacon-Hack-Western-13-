@@ -22,6 +22,7 @@ try {
   const bridge = await startBridge({
     wsPort: 8765,
     udpPort: 5005,
+    previewPort: 5007,
     recordDir: fileURLToPath(new URL('recordings/', import.meta.url)),
     replayFile,
     recordings,
