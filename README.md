@@ -56,7 +56,13 @@ This image accepts only single-CPU runmasks. Perception runs on one core, not sp
 
 ## Running the demo scripts
 
-Run these on the Pi. The first is the full chain on a replayed clip:
+The live demo (camera → detection → guidance → JBL, phone page as the mic) is one command on the Pi, from this checkout; see `docs/demo-runbook.md` for setup:
+
+```
+AUDIO=jbl sh run_live.sh bottle
+```
+
+Replay scripts, also on the Pi. The first is the full chain on a replayed clip:
 
 ```
 sh ingest/tools/device_chain_demo.sh /tmp/replay.avi cup

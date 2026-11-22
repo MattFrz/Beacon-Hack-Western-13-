@@ -35,6 +35,7 @@ import threading
 import sys
 import time
 from pathlib import Path
+from collections import deque
 from typing import Any, Dict, List, Optional, Sequence
 
 # QNX's packaged onnxruntime ships the C library but not the pybind extension,
@@ -383,6 +384,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="LK pyramid levels (default 4; reaches ~150 px steps)",
     )
     parser.add_argument(
+        "--yolo-hand-conf", type=float, default=0.05, metavar="C",
+        help="detector threshold for the `hand` class only (default 0.05; weak hands are "
+             "common on-device); every other class keeps --conf",
+    )
+    parser.add_argument(
         "--memory-s", type=float, default=20.0, metavar="S",
         help="carry remembered rows on LOST records so a late FIND can bind, in "
              "seconds (default 20; must match BEACON_MEMORY_BIND_MAX_NS in guided)",
@@ -465,6 +471,108 @@ def gate_by_depth(
     return gated, dropped
 
 
+# Classes that mark the wearer's hand. "watch" (a wristwatch on the reaching arm) is
+# only present in a bake that includes it; a real "hand" box wins when both are seen.
+HAND_CLASSES = ("hand", "watch")
+HAND_MIN_Z_M = 0.2  # the wearer's own hand, seen from a chest camera, is within arm's reach
+HAND_MAX_Z_M = 0.8
+
+
+def _boxes_touch(a: Sequence[float], b: Sequence[float], pad: float = 0.15) -> bool:
+    """True when box a overlaps box b grown by `pad` of its size on each side."""
+    bw, bh = b[2] - b[0], b[3] - b[1]
+    return not (a[2] < b[0] - pad * bw or a[0] > b[2] + pad * bw
+                or a[3] < b[1] - pad * bh or a[1] > b[3] + pad * bh)
+
+
+def _iou(a: Sequence[float], b: Sequence[float]) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+HAND_LOOKALIKE_IOU = 0.5
+
+
+def drop_hand_lookalikes(world: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop live objects whose box is mostly the hand's box.
+
+    Seen on the Pi: the open hand was also boxed as "bottle 0.53 m". That fake
+    bottle can become the target, and the hand is always "on" it, so REACH and
+    "Found it" fire with nothing there. A real object being gripped overlaps the
+    hand box only partly (IoU well under 0.5), so it stays.
+    """
+    hand = world.get("hand")
+    if not isinstance(hand, dict) or not hand.get("bbox_px"):
+        return world
+    hb = [float(v) for v in hand["bbox_px"]]
+    objects = world.get("objects") or []
+    kept = [
+        o for o in objects
+        if not (isinstance(o, dict) and o.get("in_latest_boxes") and o.get("bbox_px")
+                and _iou(hb, [float(v) for v in o["bbox_px"]]) >= HAND_LOOKALIKE_IOU)
+    ]
+    if len(kept) == len(objects):
+        return world
+    out = dict(world)
+    out["objects"] = kept
+    return out
+
+
+def place_hand(world: Dict[str, Any], frame_w: int, frame_h: int,
+               hfov_deg: float) -> Dict[str, Any]:
+    """Give the hand a usable 3D point; the depth model cannot measure a hand.
+
+    Measured on the Pi: a hand ~0.3 m away read 0.5-3.7 m, so REACH (d <= 0.5 m)
+    never started. Two facts fix it without guessing: (1) a hand whose box
+    touches an object's box is at that object: it takes that object's depth and
+    sits at its gap from the object's outline (so the ticks still steer, and a
+    hand on the object reads ~0 m);
+    (2) otherwise the wearer's own hand is within arm's reach, so its depth is
+    clamped to 0.2-0.8 m. The direction from the camera is kept either way.
+    Returns a new world dict; unchanged when there is no hand box or geometry.
+    """
+    hand = world.get("hand")
+    if not isinstance(hand, dict) or not hand.get("bbox_px") or frame_w <= 0 or frame_h <= 0:
+        return world
+    x0, y0, x1, y1 = (float(v) for v in hand["bbox_px"])
+    u, v = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    f = frame_w / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
+    target = world.get("target") if isinstance(world.get("target"), dict) else {}
+    touching = [
+        obj for obj in world.get("objects") or []
+        if (isinstance(obj, dict) and obj.get("in_latest_boxes") and obj.get("bbox_px")
+            and isinstance(obj.get("xyz_cam"), (list, tuple))
+            and _boxes_touch((x0, y0, x1, y1), obj["bbox_px"]))
+    ]
+    # the object being searched for wins when the hand touches several
+    touching.sort(key=lambda o: o.get("name") != target.get("name"))
+    placed = dict(hand)
+    if touching:
+        # On the object: measure to its outline, not its centre. A hand gripping a
+        # bottle is ~0.2 m from the bottle's centre in the image, so measured to the
+        # centre REACH never reached "Found it" (< 0.15 m) on the Pi. The gap from
+        # the hand's centre to the nearest point of the object's box, at the object's
+        # depth, is ~0 when the hand is on it; its sign keeps the pan direction.
+        obj = touching[0]
+        ox0, oy0, ox1, oy1 = (float(c) for c in obj["bbox_px"])
+        z = float(obj["xyz_cam"][2])
+        gx = (u - min(max(u, ox0), ox1)) / f * z
+        gy = (v - min(max(v, oy0), oy1)) / f * z
+        c = [float(c) for c in obj["xyz_cam"]]
+        placed["xyz_cam"] = [c[0] + gx, c[1] + gy, c[2]]
+    else:
+        raw = hand.get("xyz_cam")
+        z = float(raw[2]) if isinstance(raw, (list, tuple)) and len(raw) == 3 else HAND_MAX_Z_M
+        z = min(max(z, HAND_MIN_Z_M), HAND_MAX_Z_M)
+        placed["xyz_cam"] = [(u - frame_w / 2.0) / f * z, (v - frame_h / 2.0) / f * z, z]
+    out = dict(world)
+    out["hand"] = placed
+    return out
+
+
 def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """Move a `hand` detection out of objects[] into the record's hand field.
 
@@ -484,18 +592,21 @@ def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str,
     hand_objs = [
         obj
         for obj in objects
-        if isinstance(obj, dict) and str(obj.get("name", "")).lower() == "hand"
+        if isinstance(obj, dict) and str(obj.get("name", "")).lower() in HAND_CLASSES
     ]
     if not hand_objs:
         return world, None
 
-    best = max(hand_objs, key=lambda obj: float(obj.get("conf") or 0.0))
+    best = max(hand_objs, key=lambda obj: (str(obj.get("name", "")).lower() == "hand",
+                                           float(obj.get("conf") or 0.0)))
     hand: Dict[str, Any] = {
         "t_ns": world.get("t_ns"),
         "frame_id": best.get("frame_id"),
     }
     if "conf" in best:
         hand["conf"] = best["conf"]
+    if best.get("bbox_px") is not None:
+        hand["bbox_px"] = best["bbox_px"]  # so the dashboard can draw the hand on the live video
     if isinstance(best.get("xyz_cam"), (list, tuple)):
         hand["xyz_cam"] = list(best["xyz_cam"])
     if isinstance(best.get("xyz_world"), (list, tuple)):
@@ -503,11 +614,11 @@ def lift_hand(world: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Dict[str,
 
     lifted = dict(world)
     lifted["objects"] = [
-        obj for obj in objects if not isinstance(obj, dict) or str(obj.get("name", "")).lower() != "hand"
+        obj for obj in objects if not isinstance(obj, dict) or str(obj.get("name", "")).lower() not in HAND_CLASSES
     ]
     lifted["hand"] = hand
     target = lifted.get("target")
-    if isinstance(target, dict) and str(target.get("name", "")).lower() == "hand":
+    if isinstance(target, dict) and str(target.get("name", "")).lower() in HAND_CLASSES:
         lifted["target"] = None
         lifted.pop("d_m", None)
     return lifted, hand
@@ -545,9 +656,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     dropped_far = 0
     hands_seen = 0
     max_depth = float(getattr(args, "max_depth", 3.0) or 0.0)
+    # The detector runs at the lower of the two thresholds; non-hand rows are
+    # filtered back to --conf after each frame (see object_conf below).
+    object_conf = float(args.conf)
+    args.conf = min(object_conf, float(getattr(args, "yolo_hand_conf", object_conf)))
     last_mtime = 0
     last_d_m: Optional[float] = None
     last_seen_ns: Optional[int] = None
+    vision_ns: deque = deque(maxlen=60)  # age of vision at refresh, newest 60 records
+    prev_frame_ns = 0
     last_objects: Optional[List[Dict[str, Any]]] = None
     last_target: Optional[Dict[str, Any]] = None
 
@@ -604,6 +721,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                     last_objects=last_objects,
                     last_target=last_target,
                 )
+                # bbox_px is in full-frame pixels; the dashboard scales the boxes onto
+                # the 24 fps camera feed (which may be downscaled) with this size.
+                if probe.get("W") and probe.get("H"):
+                    world["frame_wh"] = [int(probe["W"]), int(probe["H"])]
+                # The detector ran at the lower hand threshold; other objects keep --conf.
+                if object_conf > args.conf:
+                    world["objects"] = [
+                        o for o in (world.get("objects") or [])
+                        if not isinstance(o, dict) or str(o.get("name", "")).lower() in HAND_CLASSES
+                        or float(o.get("conf") or 0.0) >= object_conf
+                    ]
 
                 # A YOLO `hand` is not a findable object; it belongs in hand{},
                 # where the law and the dashboard already look for it. Lift before
@@ -612,6 +740,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # depth model's known far-bias, gating it would silently kill hand
                 # tracking at about arm's length.
                 world, hand_det = lift_hand(world)
+                if hand_det is not None:
+                    world = drop_hand_lookalikes(world)
+                if hand_det is not None and probe.get("W") and probe.get("H"):
+                    world = place_hand(world, int(probe["W"]), int(probe["H"]),
+                                       float(getattr(args, "fov", None) or 60.0))
+                    hand_det = world["hand"]
                 if hand_det is not None:
                     hands_seen += 1
                     print(
@@ -692,6 +826,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                     last_d_m = None
                 elif "d_m" in world:
                     last_d_m = world["d_m"]
+
+                # p95_vision_ns (spec: LIVE lasts max(1 s, 2 x p95)). Without it guided
+                # assumes 1 s and the ~1 s on-device cycle drops the target to LOST
+                # between records. Measured as how old the previous record's frame is
+                # when this one replaces it (latency + cycle), i.e. the oldest vision
+                # guided normally holds; capture->publish alone (~0.9 s) is too short
+                # here because the cycle (~1.1 s) is longer than the latency.
+                now_ns = time.monotonic_ns()
+                if prev_frame_ns:
+                    vision_ns.append(now_ns - prev_frame_ns)
+                prev_frame_ns = int(world.get("t_ns") or 0)
+                ranked = sorted(v for v in vision_ns if 0 < v < 10_000_000_000)
+                if ranked:
+                    world.setdefault("health", {})["p95_vision_ns"] = ranked[int(0.95 * (len(ranked) - 1))]
 
                 if seen % publish_every == 0:
                     line = json.dumps(world, separators=(",", ":"))

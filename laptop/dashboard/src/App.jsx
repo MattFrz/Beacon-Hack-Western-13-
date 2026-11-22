@@ -1,10 +1,8 @@
 import { Switch } from '@animate-ui/react/primitives/base-ui/switch';
 import { Button } from '@animate-ui/react/primitives/buttons/button';
 import { Highlight, HighlightItem } from '@animate-ui/react/primitives/effects/highlight';
-import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
 import { ShimmeringText } from '@animate-ui/react/primitives/texts/shimmering';
 import { Tab, TabList, TabPanel } from '@animate-ui/react/primitives/react-aria/tabs';
-import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
 import { ReducedMotionContext, useShouldReduceMotion } from '@animate-ui/react/utils/motion';
 import { MotionConfig } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -14,10 +12,10 @@ import Events from './Events.jsx';
 import { Collapse, Expand, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from './icons.jsx';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
-import Sidebar from './Sidebar.jsx';
+import Sidebar, { usePanelWidth } from './Sidebar.jsx';
 import Tip from './Tip.jsx';
 import { useTelemetry } from './useTelemetry.js';
-import { crumbsToScene, targetObjectId } from './worldScene.js';
+import { crumbsToScene, targetObjectId, worldHand } from './worldScene.js';
 
 const MODES = ['LIVE', 'HOLD', 'LOST'];
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -36,7 +34,7 @@ const PANELS_KEY = 'beacon.panels';
 const MOTION_KEY = 'beacon.motion';
 const TAB_KEY = 'beacon.tab';
 const TABS = ['guidance', 'system'];
-const PI_FRESH_MS = 2000; // the Pi counts as connected while its last packet is younger than this
+const PI_FRESH_MS = 5000; // the Pi counts as connected while its last packet is younger than this
 const SOURCES = [
   ['live', 'Live', 'Show data from the Pi'],
   ['replay', 'Replay', 'Play the recording'],
@@ -45,21 +43,8 @@ const BOTH = { left: true, right: true };
 // The viewer's animation choice -> the reduced-motion setting Motion and animate-ui read.
 const MOTION_SETTING = { system: 'user', on: 'never', off: 'always' };
 
-// A live number whose digits roll to each new value; '–' when telemetry has none.
 function Num({ value, digits = 0, unit = '' }) {
-  if (!isNum(value)) return '–';
-  return (
-    <>
-      <SlidingNumber number={value} decimalPlaces={digits} initiallyStable />
-      {unit}
-    </>
-  );
-}
-
-// Words that change (law, intent, spoken sentence) roll in letter by letter.
-function Rolling({ text, stagger = 0.03 }) {
-  if (!text) return '–';
-  return <RollingText key={text} text={text} transition={{ duration: 0.3, delay: stagger, ease: 'easeOut' }} />;
+  return <span className="number">{isNum(value) ? value.toFixed(digits) + unit : '–'}</span>;
 }
 
 // The last spoken sentence: telemd's caption, else guided's clip ids turned into words.
@@ -136,15 +121,29 @@ function usePanels(narrow) {
   return [panels, setPanels, set];
 }
 
+const subscribeWidth = listener => {
+  window.addEventListener('resize', listener);
+  return () => window.removeEventListener('resize', listener);
+};
+const viewportWidth = () => window.innerWidth;
+
 export default function App() {
-  const { log, world, frameUrl, connected, stale, bridge, setSource } = useTelemetry();
+  const { log, world, connected, stale, bridge, setSource, now } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
+  const [mapEpoch, setMapEpoch] = useState(0); // bumped by Reset map: the 3D scene remounts with an empty map
   useEffect(() => setCursor(null), [bridge?.source, bridge?.replay]);
   const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
   const narrow = useMedia(NARROW);
   const systemReduce = useMedia(REDUCE);
   const [motionChoice, setMotionChoice] = useMotionChoice();
   const [panels, setPanels, setPanel] = usePanels(narrow);
+  const [leftWidth, setLeftWidth] = usePanelWidth('left');
+  const [rightWidth, setRightWidth] = usePanelWidth('right');
+  const viewport = useSyncExternalStore(subscribeWidth, viewportWidth);
+  const maxPanel = narrow ? Math.max(1, viewport - 120) : Math.floor(viewport * 0.45);
+  const bothOpen = !narrow && panels.left && panels.right;
+  const leftLimit = bothOpen ? Math.min(maxPanel, viewport - 320 - 260) : maxPanel;
+  const rightLimit = bothOpen ? Math.min(maxPanel, viewport - 320 - Math.min(leftWidth, leftLimit)) : maxPanel;
   const [tab, setTab] = useStored(TAB_KEY, 'guidance', TABS);
   const restore = useRef(BOTH);
   const setting = MOTION_SETTING[motionChoice];
@@ -153,6 +152,19 @@ export default function App() {
   const paused = cursor != null;
   const shown = paused ? log.items[Math.max(cursor, log.first) - log.first]?.world : world;
   const hasData = paused ? Boolean(shown) : Boolean(connected && !stale && world);
+  const end = paused ? Math.max(0, cursor - log.first) : log.items.length - 1;
+  const viewTime = paused ? log.items[end]?.at : now;
+  let historyHand = null;
+  let handOpacity = 1;
+  for (let i = end; i >= 0 && log.items[i]; i--) {
+    const age = Math.max(0, viewTime - log.items[i].at);
+    if (age >= 1000 || log.items[i].world.t_ns > shown?.t_ns) break;
+    historyHand = worldHand(log.items[i].world);
+    if (historyHand) {
+      handOpacity = i === end && age < 250 ? 1 : 1 - age / 1000;
+      break;
+    }
+  }
   const w = shown ?? {};
   const mode = hasData && MODES.includes(w.mode) ? w.mode : null;
   const health = w.health ?? {};
@@ -191,6 +203,7 @@ export default function App() {
     <MotionScope setting={setting}>
       <div className="shell">
         <Sidebar
+          preferred={leftWidth} limit={leftLimit} setWidth={setLeftWidth}
           side="left"
           title="Guidance and system"
           keys="["
@@ -219,7 +232,7 @@ export default function App() {
         </Sidebar>
 
         <main className="stage" data-stale={!hasData}>
-          <Scene key={bridge?.source === 'replay' ? bridge.replay : 'live'} world={hasData ? shown : null} />
+          <Scene key={`${bridge?.source === 'replay' ? bridge.replay : 'live'}-${mapEpoch}`} latest={connected && !stale ? world : null} paused={paused} hand={historyHand} handOpacity={handOpacity} world={hasData ? shown : null} />
 
           <div className="stage-top">
             <div className="topbar">
@@ -230,15 +243,18 @@ export default function App() {
               <div className="readout"><span>Tracking</span><b>{mode ?? '–'}</b></div>
               <div className="readout">
                 <span>Law</span>
-                <b><Rolling text={w.law} /></b>
+                <b>{w.law ?? '–'}</b>
               </div>
               <div className="readout">
                 <span>Intent</span>
-                <b><Rolling text={w.intent?.kind} /></b>
+                <b>{w.intent?.kind ?? '–'}</b>
                 {w.intent?.candidates?.length > 0 && <em>{w.intent.candidates.join(', ')}</em>}
               </div>
               <div className="topbar-end">
                 <SourceSwitch bridge={bridge} setSource={setSource} />
+                <Tip label="Forget remembered objects and the camera path">
+                  <Button className="btn" onClick={() => setMapEpoch((n) => n + 1)}>Reset map</Button>
+                </Tip>
                 <Status connected={connected} paused={paused} hasData={hasData} bridge={bridge} piFresh={piFresh} />
                 <Tip label={focused ? 'Bring the panels back' : 'Focus the 3D view'} keys="Ctrl B">
                   <Button className="icon-btn" aria-label={focused ? 'Show the panels' : 'Focus the 3D view'} aria-pressed={focused} onClick={toggleFocus}>
@@ -257,15 +273,16 @@ export default function App() {
           </div>
 
           {!connected && log.items.length === 0 && <Waiting />}
-          {connected && bridge?.source === 'live' && !hasData && !paused && <WaitingForPi bridge={bridge} setSource={setSource} />}
+          {connected && bridge?.source === 'live' && !piFresh && !hasData && !paused && <WaitingForPi bridge={bridge} setSource={setSource} />}
 
           <div className="stage-foot">
             <Caption law={w.law} cue={w.cue} targetName={w.target?.name} />
-            <Scrubber log={log} cursor={cursor} setCursor={setCursor} replay={bridge?.source === 'replay'} />
+            <Scrubber log={log} cursor={cursor} setCursor={setCursor} replay={bridge?.source === 'replay' && bridge.replay} />
           </div>
         </main>
 
         <Sidebar
+          preferred={rightWidth} limit={rightLimit} setWidth={setRightWidth}
           side="right"
           title="Camera"
           keys="]"
@@ -278,7 +295,7 @@ export default function App() {
             <kbd>]</kbd>
           </header>
           <div className="sb-body">
-            <Camera url={frameUrl} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
+            <Camera world={w} paused={paused} recording={bridge?.source === 'replay' && bridge.recordings?.find(r => r.id === bridge.replay)} />
           </div>
         </Sidebar>
       </div>
@@ -585,20 +602,126 @@ function System({ w, health, log, setCursor }) {
   );
 }
 
-// Right panel: the latest camera frame at the panel's full width. A replay with probe frames shows the
-// image with its detection boxes and the depth map below it.
-function Camera({ url, paused, recording }) {
+// The 24 fps camera with the newest detection boxes drawn on top (boxes update at the detector's
+// rate, ~1-2 Hz), and the depth map from the slower inference preview below it. A recording without a
+// raw stream falls back to the composite preview, which has its own boxes baked in. Frames arrive as
+// window events so a 24 fps stream does not re-render the whole dashboard.
+function Camera({ world, paused, recording }) {
+  const [frames, setFrames] = useState({});
+  useEffect(() => {
+    const staleTimers = {};
+    const onFrame = ({ detail: { channel, frame } }) => {
+      setFrames((current) => ({ ...current, [channel]: frame }));
+      clearTimeout(staleTimers[channel]);
+      staleTimers[channel] = setTimeout(() => {
+        setFrames((current) => current[channel]?.at === frame.at ? { ...current, [channel]: null } : current);
+      }, channel === 'raw' ? 2000 : 3500);
+    };
+    const onClear = () => {
+      for (const timer of Object.values(staleTimers)) clearTimeout(timer);
+      setFrames({});
+    };
+    window.addEventListener('beacon:frame', onFrame);
+    window.addEventListener('beacon:frames-clear', onClear);
+    return () => {
+      window.removeEventListener('beacon:frame', onFrame);
+      window.removeEventListener('beacon:frames-clear', onClear);
+      for (const timer of Object.values(staleTimers)) clearTimeout(timer);
+    };
+  }, []);
+  const rawUrl = frames.raw?.url;
+  const compositeUrl = frames.composite?.url;
   if (recording && !recording.video) return <p className="muted camera-note">This hand simulation contains 3D telemetry only.</p>;
   // video is not kept in history, so a paused view never shows a live frame next to a past scene
   if (paused) return <p className="muted camera-note">The camera hides while the view is paused: video is not kept in history.</p>;
-  if (!url) {
+  if (!rawUrl && !compositeUrl) {
     return (
       <p className="muted camera-note">
         {recording ? 'Waiting for the recorded frame.' : 'Waiting for camera frames from the Pi.'}
       </p>
     );
   }
-  return <img className="camera" src={url} alt={recording ? 'Recorded camera frame' : 'Live camera frame from the Pi'} />;
+  const waiting = <p className="muted camera-wait">{recording ? 'Not included in this recording.' : 'Waiting for this feed.'}</p>;
+  return (
+    <div className="camera-stack">
+      <section className="camera-view">
+        <h3>{rawUrl ? 'Camera · up to 24 fps · detections' : 'Object detection'}</h3>
+        {rawUrl ? (
+          <LiveWithBoxes url={rawUrl} world={world} />
+        ) : compositeUrl ? (
+          <div className="camera-crop camera-crop-top">
+            <img className="camera-crop-image" src={compositeUrl} alt="Camera feed with detection boxes and labels" />
+          </div>
+        ) : waiting}
+      </section>
+      <section className="camera-view">
+        <h3>Depth map</h3>
+        {compositeUrl ? (
+          <div className="camera-crop camera-crop-bottom">
+            <img className="camera-crop-image" src={compositeUrl} alt="Colorized depth map from the camera" />
+          </div>
+        ) : waiting}
+      </section>
+    </div>
+  );
+}
+
+// Boxes are in full-frame pixels (world.frame_wh); the live JPEG may be downscaled, so the SVG uses the
+// full frame as its coordinate system and stretches over the image. Without frame_wh, the image's own
+// size is used (correct whenever the stream is not downscaled).
+const CAMERA_HFOV_DEG = 60; // live_probe --fov 60: the pinhole the Pi unprojects with
+const FULL_FRAME_W = 1280; // the C270's capture width on the Pi; boxes are in these pixels
+
+function LiveWithBoxes({ url, world }) {
+  const [natural, setNatural] = useState(null);
+  // Frame size the boxes are measured in: sent by the probe, else the image itself when it is full
+  // size, else the C270's 1280-wide frame at the image's aspect ratio (the stream was shrunk).
+  const [fw, fh] = world?.frame_wh
+    ?? (natural && (natural[0] >= FULL_FRAME_W ? natural : [FULL_FRAME_W, Math.round((FULL_FRAME_W * natural[1]) / natural[0])]))
+    ?? [0, 0];
+  const objects = (world?.objects ?? []).filter((o) => o?.bbox_px && o.in_latest_boxes !== false);
+  const hand = world?.hand?.bbox_px ? world.hand : null;
+  // Through telemd the hand has no box (the shm ABI has none), only a 3D point: project it.
+  const handPt = !hand && world?.hand?.xyz_cam?.[2] > 0.05 && fw > 0
+    ? (() => {
+        const f = fw / (2 * Math.tan((CAMERA_HFOV_DEG * Math.PI) / 360));
+        const [x, y, z] = world.hand.xyz_cam;
+        return [f * (x / z) + fw / 2, f * (y / z) + fh / 2];
+      })()
+    : null;
+  const target = world?.target?.name;
+  const range = (o) => (o.xyz_cam ? Math.hypot(...o.xyz_cam) : null);
+  const box = (key, [x0, y0, x1, y1], label, cls) => (
+    <g key={key} className={cls}>
+      <rect x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />
+      <text x={x0 + 4} y={Math.max(14, y0 - 6)}>{label}</text>
+    </g>
+  );
+  return (
+    <div className="camera-live">
+      <img
+        className="camera"
+        src={url}
+        alt="Live camera feed with detection boxes"
+        onLoad={(e) => !world?.frame_wh && setNatural([e.currentTarget.naturalWidth, e.currentTarget.naturalHeight])}
+      />
+      {fw > 0 && fh > 0 && (
+        <svg className="camera-boxes" viewBox={`0 0 ${fw} ${fh}`} preserveAspectRatio="none" aria-hidden="true">
+          {objects.map((o, i) => {
+            const r = range(o);
+            return box(`o${i}`, o.bbox_px, `${o.name}${r ? ` ${r.toFixed(2)} m` : ''}`, o.name === target ? 'box box-target' : 'box');
+          })}
+          {hand && box('hand', hand.bbox_px, 'hand', 'box box-hand')}
+          {handPt && (
+            <g className="box box-hand">
+              <circle cx={handPt[0]} cy={handPt[1]} r={fw * 0.035} />
+              <text x={handPt[0] + fw * 0.04} y={handPt[1]}>hand</text>
+            </g>
+          )}
+        </svg>
+      )}
+    </div>
+  );
 }
 
 // The animations switch: follows the OS reduced-motion setting unless the viewer overrides it here.
@@ -647,7 +770,7 @@ function Caption({ law, cue, targetName }) {
   if (!text) return null;
   return (
     <p className="caption">
-      “<Rolling text={text} stagger={0.012} />”
+      “{text}”
     </p>
   );
 }

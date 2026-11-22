@@ -151,3 +151,50 @@ test('targetObjectId finds the bound object by id, else by name at the same spot
   assert.equal(targetObjectId(elsewhere), null);
   assert.equal(targetObjectId({ objects: [bottle] }), null);
 });
+
+test('rememberObjects keeps an object after it drops out of view', async () => {
+  const { rememberObjects } = await import('./worldScene.js');
+  const bottle = { id: 7, name: 'bottle', position: [1, 0, -2], label: 'bottle', faded: false };
+  let memory = rememberObjects([], [bottle]);
+  memory = rememberObjects(memory, []); // one frame without it, or LOST
+  assert.equal(memory.length, 1);
+  assert.deepEqual(memory[0].position, [1, 0, -2]);
+  assert.equal(memory[0].faded, true);
+  memory = rememberObjects(memory, [{ ...bottle, position: [1.05, 0, -2] }]); // seen again nearby: same object
+  assert.equal(memory.length, 1);
+  assert.equal(memory[0].live, true);
+  memory = rememberObjects(memory, [{ ...bottle, position: [3, 0, -2] }]); // a second bottle elsewhere
+  assert.equal(memory.length, 2);
+  assert.deepEqual(memory[0].position, [1.05, 0, -2]);
+});
+
+test('nearby duplicate rows keep the newest position regardless of packet order', async () => {
+  const { rememberObjects } = await import('./worldScene.js');
+  const old = { id: 1, name: 'bottle', position: [1, 0, 0], seen: 10, faded: true };
+  const fresh = { ...old, id: 2, position: [1.45, 0, 0], seen: 20, faded: false };
+  const memory = rememberObjects([], [old]);
+  for (const rows of [[old, fresh], [fresh, old]]) {
+    const result = rememberObjects(memory, rows);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].key, memory[0].key);
+    assert.deepEqual(result[0].position, fresh.position);
+    assert.equal(result[0].live, true);
+  }
+});
+
+test('the wearer trail grows with real steps and skips jitter and glitches', async () => {
+  const { extendTrail } = await import('./worldScene.js');
+  const at = (x, z, epoch = 1) => ({ valid: true, pose_epoch: epoch, T_world_from_cam: [1, 0, 0, x, 0, 1, 0, 0, 0, 0, 1, z, 0, 0, 0, 1] });
+  let trail = extendTrail(null, at(0, 0));
+  trail = extendTrail(trail, at(0, 0.01));      // jitter: ignored
+  trail = extendTrail(trail, at(0, 0.5));       // a step
+  trail = extendTrail(trail, at(0, 3.0));       // 2.5 m in one packet: glitch, ignored
+  trail = extendTrail(trail, at(0.3, 0.9));     // a step
+  assert.equal(trail.points.length, 3);
+  assert.ok(Math.abs(trail.walked_m - 1.0) < 1e-9);
+  trail = extendTrail(trail, { valid: false });  // pose lost: unchanged
+  assert.equal(trail.points.length, 3);
+  trail = extendTrail(trail, at(5, 5, 2));       // tracker re-based: new trail, distance kept
+  assert.equal(trail.points.length, 1);
+  assert.ok(Math.abs(trail.walked_m - 1.0) < 1e-9);
+});

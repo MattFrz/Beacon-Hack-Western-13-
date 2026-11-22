@@ -1,4 +1,3 @@
-import { Slider } from '@animate-ui/react/primitives/base-ui/slider';
 import { Button } from '@animate-ui/react/primitives/buttons/button';
 import { ChevronLeft, ChevronRight } from './icons.jsx';
 import Tip from './Tip.jsx';
@@ -14,6 +13,9 @@ export default function Scrubber({ log, cursor, setCursor, replay }) {
   const go = (i) => setCursor(i >= newest ? null : Math.max(i, first));
   const viewed = items[index - first];
   const back = (viewed.at - items.at(-1).at) / 1000;
+  const bounds = replay && __REPLAY_BOUNDS__[replay];
+  const elapsed = bounds && Number.isFinite(viewed.world.t_ns)
+    ? Math.max(0, Math.min(bounds[1], viewed.world.t_ns) - bounds[0]) / 1e9 : null;
   const piTime = typeof viewed.world.t_ns === 'number' ? `Pi t ${(viewed.world.t_ns / 1e9).toFixed(3)} s` : null;
 
   return (
@@ -28,16 +30,13 @@ export default function Scrubber({ log, cursor, setCursor, replay }) {
           <ChevronRight />
         </Button>
       </Tip>
-      <Slider.Root className="slider" min={first} max={newest} value={index} onValueChange={(v) => go(v)}>
-        <Slider.Control className="slider-control">
-          <Slider.Track className="slider-track">
-            <Slider.Indicator className="slider-indicator" />
-            <Slider.Thumb className="slider-thumb" aria-label="Replay position" />
-          </Slider.Track>
-        </Slider.Control>
-      </Slider.Root>
+      <input type="range" className="slider" aria-label="Buffered history position"
+        min={first} max={newest} value={index} step={1}
+        onChange={e => go(e.currentTarget.valueAsNumber)} />
       <span className="scrub-label">
-        {cursor == null ? (
+        {elapsed != null ? (
+          `Replay \u00b7 ${elapsed.toFixed(1)} / ${((bounds[1] - bounds[0]) / 1e9).toFixed(1)} s`
+        ) : cursor == null ? (
           replay ? 'Playing recording' : 'Following live'
         ) : (
           <>

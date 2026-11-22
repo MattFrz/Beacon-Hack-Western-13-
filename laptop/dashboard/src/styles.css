@@ -7,7 +7,7 @@
   --surface: #222427;
   --raise: #2c2e32;
   --ink: #eff0f1;
-  --muted: #9c9ea3;
+  --muted: #b3b6bd;
   --accent: #ff4a1f;
   --accent-ink: #18191b;
   --line: rgb(239 240 241 / 0.09);
@@ -24,8 +24,6 @@
   --r-sm: 3px;
   --ctl: 40px;
   --gutter: 12px;
-  --sb-w-left: 320px;
-  --sb-w-right: 440px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -209,8 +207,15 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 .tabs [data-slot='tabs-indicator'] { border-radius: var(--r-sm); }
 
 /* right panel: the camera at full width */
-.camera { display: block; width: 100%; margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r); }
+.camera-stack { display: grid; gap: 18px; padding-top: 16px; }
+.camera-view { min-width: 0; }
+.camera-view h3 { margin: 0 0 7px; color: var(--muted); font: 12px var(--font-mono); }
+.camera { display: block; width: 100%; border: 1px solid var(--line); border-radius: var(--r); }
+.camera-crop { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.camera-crop-image { position: absolute; top: 0; left: 0; display: block; width: 100%; max-width: none; height: auto; margin: 0; border: 0; border-radius: 0; }
+.camera-crop-bottom .camera-crop-image { top: calc(-100% - 1px); }
 .camera-note { margin-top: 20px; }
+.camera-wait { margin: 10px 0 0; font-size: 12px; }
 
 /* ---------- floating top bar over the 3D view, between the two panel handles */
 .stage-top {
@@ -313,14 +318,9 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 }
 .scrubber .icon-btn { background: transparent; backdrop-filter: none; }
 .scrubber.is-empty { justify-content: center; padding: 12px; color: var(--muted); font-size: 13px; }
-.slider { flex: 1; padding: 0 10px; }
-.slider-control { display: flex; align-items: center; padding-block: 14px; touch-action: none; user-select: none; cursor: pointer; }
-.slider-track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: var(--line-strong); }
-.slider-indicator { height: 100%; border-radius: 2px; background: var(--muted); }
-.scrubber[data-paused='true'] .slider-indicator { background: var(--hold); }
-.slider-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 4px rgb(24 25 27 / 0.7); }
-.slider-thumb:has(:focus-visible) { outline: 2px solid var(--ink); outline-offset: 3px; }
-.scrub-label { min-width: 190px; padding: 0 8px; color: var(--muted); font: 12px var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.slider { flex: 1 1 96px; min-width: 60px; accent-color: var(--ink); cursor: pointer; }
+.scrubber[data-paused='true'] .slider { accent-color: var(--hold); }
+.scrub-label { min-width: 0; padding: 0 8px; color: var(--muted); font: 12px var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
 .scrub-label em { margin-left: 10px; font-style: normal; }
 .scrubber[data-paused='true'] .scrub-label { color: var(--hold); }
 
@@ -341,11 +341,6 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 
 /* ---------- narrow screens: panels cover the view instead of pushing it, one at a time */
 @media (max-width: 899px) {
-  /* leave room beside an open panel for both handles: its own, and the other side's */
-  :root {
-    --sb-w-left: min(320px, calc(100vw - var(--gutter) * 2 - var(--ctl) * 2 - 8px));
-    --sb-w-right: min(440px, calc(100vw - var(--gutter) * 2 - var(--ctl) * 2 - 8px));
-  }
   .sb-gap { width: 0 !important; }
   .sb { box-shadow: 0 0 48px rgb(0 0 0 / 0.55); }
   .brand { display: none; }
@@ -355,7 +350,7 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 @media (max-width: 560px) {
   .readout em { display: none; }
   .scrubber .btn { padding: 0 10px; }
-  .scrub-label { display: none; }
+  .scrub-label { order: 1; width: 100%; text-align: center; }
 }
 
 /* Display: the animations switch (animate-ui Switch on Base UI; its thumb slides when its position changes) */
@@ -387,3 +382,33 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 :root[data-motion='off'] *,
 :root[data-motion='off'] *::before,
 :root[data-motion='off'] *::after { animation: none !important; transition-duration: 0ms !important; }
+
+/* Live camera with detection boxes (Camera / LiveWithBoxes) */
+.camera-live { position: relative; }
+.camera-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.camera-boxes .box rect { fill: none; stroke: #3ddc84; stroke-width: 4; vector-effect: non-scaling-stroke; }
+.camera-boxes .box text { fill: #3ddc84; font: 600 26px var(--font-mono); paint-order: stroke; stroke: #000; stroke-width: 4px; }
+.camera-boxes .box-target rect { stroke-width: 6; }
+.camera-boxes .box-hand rect, .camera-boxes .box-hand circle { fill: none; stroke: #ffb020; stroke-width: 4; vector-effect: non-scaling-stroke; }
+.camera-boxes .box-hand text { fill: #ffb020; }
+
+.number { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.panel-resizer { position: absolute; inset-block: 0; width: 10px; cursor: col-resize; touch-action: none; z-index: 1; }
+.sb[data-side='left'] .panel-resizer { right: 0; }
+.sb[data-side='right'] .panel-resizer { left: 0; }
+.panel-resizer:is(:hover, :focus-visible) { background: var(--line-strong); }
+.stage { container-type: inline-size; }
+.topbar { gap: 8px 16px; padding: 8px 12px; }
+.readout { flex-direction: column; align-items: flex-start; gap: 0; overflow-wrap: anywhere; }
+.readout > span { font-size: 12px; }
+.topbar-end, .scrubber, .obj-name { flex-wrap: wrap; }
+.topbar-end { max-width: 100%; }
+.status { border: 0; height: auto; white-space: normal; }
+.metric { border-top: 0; }
+.kv dd, .obj-name, .recording-picker { min-width: 0; overflow-wrap: anywhere; }
+.recording-picker, .recording-picker select { max-width: 100%; min-width: 0; }
+@container (max-width: 640px) {
+  .stage-top { top: calc(var(--ctl) + 2 * var(--gutter)); inset-inline: var(--gutter); }
+  .brand { display: none; }
+  .topbar-end { margin-left: 0; }
+}

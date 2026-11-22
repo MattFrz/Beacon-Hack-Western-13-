@@ -100,7 +100,8 @@ test('live: forwards world JSON and JPEGs, drops junk, records world lines', asy
 
   const line = JSON.stringify(JSON.parse(sample));
   assert.equal(msgs.find((m) => typeof m === 'string'), line); // junk would have arrived first
-  assert.deepEqual(msgs.find((m) => Buffer.isBuffer(m)), jpeg);
+  // camera JPEGs on the main port go out tagged with channel 1 (raw camera); the preview port uses 2
+  assert.deepEqual(msgs.find((m) => Buffer.isBuffer(m)), Buffer.concat([Buffer.from([1]), jpeg]));
   assert.equal(fs.readFileSync(bridge.file, 'utf8'), line + '\n');
 });
 

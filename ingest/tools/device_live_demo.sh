@@ -33,6 +33,21 @@ DURATION=${3:-1800}
 CONF=${CONF:-0.10}
 FRAME=${FRAME:-/tmp/live/latest.jpg}
 GRAB_FPS=${GRAB_FPS:-30}
+# The hand is a YOLO class in the 7-class bake (MediaPipe cannot run on QNX); the
+# plain model has no `hand`, so the hand never shows and REACH never starts.
+YOLO=${YOLO:-$PERCEPT/models/yoloe26n_320_hand.onnx}
+LABELS=${LABELS:-$PERCEPT/models/labels_hand.txt}
+# Speech: GUIDED_AUDIO=fifo:/data/home/qnxuser/projects/qnx-bluetooth/audio.pcm plays on
+# the JBL (start run-radio.sh first). Default: no audio device, log only.
+GUIDED_AUDIO=${GUIDED_AUDIO:-none}
+# The on-device YOLO hand scores 0.05-0.25; guided's default (0.5) would ignore it.
+HAND_CONF=${HAND_CONF:-0.05}
+# Which checkout runs guided (with its sounds/) and telemd; default the repo above.
+GUIDED_ROOT=${GUIDED_ROOT:-$REPO}
+TELEMD=${TELEMD:-$REPO/telemd/build/telemd}
+# A second dashboard laptop that gets the same telemetry and 24 fps camera (optional).
+ALSO_TO=${ALSO_TO:-}
+PREVIEW=${PREVIEW:-$PERCEPT/percept/tools/live_preview.py}
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -45,7 +60,9 @@ slay_matching() {
 }
 
 echo "== stop leftovers =="
-slay_matching "ingest/build/ingest|guided/build/guided|live_probe|beacon_grab|telemd/build/telemd"
+# Match program paths at the start of the command, not words anywhere in it: a bare
+# "live_probe" also matched (and killed) an ssh shell whose command mentioned it.
+slay_matching "^ *[0-9]+ ([^ ]*/)?(ingest/build/ingest|[.]/ingest --|world_in|voiced/build/beacon_cmd|[.]/guided/build/guided|timeout [0-9]+ python3|python3 -s [^ ]*live_(probe|preview)[.]py|[.]/beacon_grab|[^ ]*telemd/build/telemd)"
 sleep 1
 rm -f /dev/shmem/beacon_world
 mkdir -p /tmp/live
@@ -59,17 +76,19 @@ sudo -n sh -c "/usr/bin/sensor -U 521:521 -b external -r /data/share/sensor -c $
 sleep 5
 
 echo "== guided (owns the world) =="
-cd "$REPO"
-./guided/build/guided --create --metres --duration "$DURATION" > /tmp/guided.log 2>&1 &
+cd "$GUIDED_ROOT"
+./guided/build/guided --create --metres --hand-conf "$HAND_CONF" --duration "$DURATION" --audio "$GUIDED_AUDIO" > /tmp/guided.log 2>&1 &
 sleep 1
 
 echo "== ingest (relay, no intent yet) =="
-./ingest/build/ingest --udp 5006 > /tmp/ingest-a.log 2>&1 &
+"$REPO/ingest/build/ingest" --udp 5006 > /tmp/ingest-a.log 2>&1 &
 sleep 1
 
-echo "== grabber: newest frame every 200 ms =="
+echo "== grabber: newest frame at camera rate =="
 cd "$PERCEPT"
 ./beacon_grab -u 5 -w -r "$GRAB_FPS" -s 6 -o "$FRAME" > /tmp/grab.log 2>&1 &
+python3 -s "$PREVIEW" --grab-file "$FRAME" --udp "$DASHBOARD_HOST:5005" --fps 24 > /tmp/live_preview.log 2>&1 &
+[ -n "$ALSO_TO" ] && python3 -s "$PREVIEW" --grab-file "$FRAME" --udp "$ALSO_TO:5005" --fps 24 > /tmp/live_preview2.log 2>&1 &
 # Wait for a real frame before starting inference: the first ones are black
 # while the camera's auto-exposure settles.
 i=0
@@ -85,11 +104,11 @@ cd "$REPO"
 timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --grab-file "$FRAME" \
     --udp 127.0.0.1:5006 \
-    --video-udp "$DASHBOARD_HOST:5005" \
-    --labels "$PERCEPT/models/labels_hand.txt" \
-    --yolo "$PERCEPT/models/yoloe26n_320_hand.onnx" \
+    --video-udp "$DASHBOARD_HOST:5007" \
+    --labels "$LABELS" \
+    --yolo "$YOLO" \
     --depth "$PERCEPT/models/depth_anything_v2_metric_indoor_small.onnx" \
-    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --ort-intra 3 \
+    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --yolo-hand-conf "$HAND_CONF" --ort-intra 3 \
     --h-chest 1.4 \
     --vo-max-disp 200 --vo-fb-err 3.0 --vo-min-tracks 40 \
     --vo-max-corners 180 --vo-win 21 --vo-levels 3 \
@@ -97,9 +116,10 @@ timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
 PROBE_PID=$!
 
 # The monitor: world state to the bridge on the laptop, read-only.
-if [ -x "$REPO/telemd/build/telemd" ]; then
+if [ -x "$TELEMD" ]; then
     echo "== telemd (monitor, read-only) -> $DASHBOARD_HOST:5005 =="
-    "$REPO/telemd/build/telemd" "$DASHBOARD_HOST" 5005 > /tmp/telemd.log 2>&1 &
+    "$TELEMD" "$DASHBOARD_HOST" 5005 > /tmp/telemd.log 2>&1 &
+    [ -n "$ALSO_TO" ] && "$TELEMD" "$ALSO_TO" 5005 > /tmp/telemd2.log 2>&1 &
 else
     echo "!! telemd not built: dashboard gets video only (make -C telemd)"
 fi
@@ -124,6 +144,12 @@ fi
 slay_matching "ingest/build/ingest"
 sleep 1
 "$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+# Phone page: open http://<pi>:8080 on a phone on the hotspot, dictate with the keyboard mic, Send.
+BEACON_CMD=${BEACON_CMD:-/data/home/qnxuser/beacon/voiced/build/beacon_cmd}
+if [ -x "$BEACON_CMD" ]; then
+    "$BEACON_CMD" --http 8080 > /tmp/beacon_cmd.log 2>&1 &
+    echo "== phone page: http://$(ifconfig bcm0 2>/dev/null | awk '/inet /{print $2}'):8080 =="
+fi
 sleep 12
 
 echo "== what guided heard =="
@@ -138,3 +164,4 @@ echo "== grabber =="
 tail -3 /tmp/grab.log
 
 echo "(processes left running: guided, ingest, grabber, percept — dashboard on $DASHBOARD_HOST:5005)"
+wait "$PROBE_PID" || true

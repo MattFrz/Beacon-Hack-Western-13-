@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const BRIDGE_URL = 'ws://127.0.0.1:8765';
-const STALE_MS = 1000; // no world state for this long -> NO DATA, never a frozen LIVE
-const FRAME_STALE_MS = 2000; // JPEG turned off or stopped -> hide the last frame
+const STALE_MS = 5000; // no world state for this long -> NO DATA, never a frozen LIVE
 const MAX_HISTORY = 6000; // world states kept for the scrubber: 10 min at 10 Hz
 const TRIM = 600; // drop this many of the oldest at a time
 const EMPTY = { first: 0, items: [] };
@@ -12,7 +11,6 @@ const EMPTY = { first: 0, items: [] };
 // can scrub after a run, but starts over when the source changes, so replay and live never share a timeline.
 export function useTelemetry() {
   const [log, setLog] = useState(EMPTY); // items[i] = { at, world }; first = index of items[0]
-  const [frame, setFrame] = useState(null); // { url, at }
   const [bridge, setBridge] = useState(null); // { source, replay, pi, listen } from the bridge, every second
   const [connected, setConnected] = useState(false);
   const [now, setNow] = useState(() => performance.now());
@@ -21,7 +19,8 @@ export function useTelemetry() {
   useEffect(() => {
     let ws;
     let retry;
-    let frameUrl;
+    const frameUrls = {};
+    const frameTimes = {};
     let source; // the source the history belongs to
     let stopped = false;
     const connect = () => {
@@ -34,9 +33,20 @@ export function useTelemetry() {
       ws.onmessage = ({ data }) => {
         const at = performance.now();
         if (typeof data !== 'string') {
-          if (frameUrl) URL.revokeObjectURL(frameUrl);
-          frameUrl = URL.createObjectURL(data);
-          setFrame({ url: frameUrl, at });
+          data.arrayBuffer().then((buffer) => {
+            if (stopped) return;
+            const bytes = new Uint8Array(buffer);
+            const tagged = bytes[0] === 1 || bytes[0] === 2;
+            const channel = bytes[0] === 1 ? 'raw' : 'composite';
+            const jpeg = tagged ? bytes.slice(1) : bytes; // old replay streams contain an untagged composite
+            const url = URL.createObjectURL(new Blob([jpeg], { type: 'image/jpeg' }));
+            if (frameUrls[channel]) URL.revokeObjectURL(frameUrls[channel]);
+            frameUrls[channel] = url;
+            frameTimes[channel] = performance.now();
+            window.dispatchEvent(new CustomEvent('beacon:frame', {
+              detail: { channel, frame: { url, at: frameTimes[channel] } },
+            }));
+          });
           return;
         }
         const msg = JSON.parse(data); // the bridge only sends JSON objects
@@ -44,9 +54,10 @@ export function useTelemetry() {
           const feed = msg.bridge.source === 'replay' ? `replay/${msg.bridge.replay}` : 'live';
           if (source !== undefined && feed !== source) {
             setLog(EMPTY);
-            if (frameUrl) URL.revokeObjectURL(frameUrl);
-            frameUrl = null;
-            setFrame(null);
+            for (const url of Object.values(frameUrls)) URL.revokeObjectURL(url);
+            for (const key of Object.keys(frameUrls)) delete frameUrls[key];
+            for (const key of Object.keys(frameTimes)) delete frameTimes[key];
+            window.dispatchEvent(new CustomEvent('beacon:frames-clear'));
           }
           source = feed;
           setBridge(msg.bridge);
@@ -65,7 +76,7 @@ export function useTelemetry() {
       clearTimeout(retry);
       clearInterval(clock);
       ws.close();
-      if (frameUrl) URL.revokeObjectURL(frameUrl);
+      for (const url of Object.values(frameUrls)) URL.revokeObjectURL(url);
     };
   }, []);
 
@@ -76,12 +87,12 @@ export function useTelemetry() {
 
   const last = log.items.at(-1);
   return {
+    now,
     log,
     world: last?.world ?? null,
     bridge: connected ? bridge : null,
     setSource,
     connected,
     stale: !last || now - last.at > STALE_MS,
-    frameUrl: frame && now - frame.at < FRAME_STALE_MS ? frame.url : null,
   };
 }
