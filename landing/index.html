@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-type="product">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="page-type" content="product">
+  <meta name="site-kind" content="tech">
+  <meta name="description" content="Beacon is a chest-worn prototype that uses spoken directions and stereo audio to guide blind and low-vision wearers toward familiar objects.">
+  <meta property="og:title" content="Beacon | Find by sound">
+  <meta property="og:description" content="Try the sound cues from Beacon, a wearable object-finding prototype built at Hack Western 13.">
+  <title>Beacon | Find by sound</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="demo.js" defer></script>
+  <script src="gallery.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="#main" aria-label="Beacon home"><i class="mark" aria-hidden="true"></i>Beacon</a>
+    <nav aria-label="Main">
+      <a href="https://beaconeggandcheese.cooking/dashboard/">Dashboard</a>
+      <a href="#listen">Sound demo</a>
+    </nav>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="intro" data-enter>
+        <p class="mono kicker">Built at Hack Western 13</p>
+        <h1 id="hero-title">Find your keys<br>by <em>sound.</em></h1>
+        <p class="lede">Beacon is a chest-worn prototype for people who are blind or have low vision. Ask for the keys, follow a spoken direction, then listen for stereo ticks as you reach.</p>
+        <a class="button" href="#listen"><span aria-hidden="true">▷</span> Try the sound demo</a>
+      </div>
+      <section class="gallery" aria-labelledby="gallery-title" aria-roledescription="carousel">
+        <div class="gallery-heading">
+          <h2 class="mono" id="gallery-title">Beacon’s camera test</h2>
+          <div class="gallery-arrows" hidden>
+            <button type="button" data-step="-1" aria-label="Previous media">←</button>
+            <button type="button" data-step="1" aria-label="Next media">→</button>
+          </div>
+        </div>
+        <div class="gallery-stage">
+          <div class="gallery-slide" id="camera-slide" role="group" aria-label="Camera still">
+            <img width="320" height="180" src="assets/beacon-camera.jpg"
+              alt="Beacon’s camera shows a bottle and box on a table, with boxes marking both detected objects.">
+          </div>
+          <div class="gallery-slide" id="depth-slide" role="group" aria-label="Depth still" hidden>
+            <img width="320" height="180" src="assets/beacon-depth.jpg"
+              alt="Depth map with a single bottle outlined in yellow on the left, labeled 1.60 metres.">
+            <figure class="depth-reference">
+              <img width="90" height="112" src="assets/beacon-depth-camera-detail.jpg"
+                alt="Matching camera close-up of the black bottle inside the yellow detection box.">
+              <figcaption>Camera detail</figcaption>
+            </figure>
+          </div>
+          <div class="gallery-slide" id="replay-slide" role="group" aria-label="Narrated demo" hidden>
+            <video width="320" height="180" controls playsinline preload="none"
+              poster="assets/beacon-camera.jpg" aria-label="Beacon demo with narration">
+              <source src="assets/beacon-demo-narrated.mp4" type="video/mp4">
+              <a href="assets/beacon-demo-narrated.mp4">Download the narrated demo</a>
+            </video>
+          </div>
+        </div>
+        <div class="gallery-pickers" role="group" aria-label="Choose a view" hidden>
+          <button type="button" aria-controls="camera-slide" aria-pressed="true">Camera still</button>
+          <button type="button" aria-controls="depth-slide" aria-pressed="false">Depth still</button>
+          <button type="button" aria-controls="replay-slide" aria-pressed="false">Narrated demo</button>
+        </div>
+        <span class="sr-only" role="status" id="gallery-status"></span>
+      </section>
+    </section>
+
+    <section class="how" id="how" aria-labelledby="how-title">
+      <div>
+        <h2 id="how-title">From asking<br>to <em>reaching.</em></h2>
+        <p class="lede">Beacon is designed for familiar indoor objects its camera has already seen in the current session. The objects need no tags.</p>
+      </div>
+      <ol class="steps">
+        <li><h3>Ask for the keys</h3><p>Say “Where are my keys?” Beacon matches the request to a supported object, such as keys, a cup, or a bottle.</p></li>
+        <li><h3>Follow a spoken direction</h3><p>The chest camera estimates where the item is. A short phrase such as “a little left” helps you approach it.</p></li>
+        <li><h3>Reach toward the sound</h3><p>The ticks pan toward the object and speed up as your hand gets closer. When your hand is close and aligned, the ticks become a steady tone.</p></li>
+      </ol>
+    </section>
+
+    <section class="listen" id="listen" aria-labelledby="listen-title">
+      <div>
+        <h2 id="listen-title">Hear the<br><em>distance.</em></h2>
+        <p class="lede">Play the browser simulation and move the slider toward the keys. Then simulate tracking loss. Beacon briefly holds the last reach cue before saying “I lost the target.”</p>
+      </div>
+      <div class="instrument">
+        <div class="instrument-head">
+          <label class="mono" for="reach">Hand to keys</label>
+          <span id="reading">60 cm</span>
+        </div>
+        <div class="wave" aria-hidden="true"></div>
+        <input id="reach" type="range" min="0" max="55" value="0" aria-valuetext="60 centimetres from the keys">
+        <div class="limits mono" aria-hidden="true"><span>Far</span><span>Near</span></div>
+        <div class="demo-status">
+          <span class="mode mono" id="mode" role="status">Live</span>
+          <span id="state">Slow ticks</span>
+        </div>
+        <div class="demo-actions">
+          <button class="button" id="play" type="button">Play sound</button>
+          <button class="button secondary" id="tracking" type="button">Simulate tracking loss</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="project" aria-labelledby="project-title">
+      <h2 id="project-title">The wearable<br>and the <em>dashboard.</em></h2>
+      <div class="project-details">
+        <p>Speech recognition, vision, and sound guidance run on the Raspberry Pi. QNX gives guidance priority so it can keep its timing while vision models run.</p>
+        <p>Open the team dashboard to replay the camera test. See what Beacon detected, follow its 3D map, and scrub back to the moment it lost the target.</p>
+        <p>We tested Beacon while wearing blindfolds. Beacon is designed to be used alongside a cane.</p>
+        <a class="button" href="https://beaconeggandcheese.cooking/dashboard/">Open dashboard replay</a>
+      </div>
+    </section>
+  </main>
+  <footer>
+    <strong>Beacon</strong>
+    <a href="https://github.com/MattFrz/Beacon-Hack-Western-13-">Project on GitHub ↗</a>
+    <a href="https://github.com/MattFrz/Beacon-Hack-Western-13-/tree/223a4693/laptop/samples/vid360-frames">Camera test frames on GitHub ↗</a>
+  </footer>
+</body>
+</html>
