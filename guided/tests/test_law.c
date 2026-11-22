@@ -649,6 +649,32 @@ static void test_flicker(void)
     CHECK(says <= 3 && (says < 2 || min_gap >= 2 * S), "blinking target: few cues, at least 2 s apart");
 }
 
+/* On the Pi the pose copy can arrive late now and then, so the map flips between
+ * trusted and stale while the target is out of view. "I lost the target" must
+ * still be said at most once. */
+static void test_lost_once_with_flaky_pose(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 1);
+    uint64_t now = 600 * S;
+    obj(0, 1, "keys", 0.0f, 0.1f, 1.0f, now, 1, 40);
+    P.pose.t_ns = now;
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    guided_step(&st, &P, &in, now, &out);
+    uint64_t seen = now;
+    obj(0, 1, "keys", 1.0f, 0.1f, 0.2f, seen, 0, 40);   /* now far right, out of view */
+    int lost = 0;
+    for (int i = 0; i < 400; ++i) {              /* ~6.4 s */
+        now += 16 * MS;
+        if (i % 70 == 0)
+            P.pose.t_ns = now;                     /* pose refreshed only every ~1.1 s */
+        guided_step(&st, &P, &in, now, &out);
+        lost += said(&out, BEACON_CLIP_LOST_TARGET);
+    }
+    CHECK(lost <= 1, "flaky pose freshness: 'I lost the target' at most once");
+}
+
 int main(void)
 {
     test_seq_writer_restart();
@@ -659,6 +685,7 @@ int main(void)
     test_landmark();
     test_orient_pips();
     test_flicker();
+    test_lost_once_with_flaky_pose();
     test_reach_enter_exit();
     test_turn_from_map();
     test_lost_once_and_no_numbers();

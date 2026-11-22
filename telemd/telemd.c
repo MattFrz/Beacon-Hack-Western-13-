@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -45,19 +46,61 @@ static const char *heartbeat_alive(uint64_t heartbeat, uint64_t now)
         ? "true" : "false";
 }
 
+static int append(char *packet, size_t cap, size_t *used, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(packet + *used, cap - *used, fmt, args);
+    va_end(args);
+    if (n < 0 || (size_t)n >= cap - *used) return 0;
+    *used += (size_t)n;
+    return 1;
+}
+
+static int append_scene(char *packet, size_t cap, size_t used, const beacon_percept_block_t *percept)
+{
+    const beacon_pose_t *p = &percept->pose;
+    int valid = p->valid;
+    for (int i = 0; i < 16; ++i) valid = valid && isfinite(p->T_world_from_cam[i]);
+    if (!append(packet, cap, &used, ",\"pose\":{\"valid\":%s,\"age_ns\":%" PRIu64
+                ",\"pose_epoch\":%u", valid ? "true" : "false", p->age_ns, p->pose_epoch)) return 0;
+    if (valid) {
+        if (!append(packet, cap, &used, ",\"T_world_from_cam\":[")) return 0;
+        for (int i = 0; i < 16; ++i)
+            if (!append(packet, cap, &used, "%s%.9g", i ? "," : "", p->T_world_from_cam[i])) return 0;
+        if (!append(packet, cap, &used, "]")) return 0;
+    }
+    if (!append(packet, cap, &used, "},\"objects\":[")) return 0;
+    int count = 0;
+    for (unsigned i = 0; i < BEACON_MAX_OBJECTS; ++i) {
+        const beacon_object_t *o = &percept->objects[i];
+        if (!o->used || (valid && o->pose_epoch != p->pose_epoch)) continue;
+        char name[6 * BEACON_NAME_LEN + 1], cam[96], position[96], id[32];
+        escape_name(o->name, name);
+        vector_json(cam, o->xyz_cam);
+        vector_json(position, o->xyz_world);
+        /* ingest can receive string IDs that do not fit the numeric ABI. */
+        if (o->id) snprintf(id, sizeof(id), "%u", o->id);
+        else snprintf(id, sizeof(id), "\"slot-%u\"", i);
+        if (!append(packet, cap, &used, "%s{\"id\":%s,\"name\":\"%s\",\"xyz_cam\":%s,\"xyz_world\":%s,"
+                    "\"last_seen_ns\":%" PRIu64 ",\"in_latest_boxes\":%s}", count++ ? "," : "",
+                    id, name, cam, position, o->last_seen_ns, o->in_latest_boxes ? "true" : "false")) return 0;
+    }
+    return append(packet, cap, &used, "]}") ? (int)used : 0;
+}
+
 static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
 {
     static const char *const modes[] = {"NONE", "LIVE", "HOLD", "LOST"};
     static const char *const laws[] = {"NONE", "STOP", "LOST", "REACH", "WALK", "RETURN"};
     beacon_guided_block_t guided;
-    beacon_percept_health_t health;
-    beacon_hand_t hand;
-    beacon_seq_t gs, ps, hand_seq;
+    static beacon_percept_block_t percept;
+    beacon_seq_t gs, ps;
     if (!beacon_seq_read(&world->seq_guided, &guided, &world->guided, sizeof(guided), 3, &gs) ||
-        !beacon_seq_read(&world->seq_percept, &health, &world->percept.health, sizeof(health), 3, &ps) ||
-        !beacon_seq_read(&world->seq_percept, &hand, &world->percept.hand, sizeof(hand), 3, &hand_seq) ||
-        ps != hand_seq)
+        !beacon_seq_read(&world->seq_percept, &percept, &world->percept, sizeof(percept), 3, &ps))
         return 0;
+    beacon_percept_health_t health = percept.health;
+    beacon_hand_t hand = percept.hand;
 
     uint64_t now = beacon_now_ns();
     const beacon_target_t *t = &guided.target;
@@ -107,20 +150,21 @@ static int snapshot(const beacon_world_t *world, char *packet, size_t cap)
                                  i ? "," : "", (unsigned)display->last_clips[i]);
 
     const char *law = guided.display.law < sizeof(laws)/sizeof(laws[0]) ? laws[guided.display.law] : "NONE";
-    return snprintf(packet, cap, "{\"v\":1,\"t_ns\":%" PRIu64 ",\"seq\":{\"guided\":%u,\"percept\":%u},"
+    int n = snprintf(packet, cap, "{\"v\":1,\"t_ns\":%" PRIu64 ",\"seq\":{\"guided\":%u,\"percept\":%u},"
                     "\"health\":{\"last_yolo_ms\":%" PRIu32 ",\"last_depth_ms\":%" PRIu32
                     ",\"p95_vision_ns\":%" PRIu64 ",\"timing\":{\"misses_16ms\":%" PRIu64
                     ",\"worst_late_us\":%" PRIu64 "},\"procs\":{"
                     "\"guided\":{\"alive\":%s,\"hb_ns\":%" PRIu64 "},"
                     "\"percept\":{\"alive\":%s,\"hb_ns\":%" PRIu64 "}}},"
                     "\"mode\":\"%s\",\"law\":\"%s\",\"target\":%s,\"hand\":%s,\"d_m\":%s,"
-                    "\"cue\":{\"tick_hz\":%s,\"pan\":%s,\"continuous\":%s,\"clip_ids\":[%s]}}",
+                    "\"cue\":{\"tick_hz\":%s,\"pan\":%s,\"continuous\":%s,\"clip_ids\":[%s]}",
                     now, gs, ps, health.last_yolo_ms, health.last_depth_ms, health.p95_vision_ns,
                     guided.stats.misses, guided.stats.worst_late_ns / UINT64_C(1000),
                     heartbeat_alive(guided.hb_guided_ns, now), guided.hb_guided_ns,
                     heartbeat_alive(health.hb_percept_ns, now), health.hb_percept_ns,
                     modes[mode], law, target, hand_json, distance,
                     ticks, pan, display->continuous ? "true" : "false", clips);
+    return n > 0 && (size_t)n < cap ? append_scene(packet, cap, (size_t)n, &percept) : 0;
 }
 
 int main(int argc, char **argv)
@@ -159,7 +203,7 @@ int main(int argc, char **argv)
     }
     for (;;) {
         if (world->abi == BEACON_ABI_VERSION) {
-            char packet[2048];
+            static char packet[24576]; /* full object table with escaped names, below one UDP payload */
             int n = snapshot(world, packet, sizeof(packet));
             if (n > 0 && (size_t)n < sizeof(packet) &&
                 sendto(sock, packet, (size_t)n, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0)

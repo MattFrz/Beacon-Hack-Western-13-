@@ -620,7 +620,9 @@ void guided_step(guided_state_t *st, const beacon_percept_block_t *p,
                     st->last_walk_ns = now;
                 }
                 orient(st, out, az, now, speak);
-                st->lost_said = 0;
+                /* lost_said is NOT cleared here: a pose that flickers stale/fresh would
+                 * otherwise say "I lost the target" again and again. Only seeing the
+                 * target again (below) re-arms it. */
                 st->prev_mode = mode;
                 return;
             }
