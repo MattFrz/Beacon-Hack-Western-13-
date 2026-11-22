@@ -34,6 +34,14 @@ ssh -i $env:USERPROFILE\.ssh\beacon_pi -c aes128-ctr -m hmac-sha2-256 qnxuser@10
 cd ~/beacon && AUDIO=jbl sh run_live.sh bottle
 ```
 
+**For the video (the wearer sets the target by voice, raw frames saved):**
+
+```
+cd ~/beacon && RECORD=1 AUDIO=jbl sh run_live.sh phone
+```
+
+`phone` starts with no target; the request from the phone page sets it. A request for something the camera has not seen yet waits ("looking for bottle") and starts the moment the camera sees it. `RECORD=1` saves every raw 1280x720 camera frame plus `index.jsonl` under `~/recordings/<time>/`; on the laptop, `demo-video/frames_to_video.py <dir>` turns them into an mp4 at real speed.
+
 About 40 s later it prints `bottle visible after Ns` (or `bottle never seen`: it still binds the moment a bottle appears) and the phone page address. First line should end in `model .../yoloe26n_320_watch.onnx`.
 
 ### 4. Use it

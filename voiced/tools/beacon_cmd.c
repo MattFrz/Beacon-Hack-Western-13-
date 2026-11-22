@@ -22,6 +22,7 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 
@@ -60,6 +61,49 @@ static void add(beacon_intent_t *in, const char *label)
             return;
     if (in->n_candidates < BEACON_MAX_CANDIDATES)
         strncpy(in->candidates[in->n_candidates++], label, BEACON_NAME_LEN - 1);
+}
+
+/* ADDITION: a FIND for something the camera has not seen yet waits here and is
+ * sent the moment a matching object appears in the world (the rule ingest
+ * --intent already follows). guided answers a FIND it cannot bind once, with
+ * "I have not seen that", and never retries (spec section 9), so a request made
+ * before the camera found the item used to end the demo. */
+#define PENDING_MAX_NS 120000000000ull /* give up waiting after 2 min: send anyway */
+static beacon_intent_t g_pending;
+static int g_has_pending;
+static uint64_t g_pending_since;
+
+static int any_candidate_seen(const beacon_intent_t *in)
+{
+    static beacon_percept_block_t blk;
+    beacon_seq_t seq;
+    if (!beacon_seq_read(&g_w->seq_percept, &blk, &g_w->percept, sizeof(blk), 3, &seq))
+        return 0;
+    for (int i = 0; i < BEACON_MAX_OBJECTS; ++i) {
+        if (!blk.objects[i].used)
+            continue;
+        for (uint32_t c = 0; c < in->n_candidates; ++c)
+            if (!strncmp(blk.objects[i].name, in->candidates[c], BEACON_NAME_LEN))
+                return 1;
+    }
+    return 0;
+}
+
+static void send_intent(beacon_intent_t *in);
+
+static void check_pending(void)
+{
+    if (!g_has_pending)
+        return;
+    int seen = any_candidate_seen(&g_pending);
+    if (!seen && beacon_now_ns() - g_pending_since < PENDING_MAX_NS)
+        return;
+    g_has_pending = 0;
+    send_intent(&g_pending);
+    snprintf(g_result, sizeof(g_result), "found %s: guiding now", g_pending.candidates[0]);
+    printf("%s %s  (request %u)\n", seen ? "seen, sent" : "timed out, sent", g_pending.candidates[0],
+           g_pending.utterance_id);
+    fflush(stdout);
 }
 
 static void send_intent(beacon_intent_t *in)
@@ -127,6 +171,17 @@ static int handle(char *line)
             fprintf(stderr, "beacon_cmd: find what? e.g. \"find bottle\"\n");
             return 1;
         }
+    }
+    g_has_pending = 0; /* any new request replaces one that was waiting */
+    if ((in.kind == BEACON_INTENT_FIND || in.kind == BEACON_INTENT_GO) && !any_candidate_seen(&in)) {
+        g_pending = in;
+        g_has_pending = 1;
+        g_pending_since = beacon_now_ns();
+        snprintf(g_result, sizeof(g_result), "looking for %s: starts as soon as the camera sees it",
+                 in.candidates[0]);
+        printf("waiting to see %s\n", in.candidates[0]);
+        fflush(stdout);
+        return 0;
     }
     send_intent(&in);
     {
@@ -222,6 +277,14 @@ static int serve_http(int port)
     }
     fprintf(stderr, "beacon_cmd: phone page on http://<this Pi>:%d\n", port);
     for (;;) {
+        /* wake every 200 ms to send a FIND that was waiting for its object */
+        fd_set rd;
+        FD_ZERO(&rd);
+        FD_SET(srv, &rd);
+        struct timeval wait = { 0, 200000 };
+        check_pending();
+        if (select(srv + 1, &rd, NULL, NULL, &wait) <= 0)
+            continue;
         int c = accept(srv, NULL, NULL);
         if (c < 0)
             continue;

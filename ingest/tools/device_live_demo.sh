@@ -101,6 +101,21 @@ echo "   frame: $(ls -l "$FRAME" 2>/dev/null | awk '{print $5}') bytes"
 
 echo "== percept: YOLOE + depth on one frame per cycle =="
 cd "$REPO"
+# Pass optional flags only when this checkout's live_probe has them, so the script
+# runs with either version on the Pi.
+PROBE_PY="$REPO/percept/tools/live_probe.py"
+EXTRA=""
+grep -q -- '--yolo-hand-conf' "$PROBE_PY" && EXTRA="$EXTRA --yolo-hand-conf $HAND_CONF"
+# RECORD_DIR: save every raw camera frame (+ index.jsonl) for the video, if supported.
+if [ -n "$RECORD_DIR" ]; then
+    if grep -q -- '--record-video' "$PROBE_PY"; then
+        mkdir -p "$RECORD_DIR"
+        EXTRA="$EXTRA --record-video $RECORD_DIR"
+        echo "   recording raw frames under $RECORD_DIR"
+    else
+        echo "   !! this live_probe cannot record (no --record-video); not recording"
+    fi
+fi
 timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --grab-file "$FRAME" \
     --udp 127.0.0.1:5006 \
@@ -108,7 +123,7 @@ timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --labels "$LABELS" \
     --yolo "$YOLO" \
     --depth "$PERCEPT/models/depth_anything_v2_metric_indoor_small.onnx" \
-    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --yolo-hand-conf "$HAND_CONF" --ort-intra 3 \
+    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" $EXTRA --ort-intra 3 \
     --h-chest 1.4 \
     --vo-max-disp 200 --vo-fb-err 3.0 --vo-min-tracks 40 \
     --vo-max-corners 180 --vo-win 21 --vo-levels 3 \
@@ -127,23 +142,29 @@ fi
 # Perception must be warm *and* see the target before an intent: a FIND that
 # arrives with objects[] empty is NACKed once and never retried (§9). Waiting
 # for a LIVE record that names the target is the honest way to sequence it.
-echo "== waiting for percept to see $TARGET =="
-waited=0
-while [ $waited -lt 40 ]; do
-    if grep -q "mode=LIVE name=$TARGET" /tmp/live_probe.log 2>/dev/null; then
-        echo "   $TARGET visible after ${waited}s"
-        break
+if [ "$TARGET" = phone ]; then
+    # ADDITION: no automatic FIND. The wearer sets the target from the phone page
+    # (it waits for the camera to see the item before sending), as in the video.
+    echo "== target: from the phone page =="
+else
+    echo "== waiting for percept to see $TARGET =="
+    waited=0
+    while [ $waited -lt 40 ]; do
+        if grep -q "mode=LIVE name=$TARGET" /tmp/live_probe.log 2>/dev/null; then
+            echo "   $TARGET visible after ${waited}s"
+            break
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+    if [ $waited -ge 40 ]; then
+        echo "   !! $TARGET never seen: the intent below will be NACKed (aim the camera first)"
     fi
-    sleep 2
-    waited=$((waited + 2))
-done
-if [ $waited -ge 40 ]; then
-    echo "   !! $TARGET never seen: the intent below will be NACKed (aim the camera first)"
-fi
 
-slay_matching "ingest/build/ingest"
-sleep 1
-"$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+    slay_matching "ingest/build/ingest"
+    sleep 1
+    "$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+fi
 # Phone page: open http://<pi>:8080 on a phone on the hotspot, dictate with the keyboard mic, Send.
 BEACON_CMD=${BEACON_CMD:-/data/home/qnxuser/beacon/voiced/build/beacon_cmd}
 if [ -x "$BEACON_CMD" ]; then
