@@ -27,9 +27,9 @@ AIROOT=${AIROOT:-/data/home/qnxuser/airoot}
 SENSOR_CONF=${SENSOR_CONF:-/data/home/qnxuser/sensor-usbjpeg.conf}
 TARGET=${1:-cup}
 DASHBOARD_HOST=${2:-10.80.55.91}
-DURATION=${3:-120}
+DURATION=${3:-1800}
 FRAME=${FRAME:-/tmp/live/latest.jpg}
-GRAB_FPS=${GRAB_FPS:-5}
+GRAB_FPS=${GRAB_FPS:-30}
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -78,14 +78,18 @@ done
 echo "   frame: $(ls -l "$FRAME" 2>/dev/null | awk '{print $5}') bytes"
 
 echo "== percept: YOLOE + depth on one frame per cycle =="
-timeout $((DURATION - 4)) python3 -s percept/tools/live_probe.py \
+cd "$REPO"
+timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --grab-file "$FRAME" \
     --udp 127.0.0.1:5006 \
     --video-udp "$DASHBOARD_HOST:5005" \
-    --labels models/labels.txt \
-    --yolo models/yoloe26n_320.onnx \
-    --depth models/depth_anything_v2_metric_indoor_small.onnx \
+    --labels "$PERCEPT/models/labels_hand.txt" \
+    --yolo "$PERCEPT/models/yoloe26n_320_hand.onnx" \
+    --depth "$PERCEPT/models/depth_anything_v2_metric_indoor_small.onnx" \
     --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf 0.10 --ort-intra 3 \
+    --h-chest 1.4 \
+    --vo-max-disp 200 --vo-fb-err 3.0 --vo-min-tracks 40 \
+    --vo-max-corners 180 --vo-win 21 --vo-levels 3 \
     > /tmp/live_probe.log 2>&1 &
 PROBE_PID=$!
 
@@ -116,7 +120,7 @@ fi
 
 slay_matching "ingest/build/ingest"
 sleep 1
-./ingest/build/ingest --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+"$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
 sleep 12
 
 echo "== what guided heard =="

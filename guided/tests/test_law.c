@@ -673,6 +673,16 @@ static void test_lost_once_with_flaky_pose(void)
         lost += said(&out, BEACON_CLIP_LOST_TARGET);
     }
     CHECK(lost <= 1, "flaky pose freshness: 'I lost the target' at most once");
+    for (int i = 0; i < 1300; ++i) {             /* ~20.8 s more of the same churn */
+        now += 16 * MS;
+        if (i % 70 == 0)
+            P.pose.t_ns = now;
+        guided_step(&st, &P, &in, now, &out);
+        lost += said(&out, BEACON_CLIP_LOST_TARGET);
+    }
+    /* First say + at most one per LOST_REPLAY_NS (8 s): ~27 s of continuous
+     * flicker must not exceed 3 "I lost the target" clips. */
+    CHECK(lost <= 3, "lost-clip gap: flicker says it at most every 8 s");
 }
 
 int main(void)

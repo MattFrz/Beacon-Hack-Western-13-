@@ -204,6 +204,7 @@ class VoRunner:
         self.valid_steps = 0
         self.bad_streak = 0
         self.last_printed_yaw = 0.0
+        self.max_step_ms = 0.0
 
     def run(self) -> None:
         while not self.stop.is_set():
@@ -222,48 +223,52 @@ class VoRunner:
             gray = cv2.resize(frame, (self.vo.vo_w, self.vo.vo_h),
                               interpolation=cv2.INTER_AREA)
             self.last_mtime = mtime
+            started = time.monotonic_ns()
             with self.lock:
                 self.n += 1
                 step = self.vo.step(gray, self.n, time.monotonic_ns())
-                if step is None:
-                    continue
-                self.steps += 1
-                self.latest = {
-                    "T": step.T_world_from_cam.tolist(),
-                    "valid": bool(step.valid),
-                    "t_ns": int(step.t_ns),
-                }
-                yaw = math.degrees(math.atan2(
-                    step.T_world_from_cam[0][2], step.T_world_from_cam[2][2]))
-                if step.valid:
-                    self.valid_steps += 1
-                    if self.bad_streak >= 3:
-                        print("live_probe: VO recovered",
-                              file=sys.stderr, flush=True)
-                    self.bad_streak = 0
-                    if (self.valid_steps % 25 == 1
-                            or abs(yaw - self.last_printed_yaw) >= 2.0):
-                        t = step.T_world_from_cam[:3, 3]
-                        print(
-                            f"live_probe: VO ok #{self.valid_steps} "
-                            f"yaw {yaw:+.1f} deg "
-                            f"t=[{t[0]:.2f},{t[1]:.2f},{t[2]:.2f}] "
-                            f"inliers {step.inliers}/{step.n_tracks} "
-                            f"disp {step.median_disp_px:.0f} px",
-                            file=sys.stderr, flush=True)
-                        self.last_printed_yaw = yaw
-                else:
-                    self.bad_streak += 1
-                    reason = ("fast pan" if step.median_disp_px > self.vo.cfg.max_disp_px
-                              else "too few tracks" if step.n_tracks < self.vo.cfg.min_tracks
-                              else "pnp failed")
+            step_ms = (time.monotonic_ns() - started) / 1e6
+            if step_ms > self.max_step_ms:
+                self.max_step_ms = step_ms
+            if step is None:
+                continue
+            self.steps += 1
+            self.latest = {
+                "T": step.T_world_from_cam.tolist(),
+                "valid": bool(step.valid),
+                "t_ns": int(step.t_ns),
+            }
+            yaw = math.degrees(math.atan2(
+                step.T_world_from_cam[0][2], step.T_world_from_cam[2][2]))
+            if step.valid:
+                self.valid_steps += 1
+                if self.bad_streak >= 3:
+                    print("live_probe: VO recovered",
+                          file=sys.stderr, flush=True)
+                self.bad_streak = 0
+                if (self.valid_steps % 25 == 1
+                        or abs(yaw - self.last_printed_yaw) >= 2.0):
+                    t = step.T_world_from_cam[:3, 3]
                     print(
-                        f"live_probe: VO untrusted ({reason}: disp "
-                        f"{step.median_disp_px:.0f} px, tracks "
-                        f"{step.n_tracks}, inliers {step.inliers}) "
-                        f"yaw {yaw:+.1f} deg",
+                        f"live_probe: VO ok #{self.valid_steps} "
+                        f"yaw {yaw:+.1f} deg "
+                        f"t=[{t[0]:.2f},{t[1]:.2f},{t[2]:.2f}] "
+                        f"inliers {step.inliers}/{step.n_tracks} "
+                        f"disp {step.median_disp_px:.0f} px "
+                        f"step {step_ms:.0f}ms max {self.max_step_ms:.0f}ms",
                         file=sys.stderr, flush=True)
-
+                    self.last_printed_yaw = yaw
+            else:
+                self.bad_streak += 1
+                reason = ("fast pan" if step.median_disp_px > self.vo.cfg.max_disp_px
+                          else "too few tracks" if step.n_tracks < self.vo.cfg.min_tracks
+                          else "pnp failed")
+                print(
+                    f"live_probe: VO untrusted ({reason}: disp "
+                    f"{step.median_disp_px:.0f} px, tracks "
+                    f"{step.n_tracks}, inliers {step.inliers}) "
+                    f"yaw {yaw:+.1f} deg",
+                    file=sys.stderr, flush=True)
 
 def _make_vo(args: argparse.Namespace, frame_w: int, frame_h: int):
     """Build the VO step machine; None (with a warning) when there are no intrinsics."""
