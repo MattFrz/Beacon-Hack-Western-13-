@@ -16,6 +16,10 @@ import numpy as np
 from percept.tools import vo_core
 
 VO_WIDTH = 320
+# The fast-pan guard is "~8 px per camera frame" (vo_core). Detection + depth run at
+# ~8 Hz on a ~24-30 fps camera, so one step spans ~3-4 camera frames of motion; scale
+# the guard like vo_probe.py does for --stride.
+FRAMES_PER_STEP = 4
 
 
 class LiveVo:
@@ -38,7 +42,9 @@ class LiveVo:
         h, w = frame.shape[:2]
         if self._vo is None:
             vo_h = max(48, int(round(h * VO_WIDTH / w)))
-            self._vo = vo_core.Vo(calib, self.depth_scale, self.h_chest, w, h, VO_WIDTH, vo_h)
+            cfg = vo_core.VoConfig()
+            cfg.max_disp_px *= FRAMES_PER_STEP
+            self._vo = vo_core.Vo(calib, self.depth_scale, self.h_chest, w, h, VO_WIDTH, vo_h, cfg)
         vo = self._vo
         gray = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (vo.vo_w, vo.vo_h),
                           interpolation=cv2.INTER_AREA)
@@ -47,6 +53,7 @@ class LiveVo:
         step = vo.step(gray, fid, t_ns)
         if step is not None:
             self.pose, self.valid = step.T_world_from_cam, step.valid
+            self.last_step = step
         return True
 
 

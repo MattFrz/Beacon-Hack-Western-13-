@@ -294,10 +294,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # labels and ranges on top, the colourised metric depth map with the
                 # same boxes underneath. That is what the monitor should see; the raw
                 # camera JPEG would show pixels with nothing drawn on them.
-                probe = probe_frame.probe_once(
-                    args, labels, mean, std, pad_color, resources,
-                    want_jpeg=False, want_preview=True, want_vo=live_vo is not None,
-                )
+                try:
+                    probe = probe_frame.probe_once(
+                        args, labels, mean, std, pad_color, resources,
+                        want_jpeg=False, want_preview=True, want_vo=live_vo is not None,
+                    )
+                except SystemExit as exc:
+                    # On Windows (udp_grab.py) the file can vanish for an instant while
+                    # the next frame is swapped in; skip that read instead of stopping.
+                    if "could not read image" not in str(exc):
+                        raise
+                    continue
                 if probe is None:
                     continue
                 seen += 1
@@ -340,6 +347,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if live_vo is not None:
                     if live_vo.update(probe):
                         apply_pose(world, live_vo.pose, live_vo.valid)
+                        step = getattr(live_vo, "last_step", None)
+                        if step is not None:
+                            t = live_vo.pose[:3, 3]
+                            print(f"vo valid={int(step.valid)} inliers={step.inliers} "
+                                  f"disp_px={step.median_disp_px:.1f} "
+                                  f"t=[{t[0]:.2f},{t[1]:.2f},{t[2]:.2f}]", file=sys.stderr, flush=True)
                     elif not warned_vo:
                         warned_vo = True
                         print("live_probe: --vo needs --fov or --calib and depth; pose stays identity",
