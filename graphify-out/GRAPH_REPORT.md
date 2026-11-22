@@ -1,17 +1,17 @@
 # Graph Report - beacon  (2026-11-22)
 
 ## Corpus Check
-- 150 files · ~157,208 words
+- 150 files · ~157,262 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 15 file(s) not represented in the graph (top: (none) 11, .jsonl 3, .css 1)
 
 ## Summary
-- 1832 nodes · 4106 edges · 94 communities (74 shown, 20 thin omitted)
+- 1832 nodes · 4109 edges · 95 communities (74 shown, 21 thin omitted)
 - Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 251 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `6104e8a8`
+- Built from commit: `d59a25c6`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -58,7 +58,7 @@
 - 2. Plan
 - time
 - ingest/src/main.c
-- time
+- tape_check.py
 - beacon.h
 - audio_out.c
 - gen_ort_capi_table.py
@@ -91,6 +91,7 @@
 - export_yoloe.py
 - Honest LOST Cue (no invented metres)
 - test_frame_id_seed.py
+- make_clip
 - Inclusive Language and Non-Cure Framing
 - make-dev-reach.test.js
 - beacon_pulse
@@ -148,7 +149,7 @@
 - **Metres honesty gate before recording** — docs_demo_runbook_metres_decision, docs_demo_runbook_tape_check_option, docs_demo_runbook_metres_removal_option, docs_nathans_revision_tape_check_gate, docs_devpost_honesty_block, guided_flags_metres_audio [INFERRED 0.85]
 - **Stand-ins feeding /beacon_world before real percept and voiced** — guided_tools_fakeworld, voiced_world_in, voiced_beacon_cmd, ingest_intent_standin, camd_bmp_bringup [INFERRED 0.85]
 
-## Communities (94 total, 20 thin omitted)
+## Communities (95 total, 21 thin omitted)
 
 ### Community 0 - "probe_to_world"
 Cohesion: 0.06
@@ -179,8 +180,8 @@ Cohesion: 0.21
 Nodes (7): MergeTests, rec(), person_at(), record_with(), T(), vo_record(), world_record()
 
 ### Community 7 - "cv2"
-Cohesion: 0.10
-Nodes (8): main(), apply_pose(), LiveVo, ApplyPose, FollowsCamera, _to_world(), make_clip(), VoProbeTests
+Cohesion: 0.09
+Nodes (9): main(), apply_pose(), LiveVo, ApplyPose, FollowsCamera, _to_world(), load(), main() (+1 more)
 
 ### Community 8 - "make_clips.py"
 Cohesion: 0.18
@@ -318,9 +319,9 @@ Nodes (17): SourceSwitch(), ChevronLeft(), ChevronRight(), Collapse(), Expand(),
 Cohesion: 0.33
 Nodes (11): apply(), find_key(), get_id(), get_num(), get_str(), get_vecn(), main(), publish() (+3 more)
 
-### Community 42 - "time"
-Cohesion: 0.11
-Nodes (12): Range 1 tabletop proof gate (same frame_id, tape-checked d_m), write_jsonl(), load(), main(), build_parser(), evaluate(), load_record(), main() (+4 more)
+### Community 42 - "tape_check.py"
+Cohesion: 0.26
+Nodes (8): Range 1 tabletop proof gate (same frame_id, tape-checked d_m), build_parser(), evaluate(), load_record(), main(), _number(), _range_prediction(), _vec3()
 
 ### Community 43 - "beacon.h"
 Cohesion: 0.10
@@ -416,7 +417,7 @@ Nodes (3): LD_LIBRARY_PATH, PYTHONPATH, ai-import-test.sh script
 
 ### Community 87 - "math"
 Cohesion: 0.12
-Nodes (6): World-frame 3D dots plan (dashboard session map), vid360 look-around replay (249 lines, real VO pose, six-noun bake), build_parser(), main(), write_calibration(), FakeSessionOptions
+Nodes (7): World-frame 3D dots plan (dashboard session map), vid360 look-around replay (249 lines, real VO pose, six-noun bake), build_parser(), main(), write_calibration(), write_jsonl(), FakeSessionOptions
 
 ### Community 88 - "beacon_grab.c"
 Cohesion: 0.31
@@ -449,13 +450,13 @@ Nodes (6): build_parser(), main(), _positive_float_arg(), _positive_int_arg(), p
 ## Knowledge Gaps
 - **160 isolated node(s):** `GUIDED_CMD_NONE`, `GUIDED_CMD_SAY`, `GUIDED_CMD_TICK`, `GUIDED_CMD_TONE_ON`, `GUIDED_CMD_TONE_OFF` (+155 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 615 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **20 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **21 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `bridge (Node UDP-to-WebSocket relay and recorder)` connect `Live Camera and 3D Work Summary` to `probe_frame.py`, `camd (camera daemon, Sensor Framework into the frame ring)`?**
-  _High betweenness centrality (0.208) - this node is a cross-community bridge._
+  _High betweenness centrality (0.217) - this node is a cross-community bridge._
 - **Are the 18 inferred relationships involving `guided_step()` (e.g. with `beacon_live_max_ns()` and `beacon_mode`) actually correct?**
   _`guided_step()` has 18 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `GUIDED_CMD_NONE`, `GUIDED_CMD_SAY`, `GUIDED_CMD_TICK` to the rest of the system?**
@@ -463,7 +464,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `probe_to_world` be split into smaller, more focused modules?**
   _Cohesion score 0.056179775280898875 - nodes in this community are weakly interconnected._
 - **Why does `Beacon dashboard index.html` connect `Live Camera and 3D Work Summary` to `test_beacon.py`?**
-  _High betweenness centrality (0.202) - this node is a cross-community bridge._
+  _High betweenness centrality (0.207) - this node is a cross-community bridge._
 - **Are the 3 inferred relationships involving `probe_once()` (e.g. with `.depth_session()` and `.read_frame()`) actually correct?**
   _`probe_once()` has 3 INFERRED edges - model-reasoned connections that need verification._
 - **Should `App.jsx` be split into smaller, more focused modules?**
