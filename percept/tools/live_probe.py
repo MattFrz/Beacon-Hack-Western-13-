@@ -491,8 +491,9 @@ def place_hand(world: Dict[str, Any], frame_w: int, frame_h: int,
 
     Measured on the Pi: a hand ~0.3 m away read 0.5-3.7 m, so REACH (d <= 0.5 m)
     never started. Two facts fix it without guessing: (1) a hand whose box
-    touches an object's box is at that object, so it takes that object's depth
-    (the lateral offset still comes from the boxes, so the ticks still steer);
+    touches an object's box is at that object: it takes that object's depth and
+    sits at its gap from the object's outline (so the ticks still steer, and a
+    hand on the object reads ~0 m);
     (2) otherwise the wearer's own hand is within arm's reach, so its depth is
     clamped to 0.2-0.8 m. The direction from the camera is kept either way.
     Returns a new world dict; unchanged when there is no hand box or geometry.
@@ -503,19 +504,34 @@ def place_hand(world: Dict[str, Any], frame_w: int, frame_h: int,
     x0, y0, x1, y1 = (float(v) for v in hand["bbox_px"])
     u, v = (x0 + x1) / 2.0, (y0 + y1) / 2.0
     f = frame_w / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
-    z = None
-    for obj in world.get("objects") or []:
+    target = world.get("target") if isinstance(world.get("target"), dict) else {}
+    touching = [
+        obj for obj in world.get("objects") or []
         if (isinstance(obj, dict) and obj.get("in_latest_boxes") and obj.get("bbox_px")
-                and isinstance(obj.get("xyz_cam"), (list, tuple))
-                and _boxes_touch((x0, y0, x1, y1), obj["bbox_px"])):
-            z = float(obj["xyz_cam"][2])
-            break
-    if z is None:
+            and isinstance(obj.get("xyz_cam"), (list, tuple))
+            and _boxes_touch((x0, y0, x1, y1), obj["bbox_px"]))
+    ]
+    # the object being searched for wins when the hand touches several
+    touching.sort(key=lambda o: o.get("name") != target.get("name"))
+    placed = dict(hand)
+    if touching:
+        # On the object: measure to its outline, not its centre. A hand gripping a
+        # bottle is ~0.2 m from the bottle's centre in the image, so measured to the
+        # centre REACH never reached "Found it" (< 0.15 m) on the Pi. The gap from
+        # the hand's centre to the nearest point of the object's box, at the object's
+        # depth, is ~0 when the hand is on it; its sign keeps the pan direction.
+        obj = touching[0]
+        ox0, oy0, ox1, oy1 = (float(c) for c in obj["bbox_px"])
+        z = float(obj["xyz_cam"][2])
+        gx = (u - min(max(u, ox0), ox1)) / f * z
+        gy = (v - min(max(v, oy0), oy1)) / f * z
+        c = [float(c) for c in obj["xyz_cam"]]
+        placed["xyz_cam"] = [c[0] + gx, c[1] + gy, c[2]]
+    else:
         raw = hand.get("xyz_cam")
         z = float(raw[2]) if isinstance(raw, (list, tuple)) and len(raw) == 3 else HAND_MAX_Z_M
         z = min(max(z, HAND_MIN_Z_M), HAND_MAX_Z_M)
-    placed = dict(hand)
-    placed["xyz_cam"] = [(u - frame_w / 2.0) / f * z, (v - frame_h / 2.0) / f * z, z]
+        placed["xyz_cam"] = [(u - frame_w / 2.0) / f * z, (v - frame_h / 2.0) / f * z, z]
     out = dict(world)
     out["hand"] = placed
     return out

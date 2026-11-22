@@ -60,7 +60,9 @@ slay_matching() {
 }
 
 echo "== stop leftovers =="
-slay_matching "ingest/build/ingest|[.]/ingest --|world_in|beacon_cmd --|guided/build/guided|live_probe|live_preview|beacon_grab|telemd/build/telemd"
+# Match program paths at the start of the command, not words anywhere in it: a bare
+# "live_probe" also matched (and killed) an ssh shell whose command mentioned it.
+slay_matching "^ *[0-9]+ ([^ ]*/)?(ingest/build/ingest|[.]/ingest --|world_in|voiced/build/beacon_cmd|[.]/guided/build/guided|timeout [0-9]+ python3|python3 -s [^ ]*live_(probe|preview)[.]py|[.]/beacon_grab|[^ ]*telemd/build/telemd)"
 sleep 1
 rm -f /dev/shmem/beacon_world
 mkdir -p /tmp/live
