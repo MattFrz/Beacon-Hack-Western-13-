@@ -447,7 +447,7 @@ int main(int argc, char **argv)
                 nobj += cur.objects[i].used ? 1 : 0;
             fprintf(stderr, "ingest: rec %llu objects %d hand %d t_ns %llu\n",
                     (unsigned long long)records, nobj, (int)cur.hand.valid,
-                    (unsigned long long)cur.hand.t_ns);
+                    (unsigned long long)cur.pose.t_ns);
         }
 
         if (pending_intent) {

@@ -5,6 +5,16 @@ Status: findings from an adversarial review of the repo + bring-up log, then the
 Source of truth for product/geometry remains `nathans-revision.md` ("the revision"). If this file disagrees with the revision on product, the revision wins; this file is ops.
 Measured facts carry their date and where they were measured (laptop vs QNX). Anything unmeasured says so.
 
+> **Update, 2026-11-22 ~03:15 (measured on the QNX loaner):** the two rows this
+> plan existed to fix are now fixed. **ONNX Runtime 1.24.4 runs on the Pi and
+> YOLOE + Depth Anything V2 infer on device**, and **the loop closes on device**:
+> real perception → UDP → `ingest` → `/beacon_world` → `guided` speaking
+> *"cup about one metre ahead"* at 60 Hz with 0 missed deadlines. Reproduce with
+> `sh ingest/tools/device_chain_demo.sh`. What is still a stand-in is **capture**
+> (no camera driver on the loaner, so frames are replayed from a clip), and
+> MediaPipe's Python task API is broken on QNX. Details: `pi-bringup.md`
+> 2026-11-22 rows. Steps 1–4 below are done; 5–9 stand.
+
 ## 1. Findings
 
 ### 1.1 What laptop work has achieved (all true, all on the wrong machine)
