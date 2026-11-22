@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_CLIPS 160
+#define MAX_CLIPS 192
 
 static clip_t g_clips[MAX_CLIPS];
 static int g_n;
@@ -44,7 +44,14 @@ static const char *const k_stem[BEACON_CLIP_COUNT] = {
     [BEACON_CLIP_TURN_AROUND] = "turn_around",
 };
 
-static const char *const k_names[] = { "bottle", "can", "keys", "phone", "box", "mouse" };
+/* The names whose clips we load: the detection vocabulary (models/labels.txt:
+bottle, can, keys, phone, box, mouse) plus the nouns earlier bakes used, whose
+clips are still in sounds/. The extras only matter to fakeworld's rehearsal
+scenarios, which script names the live pipeline can no longer detect; without
+them those cues go silent (the SAY log line is built from cue ids and the name,
+so it still reads correctly while nothing plays). */
+static const char *const k_names[] = { "keys", "keychain", "cup", "mug", "bottle", "phone",
+                                       "can", "box", "mouse" };
 static const char *const k_dirs[] = { "ahead", "sleft", "left", "sright", "right" };
 
 static uint32_t rd32(const unsigned char *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
