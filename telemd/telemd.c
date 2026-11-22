@@ -137,9 +137,15 @@ int main(int argc, char **argv)
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("UDP socket"); return 1; }
     const struct timespec period = {.tv_nsec = 100000000};
+    /* BEACON_WORLD lets tests and replay runs use a private shm, the same
+     * escape hatch guided, ingest and supervisor already have. The product
+     * path never sets it: telemd attaches to /beacon_world. */
+    const char *world_name = getenv("BEACON_WORLD");
+    if (!world_name)
+        world_name = BEACON_SHM_WORLD;
     const beacon_world_t *world = MAP_FAILED;
     while (world == MAP_FAILED) {
-        int fd = shm_open(BEACON_SHM_WORLD, O_RDONLY, 0);
+        int fd = shm_open(world_name, O_RDONLY, 0);
         if (fd >= 0) {
             struct stat st;
             if (fstat(fd, &st) < 0) { perror("fstat world"); return 1; }
