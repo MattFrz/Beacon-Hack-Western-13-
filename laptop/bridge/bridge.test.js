@@ -235,3 +235,22 @@ test('ignores requests it does not know, and replay when none is loaded', async 
 
   assert.equal(next.source, 'live');
 });
+
+test('push-to-talk: a dashboard {"say"} is forwarded as one UDP datagram to sayTo', async () => {
+  const pi = dgram.createSocket('udp4');
+  pi.bind(0);
+  await once(pi, 'listening');
+  const bridge = await startBridge({ wsPort: 0, udpPort: 0, sayTo: `127.0.0.1:${pi.address().port}` });
+  const ws = new WebSocket(`ws://127.0.0.1:${bridge.wsPort}`);
+  await once(ws, 'open');
+  const got = once(pi, 'message');
+  ws.send(JSON.stringify({ say: "  where's my water bottle " }));
+  const [buf] = await got;
+  assert.equal(buf.toString(), "where's my water bottle");
+  const st = await status(ws, (b) => b.said);
+  assert.equal(st.said.text, "where's my water bottle");
+  assert.equal(st.said.error, null);
+  ws.close();
+  bridge.close();
+  pi.close();
+});

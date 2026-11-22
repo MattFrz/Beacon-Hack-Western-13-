@@ -21,6 +21,7 @@ try {
     replayFile,
     framesDir,
     source: argFile ? 'replay' : 'live',
+    sayTo: process.env.BEACON_SAY_TO, // push-to-talk target "host:port"; default: the Pi, port 5007
   });
   console.log(`bridge: dashboards connect to ws://127.0.0.1:${bridge.wsPort}`);
   console.log(`bridge: telemd sends to UDP ${bridge.udpPort} on this laptop; live sessions are recorded to ${bridge.file}`);

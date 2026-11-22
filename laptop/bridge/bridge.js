@@ -64,7 +64,10 @@ export function gapMs(a, b) {
 // replayFile. Both fan out on wsPort. UDP is always open, so live sessions are recorded (when recordDir is
 // set) whichever source dashboards are watching. A dashboard switches by sending {"source": "live"} or
 // {"source": "replay"}; nothing else it sends is acted on.
-export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, framesDir, source }) {
+// Push-to-talk: the dashboard sends {"say": "where's my water bottle"} (browser speech recognition); the bridge
+// forwards the words as one UDP datagram to `beacon_cmd --udp` on the Pi (port 5007), or to sayTo
+// ("host:port") when set, e.g. a simulator in WSL. The Pi does the word matching.
+export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, framesDir, source, sayTo }) {
   const replay = replayFile && loadReplay(replayFile);
   let current = source ?? (replay ? 'replay' : 'live');
 
@@ -108,6 +111,7 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
 
   // Live: the last sender is the Pi (or a simulator on this laptop); dashboards are told its address and adapter.
   let pi = null; // { address, adapter, at }
+  let lastSaid = null; // push-to-talk: { text, to, at, error }, shown in the status
   let file = null;
   if (recordDir) {
     fs.mkdirSync(recordDir, { recursive: true });
@@ -145,6 +149,7 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
         replay: replay ? path.basename(replayFile).replace(/\.jsonl?$/, '') : null,
         pi: pi && { address: pi.address, adapter: pi.adapter, age_ms: Date.now() - pi.at },
         listen: { port: udp.address().port, addresses: laptopAddresses() },
+        said: lastSaid && { ...lastSaid, age_ms: Date.now() - lastSaid.at },
       },
     });
   function sendStatus() {
@@ -158,11 +163,29 @@ export async function startBridge({ wsPort, udpPort = 0, recordDir, replayFile, 
     if (current === 'replay') tick();
     sendStatus();
   };
+  // Push-to-talk out: to sayTo, else the Pi that last sent telemetry.
+  const say = (text) => {
+    const [host, port] = sayTo ? sayTo.split(':') : [pi?.address, '5007'];
+    const to = host ? `${host}:${port}` : null;
+    if (!to) {
+      lastSaid = { text, to: null, at: Date.now(), error: 'no Pi heard yet' };
+    } else {
+      lastSaid = { text, to, at: Date.now(), error: null };
+      udp.send(Buffer.from(text), Number(port), host, (err) => {
+        if (err) lastSaid = { ...lastSaid, error: err.message };
+        sendStatus();
+      });
+    }
+    console.log(`bridge: say "${text}" -> ${to ?? 'nowhere (no Pi yet)'}`);
+    sendStatus();
+  };
+
   wss.on('connection', (ws) => {
     ws.on('error', () => {}); // a bad dashboard frame must not kill the recording
     ws.on('message', (data, isBinary) => {
       const msg = isBinary ? null : parseWorld(data);
       if (msg?.source === 'live' || msg?.source === 'replay') setSource(msg.source);
+      if (typeof msg?.say === 'string' && msg.say.trim()) say(msg.say.trim().slice(0, 200));
     });
     sendTo(ws, status());
   });

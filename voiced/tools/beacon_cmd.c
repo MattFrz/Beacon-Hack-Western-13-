@@ -2,6 +2,7 @@
  *
  *   beacon_cmd                    type commands, one per line
  *   beacon_cmd find my keys       send one command and exit (handy over ssh)
+ *   beacon_cmd --udp [5007]       spoken commands from the dashboard's push-to-talk
  *
  * Commands (same intents voiced will send):
  *   find|where <thing...>   FIND   e.g. "find bottle", "where are my keys", "find water"
@@ -16,14 +17,22 @@
  */
 #include "world_shm.h"
 
+#include <arpa/inet.h>
 #include <ctype.h>
+#include <netinet/in.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 
 static beacon_world_t *g_w;
 
 static const char *const k_skip[] = { "find", "where", "is", "are", "my", "the", "a", "an", "go",
                                       "to", "me", "please", "you", "i", "need", "want",
-                                      "refill", "get", "for", "some", NULL };
+                                      "refill", "get", "for", "some",
+                                      /* spoken phrasing from the browser mic: "where's my ...",
+                                       * "help me look for ...", "locate the ..." */
+                                      "s", "it", "its", "what", "whats", "help", "look", "locate",
+                                      "show", "hey", "beacon", "okay", "ok", "of", "and", NULL };
 /* `can` used to be a stopword ("can you find..."). It is a demo noun now, so it
  * must reach the intent; the modal reading loses, which is the right trade for
  * "find the can" and only ever costs an extra candidate on "can you find X". */
@@ -125,11 +134,42 @@ static int handle(char *line)
     return 0;
 }
 
+/* --udp [PORT]: each datagram is one spoken sentence, already turned into text by
+ * the laptop dashboard's push-to-talk (browser speech recognition), forwarded by
+ * the bridge. Same word matching as typing. */
+static int listen_udp(int port)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    a.sin_port = htons((uint16_t)port);
+    if (sock < 0 || bind(sock, (struct sockaddr *)&a, sizeof(a)) < 0) {
+        perror("beacon_cmd: bind");
+        return 1;
+    }
+    fprintf(stderr, "beacon_cmd: listening for spoken commands on UDP %d\n", port);
+    char line[512];
+    for (;;) {
+        ssize_t n = recv(sock, line, sizeof(line) - 1, 0);
+        if (n <= 0)
+            continue;
+        line[n] = '\0';
+        printf("heard \"%s\" -> ", line);
+        if (handle(line))
+            printf("not understood\n");
+        fflush(stdout);
+    }
+}
+
 int main(int argc, char **argv)
 {
     g_w = world_open("beacon_cmd");
     if (!g_w)
         return 1;
+    if (argc > 1 && !strcmp(argv[1], "--udp"))
+        return listen_udp(argc > 2 ? atoi(argv[2]) : 5007);
     if (argc > 1) { /* one-shot: beacon_cmd find my keys */
         char line[512] = "";
         for (int i = 1; i < argc; ++i) {

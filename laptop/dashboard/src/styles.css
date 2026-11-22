@@ -385,3 +385,16 @@ code { font: 12.5px var(--font-mono); padding: 1px 5px; border-radius: var(--r-s
 :root[data-motion='off'] *,
 :root[data-motion='off'] *::before,
 :root[data-motion='off'] *::after { animation: none !important; transition-duration: 0ms !important; }
+
+/* Push-to-talk (Talk.jsx): hold to speak, or type a command */
+.talk { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.talk form { display: flex; }
+.talk-btn { white-space: nowrap; touch-action: none; user-select: none; }
+.talk-btn.on { outline: 2px solid var(--live, #3ddc84); }
+.talk-input {
+  width: 150px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line, #3a3f47);
+  background: transparent; color: inherit; font: 12px var(--font-mono);
+}
+.talk-heard { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.talk-heard q { font-style: italic; }
+.talk-heard em { color: var(--muted); font-style: normal; font-family: var(--font-mono); }

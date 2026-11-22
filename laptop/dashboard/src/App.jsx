@@ -15,6 +15,7 @@ import { Collapse, Expand, PanelLeftClose, PanelLeftOpen, PanelRightClose, Panel
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import Sidebar from './Sidebar.jsx';
+import Talk from './Talk.jsx';
 import Tip from './Tip.jsx';
 import { useTelemetry } from './useTelemetry.js';
 import { crumbsToScene, targetObjectId } from './worldScene.js';
@@ -137,7 +138,7 @@ function usePanels(narrow) {
 }
 
 export default function App() {
-  const { log, world, frameUrl, connected, stale, bridge, setSource } = useTelemetry();
+  const { log, world, frameUrl, connected, stale, bridge, setSource, say } = useTelemetry();
   const [cursor, setCursor] = useState(null); // null = follow live, else the history index being viewed
   useEffect(() => setCursor(null), [bridge?.source]); // a new source starts a new history
   const piFresh = Boolean(bridge?.pi && bridge.pi.age_ms < PI_FRESH_MS);
@@ -245,6 +246,7 @@ export default function App() {
                 <b><Rolling text={w.intent?.kind} /></b>
                 {w.intent?.candidates?.length > 0 && <em>{w.intent.candidates.join(', ')}</em>}
               </div>
+              <Talk say={say} said={bridge?.said} connected={connected} />
               <div className="topbar-end">
                 <SourceSwitch bridge={bridge} setSource={setSource} />
                 <Status connected={connected} paused={paused} hasData={hasData} bridge={bridge} piFresh={piFresh} />

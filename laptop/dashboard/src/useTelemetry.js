@@ -71,12 +71,18 @@ export function useTelemetry() {
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ source: next }));
   }, []);
 
+  // Push-to-talk: send spoken words to the Pi through the bridge (it answers with bridge.said).
+  const say = useCallback((text) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ say: text }));
+  }, []);
+
   const last = log.items.at(-1);
   return {
     log,
     world: last?.world ?? null,
     bridge: connected ? bridge : null,
     setSource,
+    say,
     connected,
     stale: !last || now - last.at > STALE_MS,
     frameUrl: frame && now - frame.at < FRAME_STALE_MS ? frame.url : null,
