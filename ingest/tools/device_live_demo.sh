@@ -142,23 +142,29 @@ fi
 # Perception must be warm *and* see the target before an intent: a FIND that
 # arrives with objects[] empty is NACKed once and never retried (§9). Waiting
 # for a LIVE record that names the target is the honest way to sequence it.
-echo "== waiting for percept to see $TARGET =="
-waited=0
-while [ $waited -lt 40 ]; do
-    if grep -q "mode=LIVE name=$TARGET" /tmp/live_probe.log 2>/dev/null; then
-        echo "   $TARGET visible after ${waited}s"
-        break
+if [ "$TARGET" = phone ]; then
+    # ADDITION: no automatic FIND. The wearer sets the target from the phone page
+    # (it waits for the camera to see the item before sending), as in the video.
+    echo "== target: from the phone page =="
+else
+    echo "== waiting for percept to see $TARGET =="
+    waited=0
+    while [ $waited -lt 40 ]; do
+        if grep -q "mode=LIVE name=$TARGET" /tmp/live_probe.log 2>/dev/null; then
+            echo "   $TARGET visible after ${waited}s"
+            break
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+    if [ $waited -ge 40 ]; then
+        echo "   !! $TARGET never seen: the intent below will be NACKed (aim the camera first)"
     fi
-    sleep 2
-    waited=$((waited + 2))
-done
-if [ $waited -ge 40 ]; then
-    echo "   !! $TARGET never seen: the intent below will be NACKed (aim the camera first)"
-fi
 
-slay_matching "ingest/build/ingest"
-sleep 1
-"$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+    slay_matching "ingest/build/ingest"
+    sleep 1
+    "$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+fi
 # Phone page: open http://<pi>:8080 on a phone on the hotspot, dictate with the keyboard mic, Send.
 BEACON_CMD=${BEACON_CMD:-/data/home/qnxuser/beacon/voiced/build/beacon_cmd}
 if [ -x "$BEACON_CMD" ]; then
