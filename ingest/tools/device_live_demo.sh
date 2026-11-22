@@ -37,6 +37,12 @@ LABELS=${LABELS:-models/labels_hand.txt}
 # Speech: GUIDED_AUDIO=fifo:/data/home/qnxuser/projects/qnx-bluetooth/audio.pcm plays on
 # the JBL (start run-radio.sh first). Default: no audio device, log only.
 GUIDED_AUDIO=${GUIDED_AUDIO:-none}
+# Which checkout runs guided (with its sounds/) and telemd; default the repo above.
+GUIDED_ROOT=${GUIDED_ROOT:-$REPO}
+TELEMD=${TELEMD:-$REPO/telemd/build/telemd}
+# A second dashboard laptop that gets the same telemetry and 24 fps camera (optional).
+ALSO_TO=${ALSO_TO:-}
+PREVIEW=${PREVIEW:-$PERCEPT/percept/tools/live_preview.py}
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -49,7 +55,7 @@ slay_matching() {
 }
 
 echo "== stop leftovers =="
-slay_matching "ingest/build/ingest|[.]/ingest --|world_in|beacon_cmd --|guided/build/guided|live_probe|beacon_grab|telemd/build/telemd"
+slay_matching "ingest/build/ingest|[.]/ingest --|world_in|beacon_cmd --|guided/build/guided|live_probe|live_preview|beacon_grab|telemd/build/telemd"
 sleep 1
 rm -f /dev/shmem/beacon_world
 mkdir -p /tmp/live
@@ -63,18 +69,19 @@ sudo -n sh -c "/usr/bin/sensor -U 521:521 -b external -r /data/share/sensor -c $
 sleep 5
 
 echo "== guided (owns the world) =="
-cd "$REPO"
+cd "$GUIDED_ROOT"
 ./guided/build/guided --create --metres --duration "$DURATION" --audio "$GUIDED_AUDIO" > /tmp/guided.log 2>&1 &
 sleep 1
 
 echo "== ingest (relay, no intent yet) =="
-./ingest/build/ingest --udp 5006 > /tmp/ingest-a.log 2>&1 &
+"$REPO/ingest/build/ingest" --udp 5006 > /tmp/ingest-a.log 2>&1 &
 sleep 1
 
 echo "== grabber: newest frame at camera rate =="
 cd "$PERCEPT"
 ./beacon_grab -u 5 -w -r "$GRAB_FPS" -s 6 -o "$FRAME" > /tmp/grab.log 2>&1 &
-python3 -s percept/tools/live_preview.py --grab-file "$FRAME" --udp "$DASHBOARD_HOST:5005" --fps 24 > /tmp/live_preview.log 2>&1 &
+python3 -s "$PREVIEW" --grab-file "$FRAME" --udp "$DASHBOARD_HOST:5005" --fps 24 > /tmp/live_preview.log 2>&1 &
+[ -n "$ALSO_TO" ] && python3 -s "$PREVIEW" --grab-file "$FRAME" --udp "$ALSO_TO:5005" --fps 24 > /tmp/live_preview2.log 2>&1 &
 # Wait for a real frame before starting inference: the first ones are black
 # while the camera's auto-exposure settles.
 i=0
@@ -98,9 +105,10 @@ timeout $((DURATION - 4)) python3 -s percept/tools/live_probe.py \
 PROBE_PID=$!
 
 # The monitor: world state to the bridge on the laptop, read-only.
-if [ -x "$REPO/telemd/build/telemd" ]; then
+if [ -x "$TELEMD" ]; then
     echo "== telemd (monitor, read-only) -> $DASHBOARD_HOST:5005 =="
-    "$REPO/telemd/build/telemd" "$DASHBOARD_HOST" 5005 > /tmp/telemd.log 2>&1 &
+    "$TELEMD" "$DASHBOARD_HOST" 5005 > /tmp/telemd.log 2>&1 &
+    [ -n "$ALSO_TO" ] && "$TELEMD" "$ALSO_TO" 5005 > /tmp/telemd2.log 2>&1 &
 else
     echo "!! telemd not built: dashboard gets video only (make -C telemd)"
 fi

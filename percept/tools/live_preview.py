@@ -20,6 +20,12 @@ def main():
     host, port = args.udp.rsplit(":", 1)
     period = 1 / max(1, min(args.fps, 30))
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # QNX's default UDP send buffer is smaller than a full-size frame (~50 KB): without
+    # this every sendto() fails and the dashboard gets no video (live_probe does the same).
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 256 * 1024)
+    except OSError:
+        pass
     previous = None
     deadline = time.monotonic()
     while True:

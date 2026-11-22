@@ -81,7 +81,8 @@ static const char *kind_name(uint32_t k)
 static int handle(char *line)
 {
     for (char *p = line; *p; ++p)
-        *p = (char)(ispunct((unsigned char)*p) && *p != '-' ? ' ' : tolower((unsigned char)*p));
+        /* bytes >= 0x80 (UTF-8, e.g. the iPhone's curly apostrophe in "where’s") split words too */
+        *p = (char)(((unsigned char)*p >= 0x80 || (ispunct((unsigned char)*p) && *p != '-')) ? ' ' : tolower((unsigned char)*p));
     char *words[32];
     int n = 0;
     for (char *t = strtok(line, " \t\r\n"); t && n < 32; t = strtok(NULL, " \t\r\n"))
