@@ -19,15 +19,18 @@
 # never retried, which is documented behaviour (§9), not a bug.
 #
 # Usage: sh ingest/tools/device_live_demo.sh [target] [laptop-ip] [duration]
+#   CONF default 0.10 for the live scene (more junk than a replay clip; tune
+#   down if the object is far). The target must be in models/labels_hand.txt.
 set -e
 
 REPO=${REPO:-/data/home/qnxuser/Beacon-Hack-Western-13-}
 PERCEPT=${PERCEPT:-/data/home/qnxuser/beacon-test}
 AIROOT=${AIROOT:-/data/home/qnxuser/airoot}
 SENSOR_CONF=${SENSOR_CONF:-/data/home/qnxuser/sensor-usbjpeg.conf}
-TARGET=${1:-cup}
+TARGET=${1:-bottle}
 DASHBOARD_HOST=${2:-10.80.55.91}
 DURATION=${3:-1800}
+CONF=${CONF:-0.10}
 FRAME=${FRAME:-/tmp/live/latest.jpg}
 GRAB_FPS=${GRAB_FPS:-30}
 # The hand is a YOLO class in the 7-class bake (MediaPipe cannot run on QNX); the
@@ -100,8 +103,8 @@ timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --video-udp "$DASHBOARD_HOST:5007" \
     --labels "$LABELS" \
     --yolo "$YOLO" \
-    --depth models/depth_anything_v2_metric_indoor_small.onnx \
-    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf 0.10 --ort-intra 3 \
+    --depth "$PERCEPT/models/depth_anything_v2_metric_indoor_small.onnx" \
+    --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf "$CONF" --ort-intra 3 \
     --h-chest 1.4 \
     --vo-max-disp 200 --vo-fb-err 3.0 --vo-min-tracks 40 \
     --vo-max-corners 180 --vo-win 21 --vo-levels 3 \
