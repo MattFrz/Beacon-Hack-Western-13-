@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#ifdef __QNX__
+#if defined(__QNX__) && !defined(BEACON_NO_IOAUDIO)
 #include <sys/asoundlib.h>
 #endif
 
@@ -113,7 +113,7 @@ static void wav_header(uint32_t data_bytes)
 }
 
 /* ------------------------------------------------------------------ QNX io-audio */
-#ifdef __QNX__
+#if defined(__QNX__) && !defined(BEACON_NO_IOAUDIO)
 /* Classic io-audio plugin API (as in QNX's `wave` sample). Untested on the
  * loaner Pi: verify with a USB headset or speaker during bring-up. */
 static snd_pcm_t *g_pcm;
@@ -178,14 +178,14 @@ int audio_out_open(const char *spec)
         return 0;
     }
     if (!strcmp(spec, "qnx")) {
-#ifdef __QNX__
+#if defined(__QNX__) && !defined(BEACON_NO_IOAUDIO)
         if (qnx_open() == 0) {
             g_kind = OUT_QNX;
             return 0;
         }
         fprintf(stderr, "guided: cannot open the QNX audio device; is a USB headset or speaker plugged in?\n");
 #else
-        fprintf(stderr, "guided: --audio qnx only works on QNX\n");
+        fprintf(stderr, "guided: --audio qnx needs QNX io-audio (not in this build); use fifo:PATH for the JBL\n");
 #endif
         return -1;
     }
@@ -213,7 +213,7 @@ void audio_out_write(const int16_t *buf, size_t frames)
         fwrite(buf, AUDIO_CHANNELS * 2, frames, g_wav);
         g_wav_bytes += (uint32_t)(frames * AUDIO_CHANNELS * 2);
     }
-#ifdef __QNX__
+#if defined(__QNX__) && !defined(BEACON_NO_IOAUDIO)
     else if (g_kind == OUT_QNX) {
         qnx_write(buf, frames);
     }
@@ -231,7 +231,7 @@ void audio_out_close(void)
         fclose(g_wav);
         g_wav = NULL;
     }
-#ifdef __QNX__
+#if defined(__QNX__) && !defined(BEACON_NO_IOAUDIO)
     if (g_kind == OUT_QNX && g_pcm) {
         snd_pcm_plugin_flush(g_pcm, SND_PCM_CHANNEL_PLAYBACK);
         snd_pcm_close(g_pcm);
