@@ -3,12 +3,16 @@ import { RollingText } from '@animate-ui/react/primitives/texts/rolling';
 import { SlidingNumber } from '@animate-ui/react/primitives/texts/sliding-number';
 import { useState } from 'react';
 import { captionFromClips } from './clips.js';
+import Events from './Events.jsx';
 import Scene from './Scene.jsx';
 import Scrubber from './Scrubber.jsx';
 import { useTelemetry } from './useTelemetry.js';
+import { crumbsToScene, worldObjects } from './worldScene.js';
 
 const MODES = ['LIVE', 'HOLD', 'LOST'];
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+// 0 means "not measured yet" for vision timings (no real YOLO run takes 0 ms), so show "–", not "0 ms".
+const measured = (v) => (isNum(v) && v > 0 ? v : null);
 const msAgo = (now, then) => (isNum(now) && isNum(then) ? (now - then) / 1e6 : null);
 const panWord = (p) => (!isNum(p) ? '–' : p < -0.1 ? 'left' : p > 0.1 ? 'right' : 'centre');
 
@@ -86,6 +90,18 @@ export default function App() {
           <p className="muted">No target bound</p>
         )}
 
+        <h2>Map</h2>
+        <dl>
+          <dt>Pose</dt>
+          <dd>{w.pose == null ? 'not sent' : w.pose.valid === true ? 'valid' : 'lost'}</dd>
+          <dt>Pose age</dt>
+          <dd><Num value={isNum(w.pose?.age_ns) ? w.pose.age_ns / 1e6 : null} digits={0} unit=" ms" /></dd>
+          <dt>Object dots</dt>
+          <dd>{worldObjects(w).length}</dd>
+          <dt>Crumbs</dt>
+          <dd>{crumbsToScene(w).length}</dd>
+        </dl>
+
         <h2>Processes</h2>
         <ul className="procs">
           {Object.entries(health.procs ?? {}).map(([name, p]) => (
@@ -97,12 +113,15 @@ export default function App() {
           ))}
         </ul>
 
+        <h2>Events</h2>
+        <Events log={log} setCursor={setCursor} />
+
         <h2>Timing</h2>
         <dl>
           <dt>YOLO / depth</dt>
-          <dd><Num value={health.last_yolo_ms} /> / <Num value={health.last_depth_ms} unit=" ms" /></dd>
+          <dd><Num value={measured(health.last_yolo_ms)} /> / <Num value={measured(health.last_depth_ms)} unit=" ms" /></dd>
           <dt>Vision p95</dt>
-          <dd><Num value={health.p95_vision_ns / 1e6} unit=" ms" /></dd>
+          <dd><Num value={measured(health.p95_vision_ns / 1e6)} unit=" ms" /></dd>
           <dt>16 ms misses</dt>
           <dd><Num value={health.timing?.misses_16ms} /></dd>
           <dt>Worst late</dt>

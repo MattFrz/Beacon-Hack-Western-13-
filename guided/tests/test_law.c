@@ -114,24 +114,71 @@ static void test_bind_order_and_stale(void)
     CHECK(said(&out, BEACON_CLIP_NOT_SEEN), "unseen says 'I have not seen that'");
 }
 
-static void test_walk_metres_gate(void)
+static int said_range(const guided_out_t *o, uint16_t lo, uint16_t hi)
 {
-    float p[3] = { -0.6f, 0.1f, 2.2f };
-    uint16_t clips[GUIDED_MAX_CLIPS];
-    int n = guided_walk_clips(p, 0, 1, clips, GUIDED_MAX_CLIPS);
-    int has_metres = 0, has_left = 0;
-    for (int i = 0; i < n; ++i) {
-        if (clips[i] == BEACON_CLIP_METRES || clips[i] == BEACON_CLIP_METRE) has_metres = 1;
-        if (clips[i] == BEACON_CLIP_LEFT) has_left = 1;
-    }
-    CHECK(!has_metres, "no metres spoken until --metres (tape check)");
-    CHECK(has_left, "object at -15 deg is 'a little left'");
+    for (int i = 0; i < o->n_cmds; ++i)
+        if (o->cmds[i].kind == GUIDED_CMD_SAY)
+            for (int k = 0; k < o->cmds[i].n_clips; ++k)
+                if (o->cmds[i].clips[k] >= lo && o->cmds[i].clips[k] <= hi)
+                    return 1;
+    return 0;
+}
+#define SAID_INTRO(o) said_range((o), BEACON_CLIP_INTRO_CONT_AHEAD, BEACON_CLIP_INTRO_RIGHT)
+#define SAID_DIST(o)  said_range((o), BEACON_CLIP_STEPS_1, BEACON_CLIP_STEPS_FAR)
 
-    n = guided_walk_clips(p, 1, 1, clips, GUIDED_MAX_CLIPS);
-    int two = 0;
-    for (int i = 0; i < n; ++i)
-        if (clips[i] == BEACON_CLIP_NUM_2) two = 1;
-    CHECK(two, "2.3 m is spoken as 'about two metres'");
+static void test_walk_sentences(void)
+{
+    CHECK(guided_dir_cat(0.0f) == DIR_AHEAD, "0 deg is straight ahead");
+    CHECK(guided_dir_cat(-15.0f) == DIR_SLEFT, "-15 deg is slightly to your left");
+    CHECK(guided_dir_cat(40.0f) == DIR_RIGHT, "40 deg is to your right");
+    CHECK(guided_dist_clip(0.5f) == BEACON_CLIP_WITHIN_REACH, "0.5 m is within reach");
+    CHECK(guided_dist_clip(2.2f) == BEACON_CLIP_STEPS_3, "2.2 m is about three steps");
+    CHECK(guided_dist_clip(0.83f) == BEACON_CLIP_STEPS_1, "0.83 m is about one step");
+    CHECK(guided_dist_clip(1.4f) == BEACON_CLIP_STEPS_2, "1.4 m is about two steps");
+    CHECK(guided_dist_clip(9.0f) == BEACON_CLIP_STEPS_FAR, "9 m is more than five steps");
+
+    uint16_t c[GUIDED_MAX_CLIPS];
+    int n = guided_walk_cue(DIR_SLEFT, BEACON_CLIP_STEPS_3, 1, 1, 1, c, GUIDED_MAX_CLIPS);
+    CHECK(n == 2 && c[0] == BEACON_CLIP_INTRO_CONT_SLEFT && c[1] == BEACON_CLIP_STEPS_3,
+          "full: 'Your keys are slightly to your left,' + 'about three steps ahead.'");
+    n = guided_walk_cue(DIR_SLEFT, 0, 1, 1, 1, c, GUIDED_MAX_CLIPS);
+    CHECK(n == 1 && c[0] == BEACON_CLIP_INTRO_SLEFT, "no metres: 'Your keys are slightly to your left.'");
+    n = guided_walk_cue(DIR_LEFT, BEACON_CLIP_STEPS_1, 0, 1, 0, c, GUIDED_MAX_CLIPS);
+    CHECK(n == 1 && c[0] == BEACON_CLIP_DIR_LEFT, "short direction update: 'To your left.'");
+    n = guided_walk_cue(DIR_LEFT, BEACON_CLIP_STEPS_1, 0, 0, 1, c, GUIDED_MAX_CLIPS);
+    CHECK(n == 1 && c[0] == BEACON_CLIP_STEPS_1, "short distance update: 'About one step ahead.'");
+}
+
+/* Google Maps pacing: no back-to-back repeats. A still target gets one full
+ * sentence, then only a reminder every ~8 s; a change gets one short update. */
+static void test_walk_pacing(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 1);
+    uint64_t now = 120 * S;
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    int says = 0, full = 0;
+    for (int i = 0; i < 1250; ++i) {           /* 20 s, keys 2 m ahead-left */
+        obj(0, 1, "keys", -0.6f, 0.1f, 2.2f, now, 1, 40);
+        guided_step(&st, &P, &in, now, &out);
+        for (int k = 0; k < out.n_cmds; ++k)
+            if (out.cmds[k].kind == GUIDED_CMD_SAY) says++;
+        full += SAID_INTRO(&out);
+        now += 16 * MS;
+    }
+    CHECK(says == 3 && full == 3, "still target, 20 s: one sentence then reminders at ~8 s and ~16 s");
+
+    /* the keys move to the right: one short update, not a full sentence */
+    int dir_updates = 0, fulls = 0;
+    for (int i = 0; i < 160; ++i) {           /* 2.5 s */
+        obj(0, 1, "keys", 0.9f, 0.1f, 2.2f, now, 1, 40);
+        guided_step(&st, &P, &in, now, &out);
+        dir_updates += said(&out, BEACON_CLIP_DIR_RIGHT);
+        fulls += SAID_INTRO(&out);
+        now += 16 * MS;
+    }
+    CHECK(dir_updates == 1 && fulls == 0, "direction change: one short 'To your right.'");
 }
 
 static void test_reach_enter_exit(void)
@@ -145,7 +192,7 @@ static void test_reach_enter_exit(void)
     beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
     guided_step(&st, &P, &in, now, &out);
     CHECK(out.law == BEACON_LAW_WALK, "bound, no hand: WALK");
-    CHECK(said(&out, BEACON_CLIP_OBJECT_NAME), "WALK speaks the object name first");
+    CHECK(SAID_INTRO(&out), "WALK starts with a full sentence");
 
     /* hand 0.30 m away in the same frame: enter only on the 3rd frame */
     int entered_at = -1;
@@ -177,14 +224,84 @@ static void test_reach_enter_exit(void)
     }
     CHECK(out.law == BEACON_LAW_WALK, "0.90 m leaves REACH");
 
-    /* close in under 0.15 m: continuous tone */
-    for (int i = 0; i < 80; ++i) {
+    /* close in under 0.15 m: continuous tone, then "found it" once */
+    int tone_seen = 0, found_says = 0, tone_off_after_found = 0;
+    for (int i = 0; i < 150; ++i) {
         now += 16 * MS;
         obj(0, 1, "keys", 0.10f, 0.30f, 0.60f, now, 1, frame);
         hand(0.10f, 0.30f, 0.55f, now, frame);
         guided_step(&st, &P, &in, now, &out);
+        if (out.law == BEACON_LAW_REACH && out.continuous)
+            tone_seen = 1;
+        if (said(&out, BEACON_CLIP_FOUND_IT)) {
+            found_says++;
+            tone_off_after_found = has_cmd(&out, GUIDED_CMD_TONE_OFF);
+        }
     }
-    CHECK(out.law == BEACON_LAW_REACH && out.continuous, "under 0.15 m is a continuous tone");
+    CHECK(tone_seen, "under 0.15 m is a continuous tone");
+    CHECK(found_says == 1, "'found it' is said once when the hand stays on the target");
+    CHECK(tone_off_after_found, "the tone stops when 'found it' is said");
+
+    /* hand pulls back and comes again: a second confirmation */
+    for (int i = 0; i < 60; ++i) {
+        now += 16 * MS;
+        obj(0, 1, "keys", 0.10f, 0.30f, 0.60f, now, 1, frame);
+        hand(0.10f, 0.30f, 0.20f, now, frame);
+        guided_step(&st, &P, &in, now, &out);
+    }
+    found_says = 0;
+    for (int i = 0; i < 150; ++i) {
+        now += 16 * MS;
+        obj(0, 1, "keys", 0.10f, 0.30f, 0.60f, now, 1, frame);
+        hand(0.10f, 0.30f, 0.55f, now, frame);
+        guided_step(&st, &P, &in, now, &out);
+        if (said(&out, BEACON_CLIP_FOUND_IT)) found_says++;
+    }
+    CHECK(found_says == 1, "a new approach gets a new 'found it'");
+}
+
+/* Target left the view but the session map knows where it is (spec §7
+ * Range 3): say which way to turn. With a stale pose (dead percept): LOST. */
+static void test_turn_from_map(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 0);
+    uint64_t now = 110 * S;
+    obj(0, 1, "keys", 0.10f, 0.30f, 0.60f, now, 1, 30);
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    P.pose.t_ns = now;
+    guided_step(&st, &P, &in, now, &out);
+    CHECK(out.law == BEACON_LAW_WALK && SAID_INTRO(&out), "in view: normal walk cue");
+
+    /* wearer turns 90 degrees right: keys now on their left, out of view */
+    float yaw = 90.0f * 0.01745329f;
+    float T[16] = { cosf(yaw), 0, sinf(yaw), 0,  0, 1, 0, 0,  -sinf(yaw), 0, cosf(yaw), 0,  0, 0, 0, 1 };
+    memcpy(P.pose.T_world_from_cam, T, sizeof(T));
+    P.objects[0].in_latest_boxes = 0;
+    int left = 0, right = 0, lost = 0;
+    for (int i = 0; i < 200; ++i) {          /* 3.2 s: past the 1.5 s LOST line */
+        now += 16 * MS;
+        P.pose.t_ns = now;
+        guided_step(&st, &P, &in, now, &out);
+        left += said(&out, BEACON_CLIP_TURN_LEFT);
+        right += said(&out, BEACON_CLIP_TURN_RIGHT);
+        lost += said(&out, BEACON_CLIP_LOST_TARGET);
+    }
+    CHECK(left >= 1 && right == 0, "out of view on the left: 'turn left'");
+    CHECK(left <= 2, "the turn cue repeats about every 3 s, not every frame");
+    CHECK(lost == 0, "with a fresh map it says which way to turn, not 'lost'");
+
+    /* percept dies: pose goes stale, the map is not trusted, so LOST */
+    lost = 0;
+    left = 0;
+    for (int i = 0; i < 120; ++i) {
+        now += 16 * MS;
+        guided_step(&st, &P, &in, now, &out);
+        lost += said(&out, BEACON_CLIP_LOST_TARGET);
+        left += said(&out, BEACON_CLIP_TURN_LEFT);
+    }
+    CHECK(lost == 1 && left == 0, "stale pose: 'I lost the target', never a guessed turn");
 }
 
 static void test_lost_once_and_no_numbers(void)
@@ -204,8 +321,7 @@ static void test_lost_once_and_no_numbers(void)
         guided_step(&st, &P, &in, now, &out);
         if (out.mode == BEACON_MODE_HOLD) {
             hold_seen = 1;
-            for (uint16_t c = BEACON_CLIP_NUM_0; c <= BEACON_CLIP_NUM_9; ++c)
-                if (said(&out, c)) numbers_in_hold = 1;
+            if (SAID_DIST(&out)) numbers_in_hold = 1;
         }
         if (said(&out, BEACON_CLIP_LOST_TARGET))
             lost_says++;
@@ -403,13 +519,134 @@ static void test_seq_writer_restart(void)
           snapshot == 4, "subsequent writes still publish normally");
 }
 
+static int count_kind(const guided_out_t *o, int kind)
+{
+    int n = 0;
+    for (int i = 0; i < o->n_cmds; ++i)
+        n += o->cmds[i].kind == kind;
+    return n;
+}
+
+/* "It's next to the mug." after the full sentence when another object sits beside the target */
+static void test_landmark(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 1);
+    uint64_t now = 300 * S;
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    obj(0, 1, "keys", 0.0f, 0.1f, 2.0f, now, 1, 40);
+    obj(1, 2, "mug", 0.15f, 0.1f, 2.05f, now, 1, 40);
+    guided_step(&st, &P, &in, now, &out);
+    int next_to = 0;
+    for (int i = 0; i < out.n_cmds; ++i)
+        if (out.cmds[i].kind == GUIDED_CMD_SAY && out.cmds[i].clips[0] == BEACON_CLIP_NEXT_TO &&
+            !strcmp(out.cmds[i].name, "mug"))
+            next_to = 1;
+    CHECK(SAID_INTRO(&out) && next_to, "full sentence then 'It's next to the mug.'");
+    memset(&P.objects[1], 0, sizeof(P.objects[1]));
+}
+
+/* Turn-toward pips: soft, panned to the target, faster as it comes in front,
+ * one chime once facing it, then quiet. */
+static void test_orient_pips(void)
+{
+    CHECK(guided_pip_interval_ms(90.0f) > guided_pip_interval_ms(20.0f), "pips speed up as you face the target");
+
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 1);
+    uint64_t now = 400 * S;
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    int pips = 0, pip_right = 1, chimes = 0, pip_with_say = 0;
+    for (int i = 0; i < 190; ++i) {            /* 3 s, keys 40 deg to the right */
+        obj(0, 1, "keys", 1.3f, 0.1f, 1.5f, now, 1, 40);
+        guided_step(&st, &P, &in, now, &out);
+        for (int k = 0; k < out.n_cmds; ++k)
+            if (out.cmds[k].kind == GUIDED_CMD_PIP) {
+                pips++;
+                if (out.cmds[k].pan <= 0.0f) pip_right = 0;
+            }
+        if (count_kind(&out, GUIDED_CMD_PIP) && count_kind(&out, GUIDED_CMD_SAY)) pip_with_say = 1;
+        chimes += count_kind(&out, GUIDED_CMD_CHIME);
+        now += 16 * MS;
+    }
+    CHECK(pips >= 4 && pip_right && !pip_with_say && chimes == 0,
+          "target to the right: pips on the right, never with speech, no chime yet");
+
+    int after = 0;
+    for (int i = 0; i < 60; ++i) {             /* wearer turned: keys straight ahead */
+        obj(0, 1, "keys", 0.0f, 0.1f, 1.5f, now, 1, 40);
+        guided_step(&st, &P, &in, now, &out);
+        chimes += count_kind(&out, GUIDED_CMD_CHIME);
+        if (chimes) after += count_kind(&out, GUIDED_CMD_PIP);
+        now += 16 * MS;
+    }
+    CHECK(chimes == 1 && after == 0, "facing it: one chime, then no pips");
+
+    guided_cfg_t cfg;
+    guided_default_cfg(&cfg);
+    cfg.orient_pips = 0;
+    guided_init(&st, &cfg);
+    now += 10 * S;
+    in = intent(BEACON_INTENT_FIND, "keys", NULL, 2, now);
+    pips = 0;
+    for (int i = 0; i < 190; ++i) {
+        obj(0, 1, "keys", 1.3f, 0.1f, 1.5f, now, 1, 40);
+        guided_step(&st, &P, &in, now, &out);
+        pips += count_kind(&out, GUIDED_CMD_PIP) + count_kind(&out, GUIDED_CMD_CHIME);
+        now += 16 * MS;
+    }
+    CHECK(pips == 0, "--no-orient-pips: silent between spoken cues");
+}
+
+/* Real cameras blink: the target drops out of the boxes for a few frames now
+ * and then. That must not trigger "turn ..." or back-to-back full sentences. */
+static void test_flicker(void)
+{
+    guided_state_t st;
+    guided_out_t out;
+    reset(&st, 1);
+    uint64_t now = 500 * S, seen = now;
+    beacon_intent_t in = intent(BEACON_INTENT_FIND, "keys", NULL, 1, now);
+    int says = 0, turns = 0;
+    uint64_t last_say = 0, min_gap = ~0ull;
+    for (int i = 0; i < 600; ++i) {             /* ~10 s at 60 Hz, 40 deg right */
+        int live = (i % 24) < 16;                 /* in view 16 frames, gone 8 (~0.13 s) */
+        if (live)
+            seen = now;
+        obj(0, 1, "keys", 0.84f, 0.1f, 1.0f, seen, live, 40 + (uint64_t)i);
+        P.pose.t_ns = now;
+        guided_step(&st, &P, &in, now, &out);
+        for (int k = 0; k < out.n_cmds; ++k)
+            if (out.cmds[k].kind == GUIDED_CMD_SAY) {
+                says++;
+                if (last_say && now - last_say < min_gap)
+                    min_gap = now - last_say;
+                last_say = now;
+                for (int c = 0; c < out.cmds[k].n_clips; ++c)
+                    if (out.cmds[k].clips[c] >= BEACON_CLIP_TURN_SLIGHT_LEFT &&
+                        out.cmds[k].clips[c] <= BEACON_CLIP_TURN_AROUND)
+                        turns++;
+            }
+        now += 16 * MS;
+    }
+    CHECK(turns == 0, "short blinks out of view never say \"turn ...\"");
+    CHECK(says <= 3 && (says < 2 || min_gap >= 2 * S), "blinking target: few cues, at least 2 s apart");
+}
+
 int main(void)
 {
     test_seq_writer_restart();
     test_mode();
     test_bind_order_and_stale();
-    test_walk_metres_gate();
+    test_walk_sentences();
+    test_walk_pacing();
+    test_landmark();
+    test_orient_pips();
+    test_flicker();
     test_reach_enter_exit();
+    test_turn_from_map();
     test_lost_once_and_no_numbers();
     test_frame_mismatch_holds_d();
     test_percept_dies_mid_reach();

@@ -1,102 +1,135 @@
 import { useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls } from '@react-three/drei';
+import { Matrix4 } from 'three';
+import {
+  crumbsToScene,
+  displayPose,
+  poseSceneMatrix,
+  wearerState,
+  worldHand,
+  worldObjects,
+  worldTarget,
+} from './worldScene.js';
 
-// Display guesses, not telemetry: chest height, a 30° downward pitch, Camera Module 3 standard lens.
-// shortcut: hard-coded; switch to intrinsics and pitch if telemd ever sends them.
-const CAM_POS = [0, 1.3, -0.12];
-const CAM_PITCH = (30 * Math.PI) / 180;
+// Display guesses, not telemetry: Camera Module 3 standard lens. Used only for the wearer cone.
 const FOV_H = (66 * Math.PI) / 180;
 const FOV_V = (41 * Math.PI) / 180;
 
-const COLORS = { target: '#ffb020', object: '#4ea1ff', hand: '#ff5fa2', LIVE: '#34c759', HOLD: '#ffb020' };
-const BODY = '#56606e';
+const COLORS = {
+  target: '#ffb020',
+  object: '#4ea1ff',
+  hand: '#ff5fa2',
+  wearer: '#f2f5f8',
+  crumb: '#7b8794',
+  LIVE: '#34c759',
+  HOLD: '#ffb020',
+};
 
-// telemd sends null for a position that is not finite, so check before drawing or measuring.
-const isVec = (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
-const labelFor = (name, v) => (isVec(v) ? `${name} ${Math.hypot(...v).toFixed(2)} m` : name);
+// telemd sends null for a position that is not finite, so check before measuring.
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const norm = (v) => Math.hypot(...v);
 
 export default function Scene({ world }) {
-  const { hand, target, mode, t_ns } = world ?? {};
-  const objects = world?.objects ?? [];
-  // drei <Html> labels unmount their own React root synchronously, which React 19 reports as an error.
-  // So markers stay mounted once seen (objects come and go while scrubbing, the hand while reaching) and hide instead.
+  const { mode } = world ?? {};
+  const objects = worldObjects(world);
+  const hand = worldHand(world);
+  const target = worldTarget(world);
+  const crumbs = crumbsToScene(world);
+
   const seenIds = useRef(new Set());
+  const lastWearerPosition = useRef(null);
   for (const o of objects) seenIds.current.add(o.id);
-  // telemd may send the bound target without objects[]; draw it on its own unless an object row already shows it.
-  const targetAlone = Boolean(target) && !objects.some((o) => o.id === target.id);
+
+  const pose = displayPose(world);
+  const nextWearer = wearerState(pose, lastWearerPosition.current);
+  if (nextWearer.position) lastWearerPosition.current = nextWearer.position;
+  const wearer = { ...nextWearer, position: lastWearerPosition.current };
+  const poseMatrix = poseSceneMatrix(pose);
+
+  // telemd can send a bound target without objects[]; draw it on its own unless an object row already shows it.
+  const targetId = world?.target?.id;
+  const targetAlone = Boolean(target) && !objects.some((o) => o.id === targetId);
+  const targetFaded =
+    world?.target?.in_latest_boxes === false ||
+    (isNum(world?.t_ns) && isNum(world?.target?.last_seen_ns) && world.t_ns - world.target.last_seen_ns > 1e9);
+
   return (
-    <Canvas camera={{ position: [1.6, 2.0, 1.2], fov: 45 }}>
+    <Canvas camera={{ position: [2.0, 2.2, 2.0], fov: 45 }}>
       <color attach="background" args={['#0f1318']} />
       <ambientLight intensity={0.7} />
       <directionalLight position={[2, 4, 3]} intensity={1.5} />
-      <gridHelper args={[6, 24, '#3b4350', '#232933']} />
-      <Torso />
-      {/* percept reports the OpenCV camera frame (+X right, +Y down, +Z forward). Rotating it by
-          pi - pitch about X lays it onto the scene (+Y up, -Z forward), so xyz_cam goes in as is. */}
-      <group position={CAM_POS} rotation={[Math.PI - CAM_PITCH, 0, 0]}>
-        <Frustum />
-        {[...seenIds.current].map((id) => {
-          const o = objects.find((x) => x.id === id);
-          return (
-            <Marker
-              key={id}
-              visible={Boolean(o)}
-              position={o?.xyz_cam}
-              color={id === target?.id ? COLORS.target : COLORS.object}
-              faded={o && (!o.in_latest_boxes || t_ns - o.last_seen_ns > 1e9)}
-              label={o && labelFor(o.name, o.xyz_cam)}
-            />
-          );
-        })}
-        <Marker
-          visible={targetAlone}
-          position={target?.xyz_cam}
-          color={COLORS.target}
-          faded={target && t_ns - target.last_seen_ns > 1e9}
-          label={target && labelFor(target.name, target.xyz_cam)}
-        />
-        <Marker visible={Boolean(hand)} position={hand?.xyz_cam} color={COLORS.hand} size={0.025} label="hand" labelBelow />
-        {isVec(hand?.xyz_cam) && isVec(target?.xyz_cam) && COLORS[mode] && (
-          <Line
-            points={[hand.xyz_cam, target.xyz_cam]}
-            color={COLORS[mode]}
-            lineWidth={2}
-            dashed={mode === 'HOLD'}
-            dashSize={0.02}
-            gapSize={0.015}
+      <gridHelper args={[10, 40, '#3b4350', '#232933']} />
+
+      {crumbs.map((p, i) => (
+        <mesh key={`crumb-${i}`} position={p}>
+          <sphereGeometry args={[0.012, 10, 8]} />
+          <meshStandardMaterial color={COLORS.crumb} transparent opacity={0.45} />
+        </mesh>
+      ))}
+
+      {[...seenIds.current].map((id) => {
+        const o = objects.find((x) => x.id === id);
+        return (
+          <Marker
+            key={id}
+            visible={Boolean(o)}
+            position={o?.position}
+            color={id === world?.target?.id ? COLORS.target : COLORS.object}
+            faded={o?.faded}
+            label={o?.label}
           />
-        )}
-      </group>
-      <OrbitControls target={[0, 0.9, -0.5]} makeDefault />
+        );
+      })}
+
+      {hand && <Marker position={hand} color={COLORS.hand} size={0.025} label="hand" labelBelow />}
+
+      {targetAlone && (
+        <Marker
+          position={target}
+          color={COLORS.target}
+          faded={targetFaded}
+          label={`${world?.target?.name ?? 'target'} ${norm(target).toFixed(2)} m`}
+        />
+      )}
+
+      {hand && target && COLORS[mode] && (
+        <Line
+          points={[hand, target]}
+          color={COLORS[mode]}
+          lineWidth={2}
+          dashed={mode === 'HOLD'}
+          dashSize={0.02}
+          gapSize={0.015}
+        />
+      )}
+
+      {wearer.position && (
+        <>
+          <Marker position={wearer.position} color={COLORS.wearer} size={0.045} label={wearer.valid ? 'wearer' : 'pose lost'} labelBelow />
+          {poseMatrix ? (
+            <group matrixAutoUpdate={false} matrix={new Matrix4().fromArray(poseMatrix)}>
+              <Frustum />
+            </group>
+          ) : (
+            <group position={wearer.position}>
+              <Frustum />
+            </group>
+          )}
+        </>
+      )}
+
+      <OrbitControls target={wearer.position ?? [0, 0, 0]} makeDefault />
     </Canvas>
   );
 }
 
-function Torso() {
-  return (
-    <>
-      <mesh position={[0, 1.15, 0]} scale={[1, 1, 0.6]}>
-        <capsuleGeometry args={[0.17, 0.4, 8, 16]} />
-        <meshStandardMaterial color={BODY} />
-      </mesh>
-      <mesh position={[0, 1.65, 0]}>
-        <sphereGeometry args={[0.11, 24, 16]} />
-        <meshStandardMaterial color={BODY} />
-      </mesh>
-      <mesh position={CAM_POS}>
-        <boxGeometry args={[0.05, 0.05, 0.03]} />
-        <meshStandardMaterial color="#dddddd" />
-      </mesh>
-    </>
-  );
-}
-
-// The camera's field of view as a wireframe pyramid, in camera coordinates.
+// The camera's field of view as a wireframe pyramid in camera space. OpenCV +Z forward is scene -Z.
 function Frustum({ length = 0.9 }) {
   const w = length * Math.tan(FOV_H / 2);
   const h = length * Math.tan(FOV_V / 2);
-  const [a, b, c, d] = [[-w, -h, length], [w, -h, length], [w, h, length], [-w, h, length]];
+  const z = -length;
+  const [a, b, c, d] = [[-w, -h, z], [w, -h, z], [w, h, z], [-w, h, z]];
   const o = [0, 0, 0];
   return (
     <Line
@@ -114,14 +147,12 @@ function Marker({ position = [0, 0, 0], visible = true, color, label, faded = fa
   // <Html> picks its DOM target from r3f's event system, which connects just after startup; a label
   // mounted before that gets re-created (the same React 19 unmount error), so wait for it.
   const ready = useThree((s) => Boolean(s.events.connected));
-  if (!isVec(position)) [position, visible] = [[0, 0, 0], false];
   return (
     <group position={position} visible={visible}>
       <mesh>
         <sphereGeometry args={[size, 24, 16]} />
         <meshStandardMaterial color={color} transparent opacity={faded ? 0.35 : 1} />
       </mesh>
-      {/* -Y is up inside the camera group; the hand's label goes below so it never covers the target's */}
       {ready && (
         <Html position={[0, labelBelow ? size + 0.035 : -size - 0.03, 0]} center className="label">
           {visible ? label : null}
