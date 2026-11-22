@@ -90,7 +90,9 @@ static void test_bind_order_and_stale(void)
 {
     guided_state_t st;
     guided_out_t out;
-    uint64_t now = 20 * S;
+    /* 60 s base: the 20 s memory window needs room below 'now' without
+     * underflowing last_seen_ns. */
+    uint64_t now = 60 * S;
 
     reset(&st, 0);
     obj(0, 7, "keychain", 0.0f, 0.2f, 0.8f, now, 1, 5);
@@ -101,10 +103,22 @@ static void test_bind_order_and_stale(void)
 
     reset(&st, 0);
     obj(0, 7, "keychain", 0.0f, 0.2f, 0.8f, now, 1, 5);
-    obj(1, 8, "keys", 0.1f, 0.2f, 0.9f, now - 2 * S, 0, 1);
+    obj(1, 8, "keys", 0.1f, 0.2f, 0.9f, now - 21 * S, 0, 1);
     in = intent(BEACON_INTENT_FIND, "keys", "keychain", 1, now);
     guided_step(&st, &P, &in, now, &out);
-    CHECK(st.target.bound && st.target.id == 7, "skips a row older than 1.5 s for a new bind");
+    CHECK(st.target.bound && st.target.id == 7, "skips a row older than the 20 s memory window");
+
+    /* 9-amendment: "ask after the turn" -- a row remembered 2 s ago, not in
+     * latest boxes, still binds a late FIND when the pose is valid in the same
+     * epoch. Without this the wearer who turns away and asks is told "I have
+     * not seen that" about an object the map still knows. */
+    reset(&st, 0);
+    obj(0, 8, "keys", 0.1f, 0.2f, 0.9f, now - 2 * S, 0, 1);
+    obj(1, 7, "keychain", 0.0f, 0.2f, 0.8f, now, 1, 5);
+    in = intent(BEACON_INTENT_FIND, "keys", "keychain", 1, now);
+    guided_step(&st, &P, &in, now, &out);
+    CHECK(st.target.bound && st.target.id == 8, "binds a remembered row within 20 s (late FIND)");
+    CHECK(st.target.in_latest_boxes == 0, "late bind is a remembered row, not a live one");
 
     reset(&st, 0);
     obj(0, 2, "bottle", -0.6f, 0.1f, 2.2f, now, 1, 5);
@@ -659,6 +673,16 @@ static void test_lost_once_with_flaky_pose(void)
         lost += said(&out, BEACON_CLIP_LOST_TARGET);
     }
     CHECK(lost <= 1, "flaky pose freshness: 'I lost the target' at most once");
+    for (int i = 0; i < 1300; ++i) {             /* ~20.8 s more of the same churn */
+        now += 16 * MS;
+        if (i % 70 == 0)
+            P.pose.t_ns = now;
+        guided_step(&st, &P, &in, now, &out);
+        lost += said(&out, BEACON_CLIP_LOST_TARGET);
+    }
+    /* First say + at most one per LOST_REPLAY_NS (8 s): ~27 s of continuous
+     * flicker must not exceed 3 "I lost the target" clips. */
+    CHECK(lost <= 3, "lost-clip gap: flicker says it at most every 8 s");
 }
 
 int main(void)

@@ -26,6 +26,7 @@ PERCEPT=${PERCEPT:-/data/home/qnxuser/beacon-test}
 AIROOT=${AIROOT:-/data/home/qnxuser/airoot}
 SENSOR_CONF=${SENSOR_CONF:-/data/home/qnxuser/sensor-usbjpeg.conf}
 TARGET=${1:-cup}
+<<<<<<< HEAD
 DASHBOARD_HOST=${2:-10.80.55.92}
 DURATION=${3:-120}
 FRAME=${FRAME:-/tmp/live/latest.jpg}
@@ -43,6 +44,12 @@ TELEMD=${TELEMD:-$REPO/telemd/build/telemd}
 # A second dashboard laptop that gets the same telemetry and 24 fps camera (optional).
 ALSO_TO=${ALSO_TO:-}
 PREVIEW=${PREVIEW:-$PERCEPT/percept/tools/live_preview.py}
+=======
+DASHBOARD_HOST=${2:-10.80.55.91}
+DURATION=${3:-1800}
+FRAME=${FRAME:-/tmp/live/latest.jpg}
+GRAB_FPS=${GRAB_FPS:-30}
+>>>>>>> origin/main
 
 export LD_LIBRARY_PATH=$AIROOT/usr/lib
 export PYTHONPATH=$AIROOT/usr/lib/python3.14/site-packages
@@ -93,14 +100,25 @@ done
 echo "   frame: $(ls -l "$FRAME" 2>/dev/null | awk '{print $5}') bytes"
 
 echo "== percept: YOLOE + depth on one frame per cycle =="
-timeout $((DURATION - 4)) python3 -s percept/tools/live_probe.py \
+cd "$REPO"
+timeout $((DURATION - 4)) python3 -s "$REPO/percept/tools/live_probe.py" \
     --grab-file "$FRAME" \
     --udp 127.0.0.1:5006 \
+<<<<<<< HEAD
     --video-udp "$DASHBOARD_HOST:5007" \
     --labels "$LABELS" \
     --yolo "$YOLO" \
     --depth models/depth_anything_v2_metric_indoor_small.onnx \
+=======
+    --video-udp "$DASHBOARD_HOST:5005" \
+    --labels "$PERCEPT/models/labels_hand.txt" \
+    --yolo "$PERCEPT/models/yoloe26n_320_hand.onnx" \
+    --depth "$PERCEPT/models/depth_anything_v2_metric_indoor_small.onnx" \
+>>>>>>> origin/main
     --depth-scale 0.25 --max-depth 3.0 --fov 60 --conf 0.10 --ort-intra 3 \
+    --h-chest 1.4 \
+    --vo-max-disp 200 --vo-fb-err 3.0 --vo-min-tracks 40 \
+    --vo-max-corners 180 --vo-win 21 --vo-levels 3 \
     > /tmp/live_probe.log 2>&1 &
 PROBE_PID=$!
 
@@ -133,12 +151,15 @@ fi
 slay_matching "ingest/build/ingest"
 sleep 1
 "$REPO/ingest/build/ingest" --udp 5006 --intent "FIND:$TARGET" > /tmp/ingest-b.log 2>&1 &
+<<<<<<< HEAD
 # Phone page: open http://<pi>:8080 on a phone on the hotspot, dictate with the keyboard mic, Send.
 BEACON_CMD=${BEACON_CMD:-/data/home/qnxuser/beacon/voiced/build/beacon_cmd}
 if [ -x "$BEACON_CMD" ]; then
     "$BEACON_CMD" --http 8080 > /tmp/beacon_cmd.log 2>&1 &
     echo "== phone page: http://$(ifconfig bcm0 2>/dev/null | awk '/inet /{print $2}'):8080 =="
 fi
+=======
+>>>>>>> origin/main
 sleep 12
 
 echo "== what guided heard =="

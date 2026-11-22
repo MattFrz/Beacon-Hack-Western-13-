@@ -6,6 +6,16 @@ Path: `docs/nathans-revision.md`
 Repo: `/home/nate/Projects/Beacon-Hack-Western-13-`
 Supersedes, for product and geometry: `Beacon Hack Western build plan.md` (Nov 20; removed from the repo, see git history) and the neighbour notes in `/home/nate/Projects/hackwestern13/docs/beacon-design.md`. Those remain research/ops background. Where they disagree with this file, this file wins. Operations (owners, folders, tonight's work) live in `docs/team-plan.md` and must not contradict this file.
 
+## Amendment 2026-11-21: no GPIO hardware
+
+The kit in hand is the loaner Pi 5, one Logitech C270 (camera and microphone), one JBL Go 3 over the BT bridge, and laptops. There is no buzzer, transistor, LED, IMU, range sensor or button. Applied throughout this file:
+
+- **The piezo is not a channel.** It stays in the code behind `platform_piezo_set()` as a no-op, and nothing in the pitch, the script or the tests may claim a fault tone, a second audio path, or a fallback when the speaker dies.
+- **The cannot-fail claim rests on what the hardware can show:** separate processes, `SCHED_FIFO` 58 on core 0, runmasks, seqlocked shm, a supervisor that respawns a dead component, and a cue that says it lost the target instead of guessing. Judging notes: `docs/qnx-prize-track.md`.
+- **The restart-without-a-reboot beat** is the BT audio service coming back after the radio process is killed, plus the supervisor respawning a killed child.
+- **Optional hardware below is design intent only.** Nothing optional is in the Sunday script.
+- **Runmasks: this image accepts one CPU or all CPUs.** Measured 2026-11-21 on the loaner: `0x3`, `0x6`, `0x7`, `0xc` and `0xe` return `EINVAL`; `0x1`, `0x2`, `0x4`, `0x8`, `0xf` succeed. So "cores 1-3" (`0xe`) cannot be applied here. `guided` stays pinned to core 0 (`0x1`); perception and the relay pin one core off core 0 (`0x2`) and log the kernel's readback, because `pidin -F %i` renders empty on this image. `POSIX_SPAWN_SETRUNMASK` does not exist in this SDP either, so each child applies its own mask.
+
 Working name: Beacon.
 
 A chest-worn Raspberry Pi 5 running QNX 8.0 that homes a wearer who is blind or has low vision to a named thing, without waiting for a sighted helper. Perception AI proposes a named 3D point. A high-priority QNX process is the only thing allowed to turn that point into sound. On Raspberry Pi OS a hung model can delay the beeps by hundreds of milliseconds with no error; this design is built so that cannot happen.
@@ -16,7 +26,7 @@ What this project is, in one place:
 
 1. An accessibility product: named-object homing for people who are blind or have low vision (section 1).
 2. A geometry loop: pixel to metre-scale 3D point to session memory to sound (sections 7–10).
-3. A QNX isolation contract: five processes, FIFO on core 0, `slay percept` must not mute the piezo (section 5.1).
+3. A QNX isolation contract: five processes, FIFO on core 0, `slay percept` must not stop the cue (section 5.1).
 4. A weekend cut: Sunday is keys FIND+REACH, in-view bottle WALK, then kill → LOST. RETURN is gated on VO (sections 12–13).
 
 ## 1. Product
@@ -123,7 +133,7 @@ Talked through in alignment; do not silently reopen. Review patches below are co
 | Failure demo | After a successful home, `slay percept`. HOLD then LOST. Cover-lens is the same path. |
 | Weekend approach | Session homing on five processes. Optional sixth process `telemd` is read-only monitoring (JSON + downscaled JPEG to a local laptop). Kill it and the wearer hears no difference. No CLIP. No Laya unless Saturday is already green. |
 | Speech | Wearer may speak ordinary English. `voiced` emits `{job, candidate names}`. `guided` binds a stored object and speaks a short instruction filled from sensors, then ticks on reach. Table first; llama.cpp only on table miss; keyword fallback if the LLM is late. REPEAT and REJECT are first-class. |
-| Form factor | Chest, one Camera Module 3, GPIO piezo. Audio: keep at least one ear open if the kit allows (bone conduction or single-ear). Two-ear USB is the loaner fallback, not a claim that the form factor is right. Optional IMU does not replace VO. |
+| Form factor | Chest, one camera, one Bluetooth speaker. No piezo: no buzzer is on hand (amendment). Audio: keep at least one ear open if the kit allows (bone conduction or single-ear). One-ear of a USB headset would be the fallback, not a claim that the form factor is right. Optional IMU does not replace VO. |
 | Hands (review) | MediaPipe runs in `percept`, not on the 16 ms `guided` thread. After `slay percept`, REACH uses last `d` (HOLD) then LOST. No new unprojection without depth. |
 | Off-axis ticks | REACH ticks stay findable when the hand is near in range but far in angle. Amplitude floor ~0.25, never silent. |
 | Validation | Prototype. Not BLV-tested. Floor drops out of Sunday. |
@@ -136,8 +146,8 @@ Hardware and OS:
 - Raspberry Pi 5, 8 GB, QNX 8.0 loaner image, active cooler required. Thermal throttle on core 0 kills the guidance deadline.
 - Camera Module 3 through QNX Sensor Framework (unit 3 on CAM/DISP 0, unit 4 on CAM/DISP 1). Frames are uncompressed. Confirm the loaner config (`sensor_rpi5.conf` or older `post_startup.sh`) before writing camera code.
 - **Lock published `W×H` and focus before calibration.** After Phase 0 capture, write `CAM_W`, `CAM_H`, frametype into a header every consumer compiles against. If CamAPI can lock focus, lock it as a **step-2 gate**. If it cannot, Range 1 unprojection is unknown until a tape-check at two distances; do not speak metres.
-- Audio out: USB headset is the loaner path (QNX Pi 5 has no usable 3.5 mm jack). Prefer single-ear or bone conduction so the other ear stays on the room. GPIO piezo is the cannot-fail actuator if USB audio vanishes. Do not put guidance vibration on the cane hand.
-- Optional IMU: BNO055 or ICM-20948 on I2C. Visual odometry still publishes pose; IMU only helps WALK yaw.
+- Audio out: the JBL Go 3 over the codec's BT bridge is the loaner path (QNX Pi 5 has no usable 3.5 mm jack, and no USB audio device is in hand). Prefer single-ear or bone conduction so the other ear stays on the room. There is no second output channel: no buzzer exists, so one audio device is the whole cue path and a fault tone cannot be claimed. Do not put guidance vibration on the cane hand.
+- Optional IMU: BNO055 or ICM-20948 on I2C. None in hand. Visual odometry still publishes pose; IMU only helps WALK yaw.
 
 Software (from `oss.qnx.com` unless noted):
 
@@ -151,7 +161,7 @@ Scheduler (detail in section 5.1):
 
 - Isolation is processes, thread priorities, CPU runmasks, and a supervisor. **QNX 8.0 has no APS.** Do not pitch partitions.
 - Privileged priorities (64+) need `procmgr_ability(PROCMGR_AID_PRIORITY)` then drop root. Default unprivileged ceiling is 63. Stay at 63 max unless ability is proven.
-- `guided` is `SCHED_FIFO` 58 on core 0. `percept` / `voiced` are `SCHED_RR` 22 / 18 on cores 1–3. Core 0 never runs a model thread.
+- `guided` is `SCHED_FIFO` 58 on core 0. `percept` / `voiced` are `SCHED_RR` 22 / 18 off core 0, on one core each because this image rejects multi-bit masks (amendment). Core 0 never runs a model thread.
 
 Compute budget, CPU only, four Cortex-A76 cores. **Linux/QNX proxy numbers are not simultaneous cadences.** `percept` is one pipeline. Default is sequential YOLO then depth then hands then VO. Optional 2-thread YOLO∥depth only after a measured p95 on the loaner with `guided` running. Do not treat any ms in this table as a QNX fact until that gate.
 
@@ -176,12 +186,12 @@ Five processes. That is the microkernel story. Do not collapse them into one bin
 
 ```
 core 0  (runmask pinned)
-  supervisor   prio 63   spawn, heartbeat, restart, health LED / piezo fault
+  supervisor   prio 63   spawn, heartbeat, restart, fault log
   camd         prio 50   Sensor Framework -> newest-frame shm ring
   guided       prio 58   synthesizer: WorldState -> speech templates + reach ticks
                          NO models, NO full-frame convert, NO blocking USB write
 
-cores 1-3
+off core 0 (single core per process, amendment)
   percept      prio 22   YOLOE + depth + hands + unproject + RGB-D odometry + objects[]
   voiced       prio 18   whisper.cpp + {job, candidates} + optional llama.cpp
 ```
@@ -190,13 +200,13 @@ cores 1-3
 
 Henomaly used nine processes, shared-memory frames, high-priority camera/alerts, low-priority inference, and a supervisor. Copy that shape. MOGGIE and EyeMelody dropped queued frames and kept the newest one; copy that too.
 
-Pin ORT/TFLite/MediaPipe thread pools onto cores 1–3. They must not leak onto core 0.
+Pin ORT/TFLite/MediaPipe thread pools off core 0, on one core each (multi-bit masks are rejected). They must not run on core 0.
 
 ### 5.1 QNX mechanism (the prize)
 
 This is the part judges score. Geometry in later sections can drop (RETURN, off-camera memory) and the prize story still holds. If this section is not visible in the 30 s demo, Beacon is a Linux CV app that booted on QNX.
 
-**Swap test.** Raspberry Pi OS is fully preemptive CFS. A 300 ms ONNX run on the same cores as `alsa` can delay a tick by hundreds of milliseconds with no error. QNX is a microkernel: drivers, filesystems, and these five programs are processes; a high-priority FIFO thread on core 0 preempts inference immediately. `slay percept` cannot mute the piezo. That is the product difference. Say it, then show it.
+**Swap test.** Raspberry Pi OS is fully preemptive CFS. A 300 ms ONNX run on the same cores as `alsa` can delay a tick by hundreds of milliseconds with no error. QNX is a microkernel: drivers, filesystems, and these five programs are processes; a high-priority FIFO thread on core 0 preempts inference immediately. `slay percept` cannot stop the cue. That is the product difference. Say it, then show it.
 
 **Do not pitch APS.** QNX OS 8.0 Adaptive Partitioning is not on the loaner. Mixed criticality here is:
 
@@ -212,13 +222,13 @@ This is the part judges score. Geometry in later sections can drop (RETURN, off-
 
 | Process | Runmask | Policy / prio | Language | May die during demo? |
 |---|---|---|---|---|
-| `supervisor` | `0x1` (core 0) | `SCHED_FIFO` 63 | C | No. If it dies, piezo fault from a last-gasp `atexit` / dying pulse is the only remaining cue |
+| `supervisor` | `0x1` (core 0) | `SCHED_FIFO` 63 | C | No. If it dies the stack runs unsupervised; nothing restarts it, and there is no second channel to sound. Do not build a demo beat on this case |
 | `camd` | `0x1` | `SCHED_FIFO` 50 | C | Restart. No invented frames while down |
-| `guided` | `0x1` | `SCHED_FIFO` 58 | C | Restart + continuous piezo until the new instance heartbeats |
-| `percept` | `0xe` (cores 1–3) | `SCHED_RR` 22 | C++ | Yes. `slay` this on Sunday |
-| `voiced` | `0xe` | `SCHED_RR` 18 | C++ | Yes. Intent stays at last value; ticks continue |
+| `guided` | `0x1` | `SCHED_FIFO` 58 | C | Restart. The cue is silent until the new instance heartbeats (one audio path) |
+| `percept` | `0x2` (one core off 0) | `SCHED_RR` 22 | C++ | Yes. `slay` this on Sunday |
+| `voiced` | `0x2` | `SCHED_RR` 18 | C++ | Yes. Intent stays at last value; ticks continue |
 
-Bit `0x1` = CPU 0, `0xe` = CPUs 1+2+3. Confirm with `pidin ar` on the loaner; Pi 5 is 4-way SMP.
+Bit `0x1` = CPU 0. `0xe` means CPUs 1+2+3 and **is rejected by this image** (amendment): a single core or all CPUs only, so the shipped pin is `0x2` for everything that must stay off core 0. Pi 5 is 4-way SMP.
 
 `camd` stays on core 0 so Sensor Framework callbacks are not scheduled behind ORT. It does **not** convert colour and it does **not** run a net. If core 0 is too busy, drop `camd` to `0x2` (CPU 1) **only after** a Profiler trace shows the 16 ms thread missing because of camera ISR/callback time - never to make room for a model.
 
@@ -251,7 +261,7 @@ on **every** thread it creates (ORT intra-op threads included). Spawn runmask is
 1. Create `/beacon_frames`, `/beacon_depth`, `/beacon_world` with `shm_open` + `ftruncate` + `mmap` (`/dev/shmem/...` on QNX). Zero seqs to 0 (even = stable empty).
 2. `ChannelCreate(0)` for heartbeats. Children `ConnectAttach` to that channel (pass chid via argv or a well-known name in shm).
 3. `posix_spawn` each child with `POSIX_SPAWN_SETSCHEDULER` / `POSIX_SPAWN_EXPLICIT_SCHED`, `sched_priority`, and runmask (`posix_spawnattr_setrunmask` where the header provides it; otherwise the child sets `ThreadCtl` as its first line).
-4. `waitpid` / `SIGCHLD` for death. `percept` and `voiced` are restarted with a backoff (100 ms, 500 ms, 2 s, then every 5 s). `guided` restart also drives the piezo fault until the new instance pulses.
+4. `waitpid` / `SIGCHLD` for death. `percept` and `voiced` are restarted with a backoff (100 ms, 500 ms, 2 s, then every 5 s). `guided` also restarts, and the restart is logged as a fault; there is no second channel to keep sounding while it comes back.
 5. Sunday kill is `slay percept` from SSH (or `kill -9 <pid>`). Supervisor must treat a clean kill the same as a crash: HOLD/LOST in `guided` is the wearer-facing path; supervisor only respawns.
 
 Do **not** use a mutex in `/beacon_world` that `percept` could hold while dying. Seqlock only.
@@ -265,17 +275,17 @@ next = now + 16'666'667 ns
 loop:
   read seqlocks (never block)
   bind + select law
-  write piezo (non-blocking GPIO)
+  write piezo (no-op: no hardware)
   enqueue USB clip/tick (non-blocking; drop if the audio queue is full)
   MsgSendPulse to supervisor (or MsgSendPulse *from* a timer)
   clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, next)
   next += 16'666'667 ns
-  if now > next: count a miss; jump next forward; do not catch up by skipping piezo
+  if now > next: count a miss; jump next forward; do not catch up by skipping cue work
 ```
 
 Use `clock_gettime(CLOCK_MONOTONIC)` for `now`, ages, and `last_seen_ns`. **Not** `CLOCK_REALTIME` (loaner NTP will jump). Store nanoseconds as `uint64_t`.
 
-Supervisor: `timer_create(CLOCK_MONOTONIC, SIGEV_PULSE)` every 50 ms. If two pulses arrive with no `guided` heartbeat, `SIGKILL` the old `guided`, piezo continuous fault, respawn. `camd` heartbeat is looser (250 ms). `percept` / `voiced` heartbeats are health only (yellow LED), never a reason to stop ticks.
+Supervisor: `timer_create(CLOCK_MONOTONIC, SIGEV_PULSE)` every 50 ms. If two pulses arrive with no `guided` heartbeat, `SIGKILL` the old `guided`, log the fault, respawn. `camd` heartbeat is looser (250 ms). `percept` / `voiced` heartbeats are health only (health log), never a reason to stop ticks.
 
 Pulse codes (suggestions; pick and freeze in a header):
 
@@ -316,25 +326,25 @@ QNX message passing (`MsgSend`/`MsgReceive`) is for heartbeats, clip ids, and �
 - API shape (from QNX AI Camera App / CamAPI): `camera_open(unit)`, set viewfinder size/format, `camera_start_viewfinder`, callback or `camera_get_frame`. Frames are **uncompressed**. There is no H.264 path; do not plan one.
 - Three-slot ring, newest-wins. If the callback overruns, drop the frame; do not queue.
 - Publish `frame_id` (monotonic uint64), `t_ns` from `CLOCK_MONOTONIC` at dequeue, `width`, `height`, `stride`, `frametype`.
-- Colour convert in the **consumer ROI**, on cores 1–3, not in `camd`.
+- Colour convert in the **consumer ROI**, off core 0, not in `camd`.
 - If `camera_get_frame` fails or the unit vanishes: stop writing slots, leave last seq even, let health age. Do not repeat the last pixels with a new timestamp.
 
 Reference: https://gitlab.com/qnx/projects/ai-camera-app and https://github.com/qnx/QNX-AI-workshop (MediaPipe hands on this Pi).
 
-#### Audio and piezo
+#### Audio (one device, one path)
 
 USB headset is the wearer-facing speaker/mic. QNX Pi 5 has **no usable 3.5 mm** path. `io-audio` + USB: confirm the device node on the loaner (`pidin` / `ls /dev/snd` or the QNX equivalent). Mic is 16 kHz mono into `voiced`. Playback is **not** on the 16 ms thread.
 
 `guided` splits:
 
-- **16 ms thread (prio 58, core 0):** law, piezo GPIO, enqueue `{clip_id, pan, tick_hz}` onto a 32-slot lock-free ring.
-- **Audio thread (prio 40, core 0):** blocking USB writes. If this thread blocks forever, ticks still exist on the piezo. If the ring is full, drop speech clips first, never drop an in-REACH tick command.
+- **16 ms thread (prio 58, core 0):** law, enqueue `{clip_id, pan, tick_hz}` onto a 32-slot lock-free ring.
+- **Audio thread (prio 40, core 0):** blocking USB/BT writes. If this thread blocks forever the cue is silent until the audio service is restarted; that is the single-channel limit, and it is stated, not hidden. If the ring is full, drop speech clips first, never drop an in-REACH tick command.
 
-Piezo: GPIO through a transistor (do not drive the pin at speaker current). Bit-bang a square wave from the 16 ms thread **or** PWM if the BSP exposes it. Continuous fault = 50% square at a fixed pitch, distinct from the REACH continuous tone. Samples: `github.com/qnx/Raspberry-Pi-Hardware-Component-Samples` (`rpi_gpio`).
+Piezo: no buzzer is in hand, so `platform_piezo_set()` stays a counter and the fault tone is gone from every claim. If hardware appears later, the sample path is `github.com/qnx/Raspberry-Pi-Hardware-Component-Samples` (`rpi_gpio`) through a transistor, never driven from the pin at speaker current.
 
 `voiced` never opens the playback device. Prompt beeps are clip ids sent to `guided`.
 
-#### Inference runtimes (cores 1–3 only)
+#### Inference runtimes (off core 0)
 
 Install from `oss.qnx.com` on the loaner (QDD package UI or the image's pkg tool). Record the exact package names in the bring-up log:
 
@@ -349,7 +359,7 @@ Install from `oss.qnx.com` on the loaner (QDD package UI or the image's pkg tool
 ORT / TFLite / MediaPipe session options:
 
 - Intra-op threads ≤ 3.
-- Affinity mask `0xe`. If the API has no affinity, create a 3-thread pool you pin with `ThreadCtl` and point the runtime at it.
+- Affinity mask: one core off core 0 (`0x2`). If the API has no affinity, create a small pool you pin with `ThreadCtl` and point the runtime at it. Multi-bit masks return `EINVAL` here.
 - After creating worker threads, dump `pidin` and confirm no tid of `percept` has runmask including CPU 0.
 
 Default pipeline is **sequential** on one `frame_id`: YOLO → depth → hands → VO. Parallel YOLO∥depth is a measured option, not the spec.
@@ -358,7 +368,7 @@ Default pipeline is **sequential** on one `frame_id`: YOLO → depth → hands �
 
 - Ages: `CLOCK_MONOTONIC` ns.
 - Core 0 thermal throttle kills the deadline. Active cooler required. Read `/dev/thermal` (or the QNX thermal node on the image) during the busy-loop test.
-- Must-capture before Sunday: System Profiler / `tracelogger` of the 60 s guidance log; `pidin ar`; worst `clock_nanosleep` lateness of the 16 ms thread with cores 1–3 hogged.
+- Must-capture before Sunday: System Profiler / `tracelogger` of the 60 s guidance log; `pidin ar`; worst `clock_nanosleep` lateness of the 16 ms thread with the other cores hogged.
 - `on -p 58 -C 1` is acceptable for a manual skeleton. The shipped path is `supervisor` spawn, not a pile of `on` jobs, so death/restart is in one place.
 
 #### Startup (do not use `/boot/onboot`)
@@ -371,7 +381,7 @@ Wi-Fi and SSH are bring-up, not the product. Staging files under `sd-stage/` in 
 
 ### Process contracts
 
-**supervisor.** Spawns the other four, sets runmasks and priorities, then watches. Every 50 ms, `guided` must pulse. Two missed beats: kill `guided`, respawn, piezo to continuous fault until `guided` heartbeats again. Silence is not allowed. `percept` / `voiced` may die. Restart them. `guided` already handles stale targets. Optional GPIO LED: green = all fresh, yellow = percept stale, red = guided fault.
+**supervisor.** `--beacon` creates the regions, spawns the others with `POSIX_SPAWN_SETSCHEDULER`, priorities and child-side runmasks, then watches (`supervisor/README.md`). Every 50 ms, `guided` must publish a heartbeat. Two missed beats: kill `guided`, log the fault, respawn with backoff, and reset the backoff after ten healthy seconds. The cue is silent until the respawn lands; say so once instead of implying a fallback tone. `percept` / `voiced` / `ingest` may die. Restart them. `guided` already handles stale targets.
 
 On `percept` start: if a writer seq is odd, skip that torn blob (do not copy it). Bump `pose_epoch`. Do not target using object `xyz` from another epoch.
 
@@ -382,14 +392,14 @@ On `percept` start: if a writer seq is odd, skip that torn blob (do not copy it)
 1. Read latest completed `seq_percept` and `seq_voiced` (skip if odd / mismatch). `hand` is inside the percept blob.
 2. Bind `intent` → `target` (section 9). Compute `mode` locally from `now` and `last_seen_ns` (section 6). **Do not write `mode` into shm.**
 3. Select law: STOP, LOST, REACH, WALK, RETURN, REPEAT, REJECT (section 10).
-4. Enqueue a clip id or tick command on a non-blocking queue. A lower-priority audio thread in this process (or `MsgSend` to an audio helper) performs USB writes. GPIO piezo is written from the 16 ms thread (it must not block).
+4. Enqueue a clip id or tick command on a non-blocking queue. A lower-priority audio thread in this process (or `MsgSend` to an audio helper) performs the device writes. Nothing on the 16 ms thread may block.
 5. Pulse supervisor.
 
-Busy-loop test (build step 1): pin a `while(1)` on cores 1–3. Ticks on core 0 must stay inside 16 ms. If they do not, stop adding models.
+Busy-loop test (build step 1): pin a `while(1)` off core 0 (`on -C 1`, one per core). Ticks on core 0 must stay inside 16 ms. If they do not, stop adding models.
 
-Hard gate (build step 3): with cores 1–3 hogged, if synthesizer p95 misses 16 ms, drop REACH ticks (WALK speech still ships). Do not move models onto core 0 to “fix” it.
+Hard gate (build step 3): with a hog on each other core, if synthesizer p95 misses 16 ms, drop REACH ticks (WALK speech still ships). Do not move models onto core 0 to “fix” it.
 
-**percept.** Best effort, cores 1–3. One cycle consumes **one** `frame_id` and publishes one bundle:
+**percept.** Best effort, off core 0, one core per process. One cycle consumes **one** `frame_id` and publishes one bundle:
 
 1. Newest frame (`frame_id`, `t_ns`). Crop/scale for each net **without** converting the full published frame to RGB unless a net requires it. Work from mmap + ROI.
 2. YOLOE-26n at 320 px → boxes, baked label strings, confidences. Inverse-letterbox to full-frame pixels (section 7). Reject boxes whose centre lands in pad.
@@ -620,7 +630,7 @@ Query path, off the tick loop:
 
 1. `whisper.cpp` → text.
 2. Table returns a **job plus a candidate set**, not a single name.
-3. `guided` reads `objects[].name` and binds the first stored hit in candidate order, skipping rows older than 1.5 s for a **new** bind (session list may still keep them). If two hits, pick nearest in cam (LIVE) else nearest in world if `pose.valid`.
+3. `guided` reads `objects[].name` and binds the first stored hit in candidate order. Skipping rows older than 1.5 s for a **new** bind was the pre-VO rule; **amended 2026-11-22**: a remembered row (not in latest boxes) binds for `BEACON_MEMORY_BIND_MAX_NS` = 20 s after its last sighting, provided the pose is valid in the same epoch. This is the "ask after the turn" case: the wearer saw the bottle, turned away, and only then says "find my bottle" -- the map still knows it, so the bind comes from the remembered row's world position instead of a NACK. LIVE/HOLD/LOST mode timing, HOLD ticks and the LOST clip stay on the 1.5 s gate; only the *bind* window widened, and a row older than 20 s still NACKs. If two hits, pick nearest in cam (LIVE) else nearest in world if `pose.valid`.
 4. If no candidate is in `objects[]`, `guided` plays “I have not seen that” (`NACK_UNSEEN`). Do not pick a class outside the candidate set.
 5. llama.cpp runs only if the table misses. Prompt includes the seen names. Still may only pick from baked names. Abstain → “I cannot help with that” (`NACK_CANT`).
 
@@ -710,7 +720,7 @@ Unique cue, not a faster tick. Spoken: “stopping”, “I lost the target”, 
 
 Sunday: after a successful home, `slay percept`. Ticks or last speech HOLD, then LOST. Cover-lens is the same path. Never keep a live distance while the camera is dark.
 
-If `guided` itself dies, piezo goes continuous fault.
+If `guided` itself dies the cue is silent until the supervisor respawns it.
 
 ## 11. Error handling
 
@@ -721,8 +731,8 @@ If `guided` itself dies, piezo goes continuous fault.
 | YOLOE miss / unknown name | “I have not seen that” | Homing to a class outside the candidate set |
 | Depth scale bad (>30% vs tape on 1 m table) | Direction from box centre still allowed; **do not speak metres** until rechecked. Optional ground-plane fallback (camera height + floor homography) for WALK distances only | Speaking unchecked metres; using ground-plane for REACH `d` |
 | `pose.valid = 0` | Ranges 1–2 still work. RETURN refused | Invented heading to a memory behind the wearer |
-| USB audio gone | Piezo still ticks / faults | Silent `guided` |
-| `guided` dead | Continuous piezo fault | Silence as the failure mode |
+| USB/BT audio gone | Nothing audible; restart the audio service | Silence being mistaken for a lost target |
+| `guided` dead | Supervisor logs a fault and respawns in about 100 ms | A claimed fallback tone |
 | CamAPI cannot lock focus | Tape-check two distances; if scale moves, mute metres | Calibrating then autofocusing mid-demo |
 
 Ground-plane fallback is a compile-time switch after the tape-measure test, not a second product. Never use it for REACH `d`.
@@ -753,9 +763,9 @@ Do not demo a floor drop. Do not inventory the room. Do not call RETURN indoor n
 
 Geometry order. Do not skip ahead.
 
-1. `supervisor` + `camd` + `guided` with a fake camera-frame target and piezo (section 5.1). Prove 60 Hz ticks while a busy-loop hogs cores 1–3. Capture Profiler + 16 ms miss count. If this is not obviously “QNX” vs Linux, stop adding models.
+1. `supervisor` + `camd` + `guided` with a fake camera-frame target and the real BT audio path (section 5.1). Prove 60 Hz ticks while a busy-loop hogs the other cores. Capture Profiler + 16 ms miss count. If this is not obviously “QNX” vs Linux, stop adding models.
 2. Probe loaner: lock `CAM_W×CAM_H`, frametype, unit number. Chessboard calibrate at that resolution. **Focus-lock gate.** Tape-measure depth on a 1 m table.
-3. Depth + MediaPipe hands in `percept` → real REACH on a cup. **No VO. No YOLOE.** Hard gate: synthesizer 16 ms p95 under the cores 1–3 hog; chest-tabletop hand hit rate usable for the grab. If hands fail, ship WALK speech only.
+3. Depth + MediaPipe hands in `percept` → real REACH on a cup. **No VO. No YOLOE.** Hard gate: synthesizer 16 ms p95 under the other-core hog; chest-tabletop hand hit rate usable for the grab. If hands fail, ship WALK speech only.
 4. YOLOE baked detect-only ONNX + whisper + table → FIND while the object stays in view. **No VO.** Speak metres only if tape-check passed. Combined vision p50/p95 on the loaner with `guided` live.
 5. `slay percept` → HOLD → LOST.
 6. ORB+PnP; only then store `p_world`, RETURN, and off-camera “bottle I walked past.”
@@ -780,8 +790,8 @@ Saturday detector gate: on QNX ORT with camera, depth, hands, and the 60 Hz audi
 Must exist before Sunday:
 
 - 60 s guidance wakeup log with the full stack running (scheduled vs actual, observation age).
-- Same reach with busy-loop load on cores 1–3: worst wakeup lateness, missed 16 ms deadlines, System Profiler trace.
-- Freeze `percept` mid-reach: LOST plays, no metres, piezo still alive. After restart, first resumed cue matches a **new** placement (judge moved the object). Ghost `xyz` from the previous `pose_epoch` must not win “nearest.”
+- Same reach with busy-loop load on the other cores: worst wakeup lateness, missed 16 ms deadlines, System Profiler trace.
+- Freeze `percept` mid-reach: LOST plays, no metres, `guided` still speaking. After restart, first resumed cue matches a **new** placement (judge moved the object). Ghost `xyz` from the previous `pose_epoch` must not win “nearest.”
 - Ten shuffled key/cup placements: miss rate, wrong-side pan, time-to-tone.
 - Tape-measure vs spoken metres at 0.5 m, 1 m, 2 m. If error > 30% at 1 m, disable spoken metres.
 - Chest-tabletop MediaPipe: hand entering from below actually produces landmark 8.
@@ -793,7 +803,7 @@ Only claim what was measured. If only software timestamps exist for LOST, label 
 
 ## 16. Hardware bill
 
-Required: Pi 5 8 GB, QNX 8.0, official PSU, active cooler, Camera Module 3 on CAM/DISP 0, USB audio (mic + at least one ear of playback), GPIO piezo, chest strap or lanyard so the camera sees a tabletop and a hand entering from below.
+Required on the loaner: Pi 5 8 GB, QNX 8.0, official PSU, active cooler, one camera (C270 in hand; Camera Module 3 only if one appears), one Bluetooth speaker (JBL Go 3; no wired audio path on this image), chest strap or lanyard so the camera sees a tabletop and a hand entering from below. No piezo, no IMU, no button (amendment).
 
 Prefer single-ear or bone conduction so ambient sound stays available. Two-ear closed USB is acceptable for the loaner demo; do not pitch it as the right everyday form factor. Guidance never goes on the cane hand (no wrist haptic).
 
@@ -802,7 +812,7 @@ Optional: BNO055 or ICM-20948, push-to-talk GPIO, second Camera Module 3 (not v1
 ## 17. Left to the builder (not product forks)
 
 - Exact C structs and pulse codes. Shm names (`/beacon_frames`, `/beacon_depth`, `/beacon_world`) are suggestions; the writer/seq split is not.
-- Tick waveform (square vs short sine bursts) and piezo vs USB mixing.
+- Tick waveform (square vs short sine bursts).
 - Camera unit number and frametype after probing the loaner - then freeze `CAM_W×CAM_H`.
 - Whether whisper tiny.en survives the hall; bump to base.en only if FIND misfires.
 - Final noun list after walking the judging space (6 baked today; `models/labels.txt` is authoritative).
@@ -873,7 +883,7 @@ Do this before product code. None of it belongs in `/boot/onboot`.
 3. Install `onnxruntime`, `opencv`, `mediapipe` or `tflite-runtime`, `whisper.cpp` from `oss.qnx.com`. Write the exact package versions into the bring-up log.
 4. Camera: read `sensor_rpi5.conf` vs `post_startup.sh`. Grab one uncompressed frame with the QNX AI Camera App or a 30-line CamAPI probe. Record unit, `W×H`, frametype, whether focus can be locked.
 5. USB headset: playback a WAV, record 2 s. Confirm no 3.5 mm path.
-6. GPIO: blink a pin from the QNX rpi_gpio sample; then the piezo.
+6. GPIO: not applicable. No piezo, button, IMU or LED is in hand; there is nothing to blink.
 7. Scheduler skeleton: `supervisor` spawns a FIFO 58 dummy `guided` on core 0 and three `while(1)` hogs on 1–3. Ticks stay inside 16 ms. Dump `pidin` so runmasks are visible.
 8. Only then start section 13 step 2 (calibrate).
 

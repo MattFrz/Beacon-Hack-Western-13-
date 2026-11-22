@@ -2,6 +2,7 @@
 #include "platform.h"
 #include "beacon.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdint.h>
@@ -18,8 +19,16 @@ int platform_set_thread_sched(int prio, unsigned runmask)
     int rc = 0;
 #ifdef __QNX__
     /* Pin first (spec §5.1: set the runmask on every thread we create). */
-    if (ThreadCtl(_NTO_TCTL_RUNMASK, (void *)(uintptr_t)runmask) == -1)
+    if (ThreadCtl(_NTO_TCTL_RUNMASK, (void *)(uintptr_t)runmask) == -1) {
         rc = -1;
+        fprintf(stderr, "guided: runmask 0x%x rejected: %s\n", runmask, strerror(errno));
+    } else {
+        /* Read it back: `pidin -F %%i` renders empty on this image, so the
+         * kernel's own answer is the evidence for the core-0 claim. */
+        int now = ThreadCtl(_NTO_TCTL_RUNMASK_GET_AND_SET, (void *)(uintptr_t)runmask);
+        fprintf(stderr, "guided: runmask 0x%x applied (kernel readback 0x%x)\n",
+                runmask, (unsigned)now);
+    }
 #else
     (void)runmask; /* laptop: do not pin, the laptop has other work to do */
 #endif
