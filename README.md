@@ -6,6 +6,8 @@ The device is a chest-worn Raspberry Pi 5 running QNX 8.0. Camera capture, objec
 
 Beacon supplements a cane. It does not detect obstacles, stairs, or traffic.
 
+Live Site: https://beaconeggandcheese.cooking/
+
 ## Status
 
 Built at Hack Western 13 by a sighted team. It has not been tested with blind or low-vision wearers. That testing is the next step.
